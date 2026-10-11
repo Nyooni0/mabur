@@ -1,5 +1,9 @@
 # mcs6 bench anomaly: dirty at bench range, unresponsive to TX power (2026-07-27)
 
+**Status:** root-caused and fixed; symbol_size 332 + full mcs6 rung at
+ov0.25 shipped and is still production. Current: docs/link-adaptation.md
+"Probe stream — the promote gate"
+
 **Status: ROOT-CAUSED + FIXED IN PROD 2026-07-29** (see "Root cause"
 section at the bottom). mabur's FEC geometry (328×4 → 1396-byte air
 frames) lands exactly on a narrow Jaguar3 PHY corner: at **mcs6 + STBC,

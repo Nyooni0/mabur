@@ -1,5 +1,7 @@
 # Low-power (pre-arm) mode spike — 2026-09-19
 
+**Status:** bitrate confirmed as the thermal lever; shipped as low-power mode 2026-09-20. Current: docs/link-adaptation.md "Low-power (disarmed) mode"
+
 Shipped as the low-power (pre-arm) mode, 2026-09-20 — see
 docs/link-adaptation.md "Low-power (disarmed) mode".
 

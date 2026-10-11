@@ -1,5 +1,7 @@
 # Arrival-time loss booking — bench validation (2026-09-05)
 
+**Status:** validated and deployed to the GS (ctllog 11). Current: docs/link-adaptation.md "Demote inputs and transition handling"
+
 Successor to `docs/findings/2026-09-05-switch-loss.md`. Validates the
 arrival tracker (branch `probe-stream`, commits d90d86b..089962f): the
 GS util-loss inputs (`s1_loss_cur`/`s3_loss_cur`, hence `link.pre_fec_loss` and the

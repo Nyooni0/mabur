@@ -1,5 +1,7 @@
 # Where the loss at a rung change comes from — bench spike + repeat-burst A/B (2026-09-05)
 
+**Status:** diagnosed as the GS's own op-change repeat burst; repeat burst REMOVED. Current: docs/tx-rx-timing.md "2. Who transmits what"
+
 Companion to `docs/findings/2026-09-05-probe-stream-flight.md`. Flight-0023
 (the first flight with the util+residual settle blank, 51dd79e) validated
 the cascade fix — attribution-miss canary 0, s3-settle-refire canary 0, no

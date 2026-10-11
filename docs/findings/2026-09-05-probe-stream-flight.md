@@ -1,5 +1,7 @@
 # Probe stream — first flights (2026-09-05)
 
+**Status:** showed max_util 0.2 too loose; tightened (current default 0.05). Current: docs/link-adaptation.md "Probe stream — the promote gate"
+
 First air data for the probe stream (PR #44, `docs/link-adaptation.md`
 "Probe stream (2026-09-04)", bench acceptance in
 `docs/findings/2026-09-04-probe-stream.md`, slotter fix in

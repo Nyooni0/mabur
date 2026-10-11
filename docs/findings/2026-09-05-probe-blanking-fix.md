@@ -1,5 +1,7 @@
 # Probe blanking fix — measured, fixed, A/B'd (2026-09-05)
 
+**Status:** fix shipped (RcfSlotter releases on probe arrival). Current: docs/tx-rx-timing.md §3.2 "GS: slot the uplink into the drone's idle (RcfSlotter)"
+
 Closes `docs/findings/2026-09-04-handover-probe-blanking.md` (Finding 2 of
 `docs/findings/2026-09-04-probe-stream.md`). Branch `probe-stream`,
 commits `b2a7fd0` (instrumentation) + `c453023` (fix). Bench rig as in

@@ -1,5 +1,7 @@
 # Handover: the probe stream loses ~2× what video loses, and the GS does it (2026-09-04)
 
+**Status:** superseded by docs/findings/2026-09-05-probe-blanking-fix.md.
+
 Status: **FIXED 2026-09-05** — see
 `docs/findings/2026-09-05-probe-blanking-fix.md` (instrumentation gap
 closed by `probelog 2`, mechanism measured, `RcfSlotter` releases on the

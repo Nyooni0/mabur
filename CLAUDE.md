@@ -34,6 +34,18 @@ RTP output were deleted in PR C.
 This file is deliberately short. The detail lives in `docs/`; load the one
 page the task needs rather than carrying all of it.
 
+Two kinds of doc, two rules:
+
+- **`docs/*.md` are reference pages: they describe the code at HEAD.** A
+  change that alters behaviour, a default, a config key, a wire field or a
+  log format fixes the page in the same commit. Present tense; no bench
+  narratives, dated asides or SUPERSEDED chains — those go to findings.
+- **`docs/findings/YYYY-MM-DD-topic.md` are dated records** (spikes,
+  benches, flights, handovers), indexed in `docs/findings/README.md`. They
+  are snapshots and are never edited to match later code; each carries a
+  one-line `**Status:**` pointing at the reference page that owns the
+  topic now.
+
 | If the task touches… | Read |
 |---|---|
 | ladder rungs, promote/demote, s3 probes, fade, attribution, RCF drain, RcAgent's encoder verbs + IDR pacing | `docs/link-adaptation.md` |
@@ -46,12 +58,12 @@ page the task needs rather than carrying all of it.
 | comparing recordings, metric scales, removed sideport keys, "why do these two flights disagree" | `docs/data-provenance.md` |
 | shipping a binary or config to a device | `docs/deploy.md` |
 | calibrating a VTX's TX-power walls, maburcal, cal.log | `docs/calibration.md` |
-| a specific past investigation | the dated `docs/*-findings-*.md` / `docs/handover-*.md` |
-| airtime/serialization math, per-stream FEC overhead, why jitter ∝ frame size, encoder size knobs (max_ipprop, presets, dead SDK caps) | `docs/airtime-model.md` |
+| a specific past investigation, or why something is the way it is | `docs/findings/README.md` (dated index) |
+| airtime/serialization math, per-stream FEC overhead, why jitter ∝ frame size, the encoder bitrate formula, encoder size knobs (max_ipprop, min_iqp, superframe_p_pct, `ref_*`/intra-refresh, dead SDK caps) | `docs/airtime-model.md` |
 | half-duplex timing: who transmits when, the slotter, airtime budget, why RCFs get lost | `docs/tx-rx-timing.md` |
 | boot time, the OpenIPC init chain, U-Boot/serial console on the drone | `docs/findings/2026-09-07-boot-time.md` |
 | carrier sense (CCA) on/off, the GS-send self-collision, the drone's RX channel view (`drone.radio.rx`), why the OSD LOSS row reads what it reads, the pending cca-on flight gate | `docs/findings/2026-09-23-cca-on.md` |
-| 40 MHz (HT40): which rungs fly 40, per-width tables, pair candidates, the boot scan's pair pick, no_agg, scanlog 3 / ctllog 12 | `docs/bw40.md` (as built: per-rung width, pairs, scan, no_agg) + `docs/findings/2026-09-23-bw40-sweep.md` ("Start here") |
+| 40 MHz (HT40): which rungs fly 40, per-width tables, pair candidates, the boot scan's pair pick, no_agg, scanlog 6 / ctllog 12 | `docs/bw40.md` (as built: per-rung width, pairs, scan, no_agg) + `docs/findings/2026-09-23-bw40-sweep.md` ("Start here") |
 | the VTX onboard SD recorder ([record], dvr.target, the RCF rec byte, OSD REC field), VENC bind-peer order, the MI /proc/mi_modules/mi_venc per-stage delay instrument, the startup vanish-counter ratchet | docs/vtx-recorder.md (as built) + docs/findings/2026-09-26-sd-record.md (spike) |
 | the browser GS / spotter (web/), WebUSB+WASM build, LinkHealthAssembler sharing, channel set form, CHANNEL line, spotter follower | docs/web-gs.md |
 | the CPE510 relay card (mabur-relay protocol v4, maburgs RemoteCard + radio.relays, web GS relay mode, relay TX, interference sweep/hop on a relay) | docs/cpe510-relay.md |

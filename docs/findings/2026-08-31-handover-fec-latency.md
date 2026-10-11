@@ -1,5 +1,7 @@
 # Handover — the `fec`/`dq` latency thread and the A-MPDU probe
 
+**Status:** superseded by docs/findings/2026-09-01-handover-fec-compute.md (dq fixed; fec production-pace work continued there and in dq-spike.md).
+
 2026-08-31, bench (drone `192.168.10.152`, GS `10.18.0.1`), branch
 `venc-foldin` (**merged to master 2026-09-02 via PR #34, fast-forward,
 branch deleted** — every commit below is on master under its original

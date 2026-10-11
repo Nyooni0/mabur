@@ -1,5 +1,7 @@
 # decode_deadline_ms bench measurement — row expiry (verdict superseded: DELETED)
 
+**Status:** mechanism later deleted, see docs/data-provenance.md "Removed sideport keys" (2026-08-30, `link.deadline_ms`).
+
 **Addendum, same day:** the measurement below stands, but the KEEP
 verdict was overruled by the operator on headroom grounds — +7–8 points
 of ONE core on a 4-core GS whose daemon peaks ~69% is affordable, and

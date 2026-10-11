@@ -1,5 +1,7 @@
 # Air clock — first flights (2026-09-06)
 
+**Status:** adopted — budget 0.5 + shed 25 + efficiency 0.73 shipped as production (PR #45). Current: docs/link-adaptation.md "Drone air clock"
+
 First air data for the drone air clock (branch `air-clock`, PR #45,
 `docs/link-adaptation.md` "Drone air clock (2026-09-06)", spec
 `2026-09-06-air-clock-enh-shed-design.md`). Three flights on the same

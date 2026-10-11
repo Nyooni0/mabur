@@ -1,5 +1,7 @@
 # Handover: venc-ring frame vanish — next session's work
 
+**Status:** superseded by docs/findings/2026-08-12-venc-ring-vanish.md.
+
 2026-08-12, end of session. UNTRACKED on purpose (working handover, not a
 finding — the findings are committed, see References). Branch `idr-request`,
 all of today's commits local/unpushed.

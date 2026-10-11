@@ -1,5 +1,7 @@
 # Handover: encoder overshoot above the commanded bitrate (2026-09-03)
 
+**Status:** QP-floor hypothesis refuted (cause is scene-cut P-frame bursts); fixed via SuperFrame P-cap. Current: docs/airtime-model.md "3. Encoder-side size shaping — what works on this SoC"
+
 Status: **BENCH-MEASURED 2026-09-03 evening — the QP-floor hypothesis
 below is REFUTED; the burst is scene-content, not rate-control recovery.
 See "Bench results" at the end.** Companion to the two drone-side fixes

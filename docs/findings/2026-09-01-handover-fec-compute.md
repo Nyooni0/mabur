@@ -1,5 +1,7 @@
 # Handover — the fec span is production-paced; attack the per-byte term
 
+**Status:** superseded by docs/findings/2026-08-31-dq-spike.md §19-20 (worker exonerated; feed-own CPU + core affinity shipped).
+
 > **⚠ SESSION 4 UPDATE (2026-09-01, same day): the contradiction below
 > is RESOLVED — see §19 of the findings doc.** The worker is exonerated
 > (90 µs/repair, joins 0.35–0.5 ms mean); the per-byte term is the hot

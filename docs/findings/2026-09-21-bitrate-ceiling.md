@@ -1,5 +1,7 @@
 # Drone bitrate ceiling re-measured — 2026-09-21
 
+**Status:** CPU wall ~20 Mb/s, mbr-hot thread-bound; CRC16 table + FEC-join-delete + copy/alloc diet shipped and merged to master. Current: docs/airtime-model.md "4. Measuring it — rigs and gotchas"
+
 Question: how much video can `maburd` push before the SoC runs out of CPU?
 The last number on record was ~12 Mb/s (docs/venc-ring-vanish-findings-
 2026-08-12.md: mcs5, FEC ov 0.25, waybeam era, before the async FEC worker,

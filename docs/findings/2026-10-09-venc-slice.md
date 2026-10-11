@@ -1,5 +1,7 @@
 # H.265 slices on the SSC338Q: no early output — findings 2026-10-09
 
+**Status:** early-output latency idea refuted; by-frame split reused for loss confinement instead, later built. Current: docs/slices.md.
+
 **Question.** With `MI_VENC_SetH265SliceSplit` on, does the SSC338Q VENC hand
 out slice 1 of a picture before the last slice is encoded, and by how much?
 If it did, maburd could FEC-encode and transmit the top of a frame while the
@@ -381,7 +383,7 @@ the bottom rungs (rung 0 frames ≈ 10 kB: estimate ~2 % at 4 slices).
   of the whole-picture decode (4.38 ms × rows/17): 2 slices ≈ 3.2 ms, 3 ≈ 2.5,
   4 ≈ 1.7, 5 / 9 / 17 ≈ 1.4 (last slice one CTU row). Beyond a small last
   slice, more slices buy nothing.
-- **Measured on the live link (2026-10-10):** `docs/slices.md`
+- **Measured on the live link (2026-10-10):** `docs/findings/2026-10-10-slice-salvage.md`
   "Slice-count sweep 2026-10-10 — measured vs predicted". In short, the
   decode gain stops improving at about −2.65 ms from 3 slices on, and 17
   is worse than 4. The truncated share tracks this model on the bench's

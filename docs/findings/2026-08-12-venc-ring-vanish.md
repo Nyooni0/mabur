@@ -1,5 +1,7 @@
 # Frames vanish in the drone's venc ring — invisible by construction
 
+**Status:** root cause = CPU famine, not ring depth. Detection shipped (counters later removed by the telem diet); self-IDR redesign never merged. Current: docs/observability.md "Frame loss inside the drone (\"wire clean\" ≠ no frame loss)"
+
 Bench, 2026-08-12. This documents the root cause of the recurring
 "persistent smear on a perfectly healthy link", found at the end of the
 IDR-back-channel work. It is a standalone finding because it outlives that

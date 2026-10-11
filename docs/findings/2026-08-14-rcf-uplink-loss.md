@@ -1,5 +1,7 @@
 # RCF uplink loss: why Part C's rc_drain decouple shows no close_ms gain
 
+**Status:** root cause = half-duplex self-collision losing 30-50% of RCFs; rcf-repeat mitigation later removed, superseded by RcfSlotter + CCA-on. Current: docs/tx-rx-timing.md "3.2 GS: slot the uplink into the drone's idle (RcfSlotter)"
+
 2026-08-14, follow-up to `docs/findings/2026-08-14-handover-rc-drain-close-ms.md`.
 Branch `fade-demote`, PR #29. Bench measurements on the deployed binaries
 (drone `1fccda526a72fbe306c81aefe9f2d0f9`, GS `767db45d495a4f94531511c66bd2edaa`).

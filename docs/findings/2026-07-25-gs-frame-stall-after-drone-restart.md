@@ -1,5 +1,9 @@
 # Handoff: restarting maburd stalls GS video output for minutes
 
+**Status:** fixed and hardware-verified (GS stall watchdog + sticky
+discont + link-up anchor); FrameStream carries the mechanism forward.
+Current: docs/observability.md "au.log"
+
 **Status: FIXED + HARDWARE-VERIFIED 2026-07-25** (candidate fixes 1+2 below,
 plus a third layer the rig demanded — see *Link-up anchor*). 3/3 maburd
 restarts on the rig now recover in ~4–5 s (= the daemon + radio bring-up

@@ -1,11 +1,13 @@
 # The airtime model — how frame bytes become latency and jitter
 
-Written 2026-08-29 after the AU-completion-jitter investigation (EMA
-21 → 5–8 ms). Everything here is bench-measured on the prod pair at
-mcs5 / 10 Mbit/s unless marked otherwise. This page is the standing
-reference for the serialization model, the current (flat) UEP overhead
-policy, and the constraints anyone evolving either must not re-discover
-the hard way.
+The reference for how a frame's bytes turn into air time, completion delay
+and jitter; for the **encoder bitrate formula** (this page is its one
+home — other pages link here); for the per-rung UEP overhead policy; and
+for the encoder size knobs that work, and the ones that don't, on this
+SoC. Measured figures come from the bench, the prod pair at mcs5 /
+10 Mbit/s 20 MHz, unless marked otherwise. Dated history (the AirBalancer
+solver, the 4-stream flat-refs policy, the measured bitrate inputs, the
+parked 90 fps canary): `docs/findings/2026-08-29-airtime-model-history.md`.
 
 ## 1. The model
 
@@ -14,123 +16,75 @@ An AU is *complete* at the GS when its last needed symbol (data + FEC)
 has arrived and decoded, so:
 
     completion(frame) ≈ capture + encode + air_bytes / drain_rate
-    air_bytes         = payload_bytes × (1 + eff_overhead(sid)) (+ ~6% pkt hdrs)
+    air_bytes         = payload_bytes × (1 + overhead(sid)) (+ framing)
 
-**Later the same day (airtime-balance-uep), the link collapsed to 2
-streams (BASE sid0 at `mcs−1`, ENH sid1) and the single `air_bytes`
-formula above became per-stream and measurement-anchored rather than
-nominal, because the naive `len·(1+ov)` model measured a reproducible
-~2× gain error at large frames (SBI/frag framing + repair quantization
-it doesn't account for — spike 2,
-`docs/findings/2026-08-29-airtime-balance-spike.md`). The split had a
-structural limit: at 2:1 rate ratios (the mcs1 rung) the balancer's
-rails could not reach air balance — 3.3 ms/pair structural residual —
-which motivated a same-rate counter-study (flat vs asymmetric overhead
-per rung, static and under motion,
-`docs/findings/2026-08-30-same-rate-uep.md`). The drone's `AirBalancer`
-tracked the true per-stream multiplier from what actually got
-serialized, `m_s = emit_s / len_s` (`emit_s`/`len_s` are α=1/16 EWMAs of
-emitted body bytes and frame-unit bytes, IDR frames excluded as 2–10×
-outliers), and solved the per-stream air split around that measured
-anchor:
+The nominal `len·(1+ov)` term underestimates real air at large frames:
+SBI/fragment framing and repair quantization measured a reproducible ~2×
+gain error in the open-loop model
+(`docs/findings/2026-08-29-airtime-balance-spike.md`), and framing excess
+runs ~5 % at large frames, more as frames shrink. Nothing compensates for
+it at run time; `encoder.airtime_budget` absorbs it (§7: real
+time-occupancy ≈ budget × ~1.16).
 
-    air_s(ov) = len_s · (m_s + (ov − ov_s_applied)) / rate_s
+### The encoder bitrate formula
 
-subject to `air_b = air_e` (balanced) and the budget invariant
-`len_b·ov_b + len_e·ov_e = (len_b + len_e)·ov_cmd` (repair-byte-neutral:
-the split redistributed, it did not add or remove overall FEC bytes).
-`rate_b`/`rate_e` were `phy_rate(base_mcs)`/`phy_rate(profile_mcs)` from
-the applied ladder, so an active ENH probe's rate flowed in
-automatically.
+`RcAgent::run_bitrate_policy` (`drone/src/rc_agent.cpp`) sets the
+encoder's rate from the applied op:
 
-⚠ **Superseded the next day (2026-08-30, same-rate-fixed-pairs).** Both
-streams now ride the SAME scored mcs — the `mcs−1` base rate and the
-`AirBalancer` solver described just above are both gone. UEP is
-expressed only through FEC overhead, and that overhead is a fixed
-**per-rung config pair** (`overhead_base`/`overhead_enh`, carried in the
-v5 RCF, RC_VERSION 5) applied directly to UEP with no per-frame
-redistribution. `AirFeed`, the deleted solver's measurement-only
-successor, survived until 2026-09-01 publishing `share_base`/
-`excess_base`/`excess_enh` into the bitrate blend; it is now deleted
-too — see the bitrate paragraph below. GS-side, a single `budget()`/
-`budget_for(rung)` no longer exists: `budget_base()`/
-`budget_base_for(rung)` score sid 0 and `budget_enh_for(rung)` scores
-sid 1 — see `docs/link-adaptation.md`.
+    kbps = 1000 · airtime_budget / [ f0·(1+ov_base)/rate_b + (1−f0)·(1+ov_enh)/rate_e ]
 
-The encoder's commanded bitrate keeps the two-term shape — a single-rate
-`kbps = rate(ladder[1]) · budget / (1 + ov)` is wrong in both directions
-once base and enh carry different overhead:
+- `rate_b`, `rate_e` = `delivered_mbps(ladder[0])`, `delivered_mbps(ladder[1])`
+  — the nominal PHY rate × `air_clock.efficiency_<bw>[mcs]`
+  (`drone/src/air_rate.h`, §7). Both layers fly the op's MCS, so the two
+  rates are equal; the formula keeps two terms because base and enh carry
+  different overhead.
+- `ov_base`, `ov_enh` = the commanded per-rung pair from the RCF (§2), or
+  the debug-HTTP `ov_base_pct`/`ov_enh_pct` override while both are set.
+- `f0` = `kShareBase` = **0.60**, a fixed base byte share (the median of
+  flight-0000; on an equal pair the term cancels exactly).
+- `airtime_budget` = `encoder.airtime_budget`, (0, 1], bundle **0.65** — a
+  fraction of the link's *delivered* capacity.
+- The result is clamped to `[encoder.bitrate_min_kbps,
+  encoder.bitrate_max_kbps]`, capped at `low_power.bitrate_kbps` while the
+  low-power mode is active (`docs/link-adaptation.md`), and rounded to
+  100 kbps.
+- Write policy: forced on entering LINKED and on the 5 s re-assert
+  (`kReassertMs`); otherwise every decrease is written at once and an
+  increase at most once per second. State latches only when the encoder
+  verb succeeds, so a failed write is retried on the next RCF.
 
-    kbps = airtime_budget / [ f0·(1+ov_base)/rate_b + (1−f0)·(1+ov_enh)/rate_e ]
+**Why the inputs are fixed.** On Star6E every `MI_VENC_SetChnAttr` that
+changes the rate emits a keyframe that bypasses `idr_rate_limit` (15 real
+changes → 15 IDRs; same-value writes → none). A formula fed with live
+measurements (a measured base share and framing excess) re-evaluated on
+every RCF and dithered across the 100 kbps grid: ~150 keyframes per
+12-minute flight for a few percent of airtime accuracy. A probe is not a
+term either: the probe stream changes MCS only, never bitrate (§6), so it
+costs zero encoder writes and zero IDRs.
 
-where `ov_base`/`ov_enh` are the commanded pair off the v5 RCF and `f0`
-is a **fixed** base byte share (`kShareBase`, 0.60). **`rate_e` is the
-base profile's rate even during an enh probe** (since 2026-09-03): the
-probe slot flies the candidate mcs, but feeding that rate in raised the
-command 11–15% on every probe entry at rungs 0–3 and lowered it on exit —
-two `SetChnAttr` writes, two forced IDRs, on a pipe already at ~65–70%
-air — and was the largest single source of >80 ms p50 seconds in
-flight-0011 (23 of 48). The 2026-08-05 probe spec always said the probe
-changes MCS only; the rate feed-in came with the 2-slot op (2bbaa3f)
-expecting the AirBalancer to absorb it, and the balancer is gone.
-⚠ SUPERSEDED 2026-09-04: there is no more "enh probe" slot to feed a
-rate into at all — the probe-stream redesign (§6 below,
-`docs/link-adaptation.md` "Probe stream") moved the candidate-MCS canary
-onto its own SBI stream, so ENH always runs the op MCS and `rate_e` is
-simply the op rate, no longer a special case. The mechanism this
-paragraph describes is historical; the principle it states (a probe must
-never change bitrate) is exactly why the probe stream is excluded from
-this formula and from `run_bitrate_policy` altogether.
-
-⚠ **Measured inputs removed 2026-09-01.** `f0` was AirFeed's live
-`share_base`, and each term also carried a measured framing excess
-`excess_s = m_s − (1 + ov_s_applied)`. That correction was real —
-framing excess runs ~5% at large frames and grows as frames shrink —
-but it closed a loop the encoder could not afford: lower rate → smaller
-frames → proportionally more padding → higher excess → lower target,
-re-evaluated on every RCF at 10–20 Hz against a 100 kbps rounding grid.
-On Star6E every `MI_VENC_SetChnAttr` that changes the rate emits a
-keyframe that bypasses `idr_rate_limit` (measured 2026-09-01: 15 real
-changes → 15 IDRs, one frame later; 16 same-value writes → 0), and in
-`flight-0000` an IDR cost a median 63.8 kB against a 21.4 kB base P
-frame (38 ms of airtime at its rung, p95 92 ms) while **151 of 226
-bitrate writes had no rung change behind them**. The blend was buying a
-few percent of airtime accuracy for ~150 keyframes per 12-minute
-flight. `f0 = 0.60` is the measured median of that flight (561
-one-second windows, p50 0.601, sd 0.044); fixing it there costs
-−2.7%/+1.0% of target on the worst pair in the flight (1.0/0.5) and
-exactly nothing on an equal pair. The dropped framing excess is not
-compensated in the formula — `airtime_budget` is the lever if the
-resulting overshoot ever matters. Full derivation of the deleted
-solver:
-`docs/superpowers/specs/2026-08-29-airtime-balance-uep-design.md` §2;
-current architecture and GS-side ladder/attribution consequences:
-`docs/link-adaptation.md`; same-rate measurement basis:
-`docs/findings/2026-08-30-same-rate-uep.md`.
+### Completion delay and the encoder
 
 Measured calibration: completion delay ≈ **4.2 ms + 0.85 µs per payload
-byte** (≈ 9.4 Mbit/s effective payload drain at this op point). The
-encoder contributes almost nothing: maburd publishes into the frame ring
-at a flat 16.7 ms cadence, publish jitter EMA 0.3–0.5 ms, pts→publish
-< 1 ms for every frame type and preset (including refPred — the old
-"SigmaStar VENC alternating latency" claim from July 2026 is refuted).
-That pts→publish figure was a cross-timebase measurement (vendor pts leads
-CLOCK_MONOTONIC), so it proved flatness, not absolute encode latency; the
-wire `enc_us` (MI_SYS_GetCurPts basis, 2026-08-31, SBI/SlotHdr v2) is the
-true per-frame figure.
+byte** (≈ 9.4 Mbit/s effective payload drain at mcs5/20). The encoder
+contributes almost nothing to its variance: `maburd` publishes into the
+frame ring at a flat 16.7 ms cadence, publish jitter EMA 0.3–0.5 ms,
+pts→publish < 1 ms for every frame type. That pts→publish figure is
+cross-timebase (vendor pts leads CLOCK_MONOTONIC), so it proves flatness,
+not absolute encode latency; the wire `enc_us` (MI_SYS_GetCurPts basis) is
+the true per-frame figure.
 
-**Jitter is the second difference of air sizes.** Inter-completion
-interval = 16.7 ms + (air_this − air_prev)/rate, and the player's
-`video.jitter` metric is an EMA of |Δ interval| — an alternation
-detector. Any pattern that makes consecutive frames occupy different
-air time shows up multiplied by ~2. Two such patterns were found and
-killed:
+### Jitter is the second difference of air sizes
 
-| era | mechanism | EMA |
-|---|---|---|
-| ltr:1, old UEP refs | payload sizes alternate 1.8:1 (TRAIL_R vs TRAIL_N) | ~21 ms |
-| rally, old UEP refs | payloads equal, but per-stream FEC overhead made base fly 2.5× air vs enhance 1.5× | ~10–15 ms |
-| rally, flat refs (now) | air sizes equal per class | **5–8 ms** |
+Inter-completion interval = 16.7 ms + (air_this − air_prev)/rate, and the
+player's jitter metric is an EMA of |Δ interval| — an alternation
+detector. Any pattern that makes consecutive frames occupy different air
+time shows up multiplied by ~2:
+
+| pattern | EMA |
+|---|---|
+| payload sizes alternating 1.8:1 (a 2-back reference structure, TRAIL_R vs TRAIL_N) | ~21 ms |
+| equal payloads, unequal per-class FEC overhead (base 2.5× air vs enh 1.5×) | ~10–15 ms |
+| equal air per class | **5–8 ms** |
 
 The remaining 5–8 ms is the floor: ~2–5 ms of transport noise
 (FEC-generation close timing, USB/radio batching, scheduling) plus
@@ -139,141 +93,107 @@ it is more air-rate headroom — running at lower utilization or a higher
 MCS margin halves the 0.85 µs/B slope — which is a ladder-policy trade,
 not a config knob.
 
-## 2. Current overhead policy — flat
+## 2. Overhead policy — a per-rung pair
 
-`kUepRefOverhead` (common/include/mabur/uep_encoder.h) is
-**{0.50, 0.50, 0.50, 0.50}**, scaled by `cmd_overhead/0.25` and clamped
-[0.125, 2.0]. At the mcs5 rung (cmd 0.5) every stream carries 1.0×
-overhead → equal air per byte on every class; at rung 0 (cmd 1.0)
-everything clamps to 2.0× uniformly. It was {1.00, 0.75, 0.50, 0.25}
-(devourer heritage) until 2026-08-29; the flatten happened in two
-reviewed steps (s1–s3, then s0) because frame→stream routing is
-whole-frame (`classify_frame`: IDR/param-sets → s0, TRAIL_R tid0 → s1,
-TRAIL_N and tid≥2 → s3; s2 is unused by current 1:1 SVC-T structures),
-so unequal refs = unequal air for equal frames.
+UEP is expressed only through FEC overhead: both layers ride the op's
+MCS, and every `[[link.ladder]]` rung carries an `overhead_base` /
+`overhead_enh` pair (GS config, 0.1–2.0, `overhead_base >= overhead_enh`
+enforced — the base layer is the one every frame depends on; bundle
+0.5 / 0.25 on every rung). The GS sends the rung's pair in the RCF and the
+drone applies it directly to the two `UepEncoder` layers
+(`set_layer_overhead`, no per-frame redistribution). A pinned link uses
+`link.static_overhead_base` / `static_overhead_enh`; before the first op
+arrives the drone runs both layers at `fec.base_overhead` (0.5). The
+values are actual overhead (0.5 = +50 % repair bytes).
 
-Resilience was re-proven at the reduced protection with the loss-sim
-rig, not assumed: 5% injected s1 loss → 0.03–0.10% post-FEC residual
-(the OLD refs demoted two ladder rungs at just 2%); 5% injected s0 loss
-→ zero video gaps and no IDR-request even fired, because rally's intra
-stripes heal without IDRs. That last fact is *why* s0 could join the
-flat ladder: the belt-and-braces 2.0× on IDRs was sized for a preset
-world (ltr) where a lost IDR froze the picture.
-
-**The RcAgent airtime estimator is now exact, not conservative.** It
-budgets video air as `bitrate × (1 + eff1)`; under the old refs eff1
-(1.5) overstated the true pair-average (~1.0) by ~25%, a hidden margin.
-With flat refs the estimate matches reality, so the same 75% airtime cap
-admits more commanded bitrate at a given rung, and the ladder's
-utilization/`u` readings sit on a new scale (thresholds deliberately NOT
-retuned — see the dated scale-break entry in data-provenance.md).
-
-⚠ **Superseded later the same day.** The 4-stream flat-refs policy above
-was itself replaced within the day by the 2-stream (BASE sid0/ENH sid1)
-literal-overhead policy + `AirBalancer` described in §1 — `kUepRefOverhead`
-and the s0..s3 routing this section describes no longer exist.
-`link.streams` shrank from 4 entries to 2; every overhead-shaped sideport
-value from before this second change is cmd-scale (half the actual air
-overhead the same nominal number means after it) — see the dated
-"overhead literal + 4→2 stream collapse" entry in data-provenance.md. This
-section stays as the record of the flatten investigation that made the
-collapse safe (it's what proved base/enh could carry equal, then reduced,
-protection without a resilience regression).
+The pair is a jitter trade (§1): any base/enh difference is a
+per-class air difference, which the jitter EMA shows at ~2× Δair /
+wire-rate. Measurement basis for the pairs:
+`docs/findings/2026-08-30-same-rate-uep.md`.
 
 ## 3. Encoder-side size shaping — what works on this SoC
 
 The encoder decides payload sizes; the transport faithfully converts
 their variance into jitter. Knobs, in order of proven usefulness:
 
-- **Preset choice is the big lever.** `rally` (refPred) equalizes
-  base/enhance payloads and spreads intra cost (2 s GOP + 150 ms
-  stripes → IDRs only ~1.7× a P frame). `ltr:1` is structurally 1.8:1
-  (TRAIL_R references 2-back; windowed CBR won't equalize) and measures
-  ~11–12 ms EMA even on flat refs — don't run it if jitter matters.
+- **Reference structure is the big lever.** `venc.ref_base` /
+  `ref_enhance` / `ref_pred` program the SVC-T hierarchy
+  (`MI_VENC_ParamRef_t`); bundle 1 / 1 / true = every other frame
+  droppable with enhance→base prediction, which keeps base and enhance
+  payloads equal. A 2-back reference structure is structurally 1.8:1
+  (windowed CBR won't equalize it) — don't run it if jitter matters.
+  Intra cost is spread by the rolling refresh (`venc.intra_refresh_frames`
+  / `intra_refresh_qp`, `MI_VENC_IntraRefresh_t`; bundle 1 frame, QP 36)
+  so the picture heals without IDRs; `drone/venc/venc_cfg.h` documents
+  each field.
 - **`venc.max_ipprop`** (config, 0=off; also volatile via
-  `:8301 /venc/set?max_ipprop=N`) programs `u32MaxIPProp` — the ONE RC
-  size cap star6e actually enforces (dose-response measured). It bounds
-  the I:P *ratio*: prod runs 2, which clips the IDR size distribution
-  flat at 2× the P average (worst-case ratio 1.65, IDR completion
-  +5.5 ms over base). Achieved-ratio floor ≈ 1.4 (I-QP rails); below
-  that the encoder refuses. It's worst-case insurance — inert while the
-  natural ratio is under the cap.
-- **`venc.qp_delta`** (s32IPQPDelta) is a weak bias: ~2% IDR size per
-  QP step (±12 range ≈ ±25% total). Average-shifter, not a bound.
-  **Every RC write stages the whole intent** (`qp_delta` + `max_ipprop`,
-  `g_rc_intent` in `star6e_controls.c`, ported 2026-09-03 from upstream
-  waybeam bf8c3cb / issue #255): `MI_VENC_GetRcParam` returns stale driver
-  defaults for ~5 s after `StartRecvPic`, so a Get→modify→Set of one field
-  in that window silently reverted the other — mabur's boot did exactly
-  that shape (`qp_delta` then `max_ipprop` back-to-back). The encoder
-  loop prints `rc_readback t+10s: … OK|MISMATCH` to `/tmp/mabur.log` so
-  the log proves what the encoder holds, not just what was written.
-- **`venc.min_iqp`** (config, 0=leave firmware 12; also volatile via
-  `:8301 /venc/set?min_iqp=N`, 1..51, with `max_iqp=N` beside it)
-  programs `u32MinIQp`, the I-frame QP floor — **the one direct IDR
-  SIZE bound star6e honours.** Bench 2026-09-06 (static 1080p, ROI off,
-  `max_ipprop` 2, the 14400→10800 attr-change IDR): floor 12/30/36/42/48
-  → IDR 11.6/11.4/5.0/2.6/1.4 kB, P frames unchanged at 23 kB, the
-  `SetRcParam` write fires no IDR and the very next IDR honours it.
-  `max_iqp` 48→51 did nothing at 1800 kbps. Motivation: the rung-0
-  demote IDR (27–41 kB in flight 0356 = 90–140 ms on the wire at mcs0,
-  every 75–140 ms over-budget episode) — half of it was `roi_qp_low`
-  −24 landing in the keyframe (ROI now disabled in the drone config),
-  the rest is the RC anchoring the GOP at a low I-QP. Cost: one soft
-  keyframe per transition, refined by the following P frames at no
-  extra bytes. Shipped 44 on 2026-09-06 as a first static guess, to be
-  refined from the au.log IDR sizes after a flight; a per-rung floor
-  (high at rungs 0–1, firmware at the top) is the follow-up if a single
-  value proves too coarse on promotes.
-- **`venc.superframe_p_pct`** (config, 0=off; also volatile via
-  `:8301 /venc/set?superframe_p_pct=N`, 100..1000) programs
-  `MI_VENC_SetSuperFrameCfg` REENCODE with a **P-frame** bit threshold of
-  N % of the rung's per-frame budget (kbps×1024/(fps×8)), re-derived on
-  every bitrate write; I stays unlimited unconditionally because an I
-  threshold below the IDR size stalls the channel for good (fork probe
-  2026-08-27, `../mabur-fork/mabur-stack-20260828`). That probe is the
-  only hardware evidence so far: rung 2, 6000 B cap → P frames 11.1 →
-  3.2 kB from the next frame, keyframe-free, 0 drops. **The RC re-plans
-  well under the cap**, so this is a quality lever as much as a bound —
-  the 2026-09-03 bench motivates it (scene-cut P frames at 2–6× budget,
-  `docs/findings/2026-09-03-handover-venc-overshoot.md`); sweep before shipping
-  non-zero. Ported 2026-09-03, default 0.
-- **`venc.min_qp` / `u32MinQp` — DELETED 2026-09-03, same day it was
-  added.** It was the bench knob for the quiet-scene QP-floor hypothesis
-  in `docs/findings/2026-09-03-handover-venc-overshoot.md`; the bench refuted the
-  hypothesis before the knob was ever run (the burst is scene content,
-  not rate-control recovery), and upstream waybeam's characterisation is
-  that `u32MinQp` acts as a bit *ceiling* that collapses the rate past
-  the scene's natural QP. The firmware's MinQp/MaxQp/MinIQp/MaxIQp are
-  still visible in the `rc_readback t+10s:` log line. Do not rebuild it.
+  `:8301 POST /venc/set?max_ipprop=N`) programs `u32MaxIPProp` — the ONE
+  RC size cap star6e actually enforces (dose-response measured). It bounds
+  the I:P *ratio*: the bundle runs 2, which clips the IDR size
+  distribution flat at 2× the P average. Achieved-ratio floor ≈ 1.4 (I-QP
+  rails); below that the encoder refuses. It's worst-case insurance —
+  inert while the natural ratio is under the cap.
+- **`venc.qp_delta`** (s32IPQPDelta, −12..12, bundle 4) is a weak bias:
+  ~2% IDR size per QP step. Average-shifter, not a bound.
+  **Every RC write stages the whole intent** (`qp_delta`, `max_ipprop`,
+  `min_iqp`, `max_iqp` — `g_rc_intent` in `drone/venc/star6e_controls.c`):
+  `MI_VENC_GetRcParam` returns stale driver defaults for ~5 s after
+  `StartRecvPic`, so a Get→modify→Set of one field in that window would
+  silently revert another. The encoder loop prints `rc_readback t+10s: …
+  OK|MISMATCH` so the log proves what the encoder holds, not just what was
+  written.
+- **`venc.min_iqp`** (config, 0=leave firmware 12, bundle **34**; also
+  volatile via `:8301 POST /venc/set?min_iqp=N`, 1..51, with `max_iqp=N`
+  beside it) programs `u32MinIQp`, the I-frame QP floor — **the one
+  direct IDR SIZE bound star6e honours.** Raising it shrinks IDRs steeply
+  while P frames are unchanged; the `SetRcParam` write fires no IDR and
+  the very next IDR honours it. It exists for the demote IDR at the bottom
+  rung, which otherwise costs tens of ms of air at mcs0. Cost: one soft
+  keyframe per transition, refined by the following P frames. Bench
+  records: `docs/findings/2026-09-06-iqp-cap.md`,
+  `docs/findings/2026-08-29-airtime-model-history.md`.
+- **`venc.superframe_p_pct`** (config, 0=off — the code default; bundle
+  **200**; also volatile via `:8301 POST /venc/set?superframe_p_pct=N`,
+  100..1000) programs `MI_VENC_SetSuperFrameCfg` REENCODE with a
+  **P-frame** bit threshold of N % of the rung's per-frame budget
+  (kbps×1024/(fps×8)), re-derived on every bitrate write; I stays
+  unlimited unconditionally because an I threshold below the IDR size
+  stalls the channel for good. **The RC re-plans well under the cap**, so
+  this is a quality lever as much as a bound; it targets scene-cut P
+  frames at 2–6× budget (`docs/findings/2026-09-03-handover-venc-overshoot.md`).
+- **`u32MinQp` — no knob, do not rebuild.** It acts as a bit *ceiling*
+  that collapses the rate past the scene's natural QP, and the quiet-scene
+  QP-floor hypothesis it was added for was refuted
+  (`docs/findings/2026-09-03-handover-venc-overshoot.md`). The firmware's
+  MinQp/MaxQp/MinIQp/MaxIQp stay visible in the `rc_readback t+10s:` line.
 - **`u32MaxISize` / `u32MaxPSize` are DEAD on star6e** — SetRcParam
   accepts them, `SetRcPriority(FRAMEBITS_FIRST)` succeeds, output is
   bit-identical even at absurd caps (verified at 13× overshoot). The
   star6e.h comment promising hard ceilings describes maruko, not this
   chip. Do not rebuild that feature.
 - **`I6_SYS_LINK_LOWLATENCY` on the VPE→VENC bind is REJECTED** —
-  hardware-tried 2026-08-31: `MI_SYS_BindChnPort2` fails with
-  `-1610014712` (0xa00a8008) and venc init dies (respawn loop, no
-  video). It would have overlapped encode with sensor readout (~4-6 ms
-  of the `enc` segment); on this SDK encode start stays gated on the
-  last readout line. FRAMEBASE is the only accepted mode for this hop
-  (comment at the bind site, `drone/venc/star6e_pipeline.c`).
+  `MI_SYS_BindChnPort2` fails with `-1610014712` (0xa00a8008) and venc
+  init dies (respawn loop, no video). It would have overlapped encode with
+  sensor readout (~4-6 ms of the `enc` segment); on this SDK encode start
+  stays gated on the last readout line. FRAMEBASE is the only accepted
+  mode for this hop (comment at the bind site,
+  `drone/venc/star6e_pipeline.c`).
 - **GOP is not a free knob**: SigmaStar CBR converges over the GOP
   window, so every bitrate step (= every ladder rung transition) becomes
-  an overshoot/undershoot sawtooth as long as the GOP. gop_s 10 made
-  every promote fail probation (TxQueue pinned, fabricated 13–41%
-  "loss" on a clean channel). Keep GOP ≤ ~2 s while the ladder
-  re-commands bitrate per rung.
+  an overshoot/undershoot sawtooth as long as the GOP. A 10 s GOP made
+  every promote fail probation (TxQueue pinned, fabricated 13–41% "loss"
+  on a clean channel). Keep `venc.gop_s` ≤ ~2 s while the ladder
+  re-commands bitrate per rung (bundle 0.5).
 
 ## 4. Measuring it — rigs and gotchas
 
 - **Drone side** (encoder cadence): poll `write_idx` on
   `/dev/shm/mabur_f` (static armv7 sniffer; recipe = 8-byte-aligned
   slot stride `(4+slot_data_size+7)&~7`, header 192 B). Lines:
-  `mono_us pts len flags nal0`. ⚠ Under rally the periodic refreshes
-  are VPS-led AUs whose slice NAL is not IDR type 19/20, so the ring
-  meta IDR flag misses them — count IDRs **GS-side** (`nal0==32`), and
-  don't trust drone-side class buckets under rally.
+  `mono_us pts len flags nal0`. ⚠ Under SVC-T + intra refresh the
+  periodic refresh AUs are VPS-led AUs whose slice NAL is not IDR type
+  19/20, so the ring meta IDR flag misses them — count IDRs **GS-side** (`nal0==32`), and don't trust
+  drone-side class buckets.
 - **GS side** (the truth for jitter): poll the AU ring
   `/dev/shm/mabur-au` (ausniff layout), per-AU
   `t_us pts sid fid len flags nal0`. Jitter EMA formula matches the
@@ -294,78 +214,53 @@ their variance into jitter. Knobs, in order of proven usefulness:
 - **Below the floor**: headroom. At 2× the air-rate margin the
   serialization slope halves; that's a ladder policy question
   (utilization target per rung), not an encoder or FEC change.
-- **Per-rung overhead shape**: the flat ladder is uniform per *stream*;
-  the rung's `cmd_overhead` still scales all streams together and the
-  clamp at 2.0 flattens rung 0 fully. If a future rung wants
-  differentiated protection back, it must pay the jitter price knowingly
-  — the arithmetic in §1 prices it (Δair × 0.85 µs/B, ×2 in the EMA).
-- **The IDR budget**: with `max_ipprop` bounding the ratio and s0 flat,
-  the remaining IDR cost is pure payload (~1.7×P). The only further
-  reductions are quality trades (`qp_delta`, tighter ipprop toward the
-  1.4 floor) — measured, available, currently not worth it.
-- **Explored and parked (2026-08-29): a 90 fps canary layer.** Base
-  60 fps guaranteed + 30 fps disposable TRAIL_N on s3 (`ltr:2`-style
-  period at 90 fps) would raise the shed floor from 30 to 60 fps, and
-  a lighter-FEC canary is the one legitimate future use of asymmetric
-  overhead (pair it with source-priority TX scheduling — the decoder's
-  systematic fast path already delivers sources immediately; only the
-  TX-side source/repair interleaving couples parity to completion time).
-  Parked because the GS display is 60 Hz: the visible 90 fps vanishes,
-  and the permanent cost (≈1/3 less bits per displayed frame at equal
-  rate, or ~1.3–1.5× the air) buys only a rarely-entered shed mode plus
-  ~4 ms freshness. Revisit on a >60 Hz display, or if flight data shows
-  the 30 fps shed floor actually hurting. Per-stream higher MCS for the
-  canary was hardware-refuted as general policy (July uniform-PHY
-  ruling: s3 at +1/+2 rungs saw 42% RF loss) — canary-tolerable, but
-  the wall is sharp. Any alternating bitrate ratio r:1 prices as
-  EMA ≈ 2·Δair/wire-rate; 1-in-N droppable patterns cost ~2/N of the
-  every-other-frame damage.
+- **Differentiated protection** costs jitter: §1 prices any per-class air
+  difference (Δair × 0.85 µs/B, ×2 in the EMA), so a rung that wants a
+  larger base/enh gap pays for it knowingly.
+- A 90 fps canary layer (60 fps guaranteed + 30 fps disposable) was
+  explored and parked on a 60 Hz display; the reasoning and the
+  conditions for revisiting it are in
+  `docs/findings/2026-08-29-airtime-model-history.md`.
 
-## 6. Probe stream air share (2026-09-04)
+## 6. Probe stream air share
 
 The always-on probe stream (`docs/link-adaptation.md` "Probe stream")
-adds one 1405 B body per ENH AU — 30 bodies/s at 30 fps — at the MCS of
-rung `current + link.probe.rung_offset`. Air share = 30 × serialization
-of 1405 B at that MCS: **≈ 1 % at mcs4-5, ≈ 2.7 % at mcs1** (lower MCS
+adds one video-body-sized SBI body (1405 B at the bundle geometry,
+`13 + bpb·(16 + symbol_size)` with bpb 4, symbol 332) after **every**
+video AU that went on air, base or enh — 60 bodies/s at 60 fps — at the
+MCS of rung `current + link.probe.rung_offset`, capped at the top rung
+(`drone/src/probe_source.h`, `LadderController::probe_rung()`).
+Its air share is 60 × the serialization of 1405 B at that MCS (lower MCS
 serializes a fixed byte count more slowly). It is NOT budgeted by
 `run_bitrate_policy` or the RcAgent airtime estimator — the probe
-changes MCS only, never bitrate (§1's superseded "enh probe" note above
-states the same principle for the mechanism this one replaced), so it
-costs zero encoder writes and zero IDRs. At the top of the ladder (no
-probe commanded, `probe_rung() == -1`) the cost is zero, not 1 %.
+changes MCS only, never bitrate, so it costs zero encoder writes and zero
+IDRs. At the top of the ladder (no probe commanded, `probe_rung() == -1`)
+the cost is zero.
 
-## 7. Per-MCS capacity and per-rung A-MPDU (2026-09-17)
+## 7. Per-MCS capacity and per-rung A-MPDU
 
 `docs/findings/2026-09-17-bandwidth-sweep.md` measured the real delivered
 air per MCS at saturation (linkbench, prod geometry, three channels, all
 within 0.5 %): **0.87 / 0.78 / 0.71 / 0.76 / 0.76 / 0.76 / 0.78 / 0.76 of
 nominal at mcs0-7 with agg6**, and 0.93 / 0.88 / 0.84 / 0.80 with singles
-at mcs0-3 (0.68 / 0.63 at mcs5 / 7). Two consequences:
+at mcs0-3 (0.68 / 0.63 at mcs5 / 7), all at 20 MHz. Consequences:
 
-- Until 2026-09-17 `run_bitrate_policy` and the air clock priced off
-  NOMINAL `phy_rate`, so `encoder.airtime_budget` was a fraction of a
-  rate the link never delivers: 0.6 landed at ~99 % of the real mcs2
-  capacity (the low-rung latency spikes), 0.5 at 76-82 % on rungs 2-5.
-  **Now both price off `delivered_mbps` = nominal ×
-  `air_clock.efficiency_<bw>[mcs]`** (`drone/src/air_rate.h`; the config key
-  is a pair of 8-entry per-MCS tables, one per width since 2026-09-24
-  (`docs/bw40.md`) — 20 MHz bundle `[0.93, 0.88, 0.84, 0.80, 0.76, 0.76,
-  0.78, 0.76]` = the sweep with singles at mcs0-3 and agg6 above; 40 MHz
-  bundle a flat `[0.77, 0.75, 0.75, 0.75, 0.74, 0.77, 0.76, 0.75]` with agg6;
-  absent = all ones = nominal). The budget is therefore a fraction of measured
-  capacity: **bundle 0.65** keeps rungs 4-5 at the load 0.5-of-nominal
-  flew (0.5 / 0.76) and lifts rungs 0/1/2 by 23/16/11 % onto the singles
-  capacity. Real time-occupancy ≈ budget × ~1.16 (SBI/fragment framing
-  ~1.09-1.14 plus probe and MSP, none of them in the formula), so 0.65 ≈
-  75 % of the air at every rung and the old "0.6 of nominal" ambition is
-  ≈ 0.72 here. The 4 % gap between the bench table (no GS uplink) and the
-  flight-fitted 0.73 at rungs 1-4 is the RCF/telemetry slot share; it
-  sits inside that ~1.16, not in the table.
-- The aggregation mode is per rung since the same day: `ampdu.min_mcs`
-  (bundle 4) — singles below it, the configured aggregate at and above
-  (`drone/src/ampdu_policy.h`, switched live by `RealActuator::apply_op`).
-  Do not read a fixed A-MPDU cost into the model: at mcs0-3 the chip now
-  flies singles and the singles column applies. Since 2026-09-24 the key is
-  per width, `ampdu.min_mcs_20` (bundle 4) / `ampdu.min_mcs_40` (bundle 2) —
-  the 40 MHz rungs (mcs3/4) both clear their own floor and aggregate
-  (`docs/bw40.md`).
+- **`run_bitrate_policy` and the air clock price off `delivered_mbps` =
+  nominal × `air_clock.efficiency_<bw>[mcs]`** (`drone/src/air_rate.h`),
+  never the nominal rate alone. The config is one 8-entry per-MCS table
+  per width (`docs/bw40.md`): 20 MHz bundle `[0.93, 0.88, 0.84, 0.80,
+  0.76, 0.76, 0.78, 0.76]` = the sweep with singles at mcs0-3 and agg6
+  above; 40 MHz bundle `[0.77, 0.75, 0.75, 0.75, 0.74, 0.77, 0.76, 0.75]`
+  with agg6; absent = all ones = nominal. `encoder.airtime_budget` is
+  therefore a fraction of measured capacity. Real time-occupancy ≈
+  budget × ~1.16 (SBI/fragment framing ~1.09-1.14 plus probe and MSP,
+  none of them in the formula), so the bundle's 0.65 ≈ 75 % of the air at
+  every rung. The ~4 % gap between the bench table (no GS uplink) and the
+  flight-fitted value is the RCF/telemetry slot share; it sits inside
+  that ~1.16, not in the table.
+- **The aggregation mode is per rung and per width**: `ampdu.min_mcs_20`
+  (bundle 4) / `ampdu.min_mcs_40` (bundle 2) — singles below the floor,
+  the configured aggregate at and above (`drone/src/ampdu_policy.h`,
+  switched live by `RealActuator::apply_op`). The bundle ladder is five
+  40 MHz rungs, mcs0-4, so mcs0/1 fly singles and mcs2-4 aggregate. Do not
+  read a fixed A-MPDU cost into the model.

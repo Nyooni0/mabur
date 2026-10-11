@@ -1,5 +1,7 @@
 # Channel scan and auto channel selection — findings 2026-09-13
 
+**Status:** spike validated the scan/floor sensor; the boot-time auto-pick it recommended was later built. Current: docs/channel-select.md "GS: search and measure (`ChannelScout`, gs/src/channel_scout.{h,cpp})"
+
 Status: **spike answered, sensor built and GS-validated, nothing in mabur
 changed yet.** Follow-up is a bounded mabur change (boot-time pick) described
 at the end.

@@ -1,5 +1,9 @@
 # Ladder controller walk campaign — findings, down_util 0.35 adoption
 
+**Status:** down_util 0.35 adopted from real-fade data; improvement queue
+items folded into the ladder's demote/promote logic since. Current:
+docs/link-adaptation.md "Demote inputs and transition handling"
+
 Date 2026-08-02. Three walk recordings (house + two open-field), analyzed
 with `tools/flightreport.py` (master) and the `--calib` sweep from
 `feat/ladder-stress-calib`. This campaign supersedes the BLOCKED bench

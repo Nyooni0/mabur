@@ -1,5 +1,7 @@
 # Latency budget — first instrumented flight, and why glass-to-glass brushes 100 ms
 
+**Status:** first 7-segment flight read; most follow-ups later closed (dq fix, RCF slotting). Current: docs/observability.md "`link.video` — delivery, latency, slices"
+
 2026-08-31. First flight with the seven-segment latency accounting live
 (branch `latency-accounting`, GS at the enc-excess build 191c177; drone at
 196f507). Sources: `flight-0035.jsonl` (maburgs' anchored `link.video.lat`

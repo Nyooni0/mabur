@@ -1,5 +1,7 @@
 # Handover — in-flight channel hop: bench, flight and validation (2026-09-15)
 
+**Status:** bench matrix rows 1/4/5/6 passed, four fixes deployed; the feature is now the production hop controller. Current: docs/inflight-channel-hop.md "Measurements"
+
 Everything in `docs/superpowers/plans/2026-09-14-inflight-channel-hop.md` that
 can be done on a host is done, and the bench half was done on 2026-09-15
 (deployed both ends, matrix rows 1/4/5/6, four fixes — see "What the bench
@@ -17,7 +19,7 @@ page only covers **what is left**, and the things a bench run could invalidate.
 | Host suite | 144/144 (`ctest -R 'test_\|host_e2e\|gs_e2e\|gs_au_e2e\|player_e2e'`) |
 | Cross-builds | `tools/build-arm64.sh` and `tools/build-arm.sh` both clean |
 | **Deployed** | **Yes, both ends, 2026-09-15.** Drone `maburd` (rollback `/usr/bin/maburd.pre-hop`, drone config untouched). GS `maburgs` at `17b7764` (rollback `maburgs.pre-hop` + `/etc/maburgs.toml.pre-hop`), `maburplay` (`maburplay.pre-hop`), `/usr/bin/maburtop`. GS config carries `[hop]`/`[hop.verdict]`, `energy_period_ms` removed. |
-| **Benched** | **Yes** — rows 1, 4, 5, 6 of the matrix plus both dwell-period baselines; results in `docs/inflight-channel-hop.md` Measurements. Rows 2 (O4) and 3 (fade) not run. |
+| **Benched** | **Yes** — rows 1, 4, 5, 6 of the matrix plus both dwell-period baselines; results in `docs/findings/2026-09-15-inflight-hop-bench-matrix.md`. Rows 2 (O4) and 3 (fade) not run. |
 | Flown | **No.** |
 | PR | Not opened — the owner's call. |
 | `hop.enable` | **`false`** on the GS again (shipped default) after the bench; the GS is back on two cards, `dwell_period_ms` 333. |

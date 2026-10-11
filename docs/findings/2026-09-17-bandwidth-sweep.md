@@ -1,5 +1,7 @@
 # Per-MCS air capacity sweep — 2026-09-17
 
+**Status:** per-MCS capacity measured (0.71-0.87 of nominal); per-rung A-MPDU + efficiency table shipped, deployed, unflown. Current: docs/airtime-model.md "7. Per-MCS capacity and per-rung A-MPDU"
+
 Question: is the real per-rung air capacity close enough to the nominal
 PHY rate that a "bandwidth calibration" (per-MCS efficiency next to the
 TX-power walls) is not worth building? Context: `encoder.airtime_budget`

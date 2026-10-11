@@ -1,5 +1,7 @@
 # NHM busy-airtime spike — bench findings, 2026-09-25
 
+**Status:** NHM blocked-bit + ranker tiering validated, hw-verified; now built and shipped. Current: docs/inflight-channel-hop.md §3 ("Blocked tier").
+
 Gate for the NHM airtime evidence work (spec
 `docs/superpowers/specs/2026-09-25-nhm-airtime-design.md`, local only). Can
 the GS read busy airtime from the 8822EU's NHM engine, and can it subtract

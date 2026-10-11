@@ -1,5 +1,7 @@
 # Pause-and-jump lag investigation — bench acquittals and first instrumented flights
 
+**Status:** TX pipeline exonerated at flight bitrates; confirmed the promote-to-IDR-burst vanish mechanism live in flight. Current: docs/observability.md "Frame loss inside the drone (\"wire clean\" ≠ no frame loss)"
+
 Bench + field, 2026-08-13. Follow-up to the ctl-0003 crash ("massive lags
 then crashed", obstructed slow flight) and to
 `docs/findings/2026-08-12-venc-ring-vanish.md`. This documents where the

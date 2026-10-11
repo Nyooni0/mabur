@@ -1,5 +1,7 @@
 # Air-time balance spikes — findings, 2026-08-29
 
+**Status:** spike code never merged; gain-error finding superseded next day by same-rate-fixed-pairs (AirBalancer deleted). Current: docs/airtime-model.md §1 "The model"
+
 Two same-day bench spikes behind the air-time-balanced UEP design (rate-split
 streams + overhead balancer). All spike code was throwaway (env-gated,
 reverted, never merged); the numbers here are the durable output.

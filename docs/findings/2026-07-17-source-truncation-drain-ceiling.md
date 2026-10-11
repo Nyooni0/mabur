@@ -1,5 +1,9 @@
 # Source Truncation & the Drone Drain Ceiling — Findings + Future Work
 
+**Status:** root cause fixed by pinning an in-budget op; the bitrate
+policy was later made airtime-exact, closing the item-1 honesty gap.
+Current: docs/airtime-model.md "The encoder bitrate formula" (§1)
+
 2026-07-17 glitch-hunt findings, written for the next session that meets
 "video glitching with clean link stats." Companion docs:
 `docs/findings/2026-07-16-txagc-calibration.md` (power axis), `docs/handover-video-delivery.md (deleted 2026-10-11; in git history)`

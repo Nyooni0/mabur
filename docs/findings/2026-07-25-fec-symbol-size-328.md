@@ -1,5 +1,9 @@
 # FEC geometry: production flip to scalar-328/w32/bpb4 (2026-07-25)
 
+**Status:** superseded 2026-07-29 — 328 hit the mcs6+STBC PHY hole;
+production moved to symbol_size 332. Current: docs/link-adaptation.md
+"Probe stream — the promote gate"
+
 **Status:** SHIPPED — deployed to the rig as production and set as the repo
 bundle default (`bundle/mabur.default.json`, `gs/bundle/maburgs.default.json`)
 on 2026-07-25. Previous production geometry was scalar-164/w64/bpb8.

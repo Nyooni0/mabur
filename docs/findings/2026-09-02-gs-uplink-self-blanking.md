@@ -1,5 +1,7 @@
 # GS uplink self-blanking: the bench's ~0.35% per-PPDU video loss (2026-09-02)
 
+**Status:** root-caused (GS uplink blasts both RX cards deaf); RCF slotting lever shipped 2026-09-03. Current: docs/tx-rx-timing.md "3.2 GS: slot the uplink into the drone's idle (`RcfSlotter`)"
+
 **Status: ROOT-CAUSED on the bench; lever 1 (RCF slotting) IMPLEMENTED + bench-deployed 2026-09-03 — see the addendum at the end.** Every video PPDU
 whose preamble lands while the ground station is transmitting its own
 uplink (RCF, ~20 sends/s at `feedback_ms 50`) is lost on BOTH GS cards.

@@ -1,5 +1,7 @@
 # Same-rate UEP vs rate-split — findings, 2026-08-30
 
+**Status:** same-rate + fixed-pairs architecture adopted and deployed same day (RC_VERSION 5, balancer solver deleted). Current: docs/link-adaptation.md "Same-rate fixed pairs"
+
 Bench study answering "can we go back to one PHY rate for both streams,
 with UEP expressed only through per-layer FEC overhead?" — run after the
 pinned-mcs1 session below exposed the rate-split's structural limit at the

@@ -1,5 +1,7 @@
 # Analog VTX vs the in-flight channel hop — bench findings, 2026-09-25
 
+**Status:** confirmed hop/ranker blind to analog carriers (preamble-only detection); proposed NHM blocked-bit fix now built. Current: docs/inflight-channel-hop.md §3 ("Blocked tier").
+
 Fills the "non-802.11 (O4/analog) interferer — not run" row of the bench
 matrix in `docs/inflight-channel-hop.md`. Short version: **the hop never
 fires on a co-channel analog carrier, even while the carrier is degrading

@@ -1,5 +1,7 @@
 # FEC + software NACK spike: selective repeat on top of the sliding window
 
+**Status:** spike validated (-95% truncations both loss-sim and jammer); led to the design spec, later built. Current: docs/fec-nack.md "Bench".
+
 2026-10-05. Branch `spike-nack` (b124e42 + this doc). Bench only, no
 flight. Question: can mabur keep broadcast FEC and two-card receive
 diversity, and still ask the drone to re-send the symbols FEC could not

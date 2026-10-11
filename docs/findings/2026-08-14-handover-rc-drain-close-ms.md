@@ -1,5 +1,7 @@
 # Handover: rc_drain decouple (Part C) shows no close_ms improvement on the bench
 
+**Status:** superseded by docs/findings/2026-08-14-rcf-uplink-loss.md.
+
 2026-08-14, end of session. Branch `fade-demote`, PR #29 (open, not merged).
 Both daemons deployed to the bench and left running on the new binaries.
 

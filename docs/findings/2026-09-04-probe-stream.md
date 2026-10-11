@@ -1,5 +1,7 @@
 # Probe stream — bench deploy + acceptance, 2026-09-04
 
+**Status:** deployed, bench acceptance passed (PR #44, RC_VERSION 6). Current: docs/link-adaptation.md "Probe stream — the promote gate"
+
 First deployment of the always-on probe stream (spec
 `2026-09-04-probe-stream-design.md`, branch `probe-stream`, PR #44) to the
 bench pair. RC_VERSION 6 flag day: GS config first (five flat `probe_*`

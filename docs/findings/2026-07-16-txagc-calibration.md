@@ -1,5 +1,9 @@
 # TXAGC Calibration Findings — RTL8812EU (Jaguar3)
 
+**Status:** bench/txagcbench tooling superseded by maburcal; the wall
+table, transfer curve and comb finding remain current ground truth.
+Current: docs/calibration.md "Reading the result"
+
 Bench measurement of the real TXAGC-index → radiated-power transfer on the
 deployed drone hardware, 2026-07-16. Written to be reproducible from a fresh
 session. Paths relative to the mabur repo root; tool source under

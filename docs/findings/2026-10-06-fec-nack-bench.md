@@ -1,5 +1,7 @@
 # fec-nack bench gate, 2026-10-06
 
+**Status:** as-built gate: base truncations to 0, but wasted-request and rung-0-fill criteria failed. Current: docs/fec-nack.md "Bench".
+
 The bench gate for the as-built software NACK (`docs/fec-nack.md`, spec §8),
 run on branch `fec-nack` at 9417274: drone `out/arm/maburd`, GS
 `out/arm64/maburgs` (md5 e926abd1…), both cross-built from that HEAD,

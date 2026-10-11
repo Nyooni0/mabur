@@ -1,5 +1,7 @@
 # Fixed-pair UEP field A/B — flat 50:50 vs asym 100:50, 2026-08-30
 
+**Status:** flat 50:50 won in real flight vs asym 100:50 (asym cost +4ms jitter, enh losses doubled, no protection gain). Current: docs/link-adaptation.md "Same-rate fixed pairs"
+
 First real-dynamics answer to the fade A/B left open by the same-rate
 fixed-pairs deploy (RC_VERSION 5): does the asymmetric per-rung overhead
 pair buy protection worth its jitter tax outside the bench? Data comes

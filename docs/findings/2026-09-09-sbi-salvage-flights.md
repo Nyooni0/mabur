@@ -1,5 +1,7 @@
 # SBI sub-block salvage: first two flights (2026-09-09)
 
+**Status:** measured precisely via salvage_only: ~9.6% of pre-FEC misses avoided (flight 0046); kept as free, not a lever. Current: docs/observability.md "`link` — op point, ladder, loss"
+
 Flights 0043 (4 blocks per body) and 0044 (8 blocks per body, drone side
 only — see the probe-gate caveat below). GS binary from `gs-keep-corrupted`
 (PR #52), `rx.keep_corrupted` on, FCS-corrupt bodies delivered and their
