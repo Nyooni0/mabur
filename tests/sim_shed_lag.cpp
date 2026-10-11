@@ -1,4 +1,4 @@
-// Validation sim for the encoder-shed-lag hypothesis (ctl-0020, 2026-08-09).
+// Validation sim for the encoder-shed-lag hypothesis (ctl-0020).
 //
 // Replays episode B of /media/dvr ctl-0020 (demote cascade rung 5->0 at
 // t=598.9..600.1s) into the REAL RcAgent at the real 100ms RCF cadence and
@@ -16,7 +16,7 @@
 //
 // Model assumptions (coarse, stated so the output can be judged):
 //  - air bytes = video * (1 + eff1) with eff1 = ov (literal air overhead —
-//    Task 3 airtime-balance-uep deleted the uep_layer_overhead ladder
+//    airtime-balance-uep deleted the uep_layer_overhead ladder
 //    translation, so eff1 is the identity now, not a per-layer rescale)
 //    of the APPLIED op; the enhancement stream is ignored (it is shed by
 //    the congestion guard early in a real overload), so offered load here
@@ -48,9 +48,9 @@ namespace {
 
 struct RungDef { int mcs; double ov; };
 // ctl-0020 header: ladder=0/100,2/50,4/25,5/25,6/25,7/10 — those were
-// cmd-overhead values (pre-Task-3 uep_layer_overhead ladder scaling);
+// cmd-overhead values (the old uep_layer_overhead ladder scaling);
 // doubled here to the literal air overhead the ×2 rule says they meant
-// (fec_overhead is a plain literal value on the wire since Task 1).
+// (fec_overhead is a plain literal value on the wire now).
 const RungDef kLadder[6] = {{0, 2.00}, {2, 1.00}, {4, 0.50},
                             {5, 0.50}, {6, 0.50}, {7, 0.20}};
 
@@ -232,7 +232,7 @@ TEST(shed_lag_replay_and_model) {
     else enc.push_back({static_cast<double>(b.t) + 50.0, b.kbps});  // +waybeam
   }
 
-  // Fix pins (shed-sync design 2026-08-09): every decreased target goes
+  // Fix pins (shed-sync fix): every decreased target goes
   // out with the rung change — the floor value within one RCF+tick of the
   // rung-0 commit, and the walk's intermediate sheds (19300, 14500, 5100)
   // no longer swallowed by the throttle/hysteresis.

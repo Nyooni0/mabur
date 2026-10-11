@@ -93,7 +93,7 @@ bool InflightScout::dwell(uint8_t ch, uint8_t back, ScoutDwell& d, HopVisit& vis
     // us it didn't. Live video is on the OTHER card, so this is exactly
     // the stranding the module exists to prevent: surface it via the flag
     // (it reaches the D line) and refuse to book a HopVisit gathered
-    // around a card whose position is unknown. Recovery is Task 11's
+    // around a card whose position is unknown. Recovery is the caller's
     // mechanical retune loop, not this module's job.
     s.flags |= devourer::chanmig::kFlagRetuneFailed;
     return false;

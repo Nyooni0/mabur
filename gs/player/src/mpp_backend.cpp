@@ -10,14 +10,14 @@
 #include <drm_fourcc.h>
 #include <rockchip/rk_mpi.h>
 
-// Task 8: real rockchip_mpp MPI calls, replacing the Task-7 stub. See
+// Real rockchip_mpp MPI calls. See
 // mpp_backend.h for why the SDK includes live only here, not in the header.
 //
 // Reference for the call shape: toolchain/mpp-src/test/mpi_dec_test.c's
 // dec_simple() (upstream's canonical decode loop) -- this backend follows
 // its decode_put_packet/decode_get_frame async split, BUFFER_FULL retry
 // discipline, AND its MPP_DEC_SET_EXT_BUF_GROUP sequence. The internal
-// (group-less) mode verified in Task 8 sized the pool to the bare DPB:
+// (group-less) mode, tried first, sized the pool to the bare DPB:
 // fine while the sink released every frame inline, but the presenter's
 // three held frames (on-screen + queued + mailbox) starved the decoder
 // within ~50 frames on hardware. The external group (buf_size x 24, the
@@ -225,8 +225,8 @@ bool MppBackend::init(const BackendCfg&, FrameSink sink) {
   }
 
   // Low-delay output: emit each frame as soon as it's decoded rather than
-  // buffering for display reordering. Must be set before the first packet
-  // per the brief; not fatal to decode correctness if rejected, only to
+  // buffering for display reordering. Must be set before the first packet;
+  // not fatal to decode correctness if rejected, only to
   // latency, so a failure here logs and continues rather than aborting
   // init.
   RK_U32 immediate_out = 1;

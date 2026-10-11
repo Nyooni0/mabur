@@ -1,5 +1,5 @@
-/* venc_record.c -- the VTX onboard recorder's VENC channel (spec
- * docs/superpowers/specs/2026-09-26-vtx-recorder-design.md).
+/* venc_record.c -- the VTX onboard recorder's VENC channel
+ * (docs/vtx-recorder.md).
  *
  * One H.265 CBR channel (STAR6E_RECORD_CHANNEL) bound FRAMEBASE to the VPE
  * port the link channel taps (or, at a record.size other than the link's, to

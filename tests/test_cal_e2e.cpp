@@ -2,7 +2,7 @@
 // and the drone's CalSweep, driven against each other through the real
 // wire codecs, over a channel that can drop frames in either direction.
 //
-// Why this file exists (review finding I5): both state machines were
+// Why this file exists: both state machines were
 // thoroughly unit-tested in isolation, and the ~500 lines of glue across
 // the two main.cpp files had no coverage at all. Every defect that
 // actually escaped this build was of that class -- CAP_CALIBRATE never

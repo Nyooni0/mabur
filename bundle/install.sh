@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build + deploy maburd + its init script + default config to a camera, then
-# restart the service. maburd is a DYNAMIC glibc ARM binary since the
-# 2026-08-29 venc fold-in (see tools/build-arm.sh); every library it NEEDs is
+# restart the service. maburd is a DYNAMIC glibc ARM binary (venc runs
+# in-process; see tools/build-arm.sh); every library it NEEDs is
 # already on the OpenIPC rootfs, and libusb is still linked statically, so
 # nothing extra is copied.
 # Usage: bundle/install.sh root@<camera-ip> [path/to/maburd]

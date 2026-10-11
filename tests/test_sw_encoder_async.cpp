@@ -1,4 +1,4 @@
-// Async-mode contract (spec 2026-07-17, amended 2026-09-22 fec-join-delete):
+// Async-mode contract (as amended by fec-join-delete):
 // with a FecWorker attached, every envelope SwEncoder emits is byte-exact
 // to one the sync encoder emits for the same feed — sources all of them,
 // repairs a subset: a repair credited while the worker queue already holds
@@ -82,7 +82,7 @@ TEST(async_sustained_load_no_stale_rows) {
   set_equality(164, 128, 2.0, 6000, 0, 256);
 }
 
-// Gauge contract (fec-compute handover 2026-09-01): in async mode every
+// Gauge contract (fec-compute handover): in async mode every
 // repair passes through execute_repair_job (worker or inline fallback), so
 // after a joining flush the cumulative job count equals repairs_out. The
 // tiny queue forces inline fallbacks, which must be counted too.
@@ -142,7 +142,7 @@ TEST(sync_mode_unaffected_by_worker_param_default) {
   CHECK(a.flush() == b.flush());
 }
 
-// ---- fec-join-delete (2026-09-22) -------------------------------------
+// ---- fec-join-delete --------------------------------------------------
 // Test helpers: a held worker (FecWorker::set_held, test surface) parks
 // the consumer so the producer's behaviour with an arbitrarily slow worker
 // is deterministic. Feeds stay well under kSlackRows seals so the ring-row

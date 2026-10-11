@@ -108,7 +108,8 @@ class RadioFrontend : public LinkCard {
  private:
   void on_packet(const Packet& pkt);
 
-  // rx_pace gauge (usb-feed probe 2026-09-01, dq-spike findings §16): per
+  // rx_pace gauge (usb-feed probe, docs/findings/2026-08-31-dq-spike.md
+  // §16): per
   // accepted body, the inter-arrival delta on TWO clocks — the chip's RX TSF
   // (RxAtrib.tsfl, µs at the antenna, upstream of ALL host processing) and
   // this host's mono_us stamp. Whichever clock carries the ~360 µs/body
@@ -141,7 +142,7 @@ class RadioFrontend : public LinkCard {
   uint16_t tx_seq_ = 0;
   std::shared_ptr<devourer::UsbDeviceLock> usb_lock_;
   std::atomic<uint64_t> own_{0};
-  // Own video airtime (spec 2026-09-25-nhm-airtime §5): published copy of
+  // Own video airtime: published copy of
   // own_air_'s running total. own_air_ itself is RX-thread only.
   std::atomic<uint64_t> own_air_us_{0};
   OwnAirAcc own_air_;

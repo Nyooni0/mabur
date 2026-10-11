@@ -78,8 +78,7 @@ Status post_loss_status(double pct) {
 
 namespace {
 
-// Design sizes at 1080p (docs/superpowers/specs/2026-08-04-gs-osd-essential-
-// design.md, "Layout and blocks").
+// Design sizes at 1080p.
 constexpr int kInsetX = 96, kInsetY = 54;
 constexpr int kSizeHero = 56, kSizePrimary = 38, kSizeStandard = 34;
 constexpr int kSizeArrow = 26, kSizeSecondary = 24, kSizeCardId = 22;
@@ -97,8 +96,8 @@ constexpr int kMinRenderedPx = 18;  // the handoff's floor
 // would reintroduce exactly that near-miss fallback one layer up, e.g.
 // silently substituting a 24 px atlas for a missing 56 px "hero" size
 // (32 px off, ~57%) instead of failing. Proportional, not a fixed pixel
-// count: a font baked across several resolutions (Task 14 bakes the eight
-// design sizes at x2/3, x1, x4/3, x2 -- 720p/1080p/1440p/2160p) rounds
+// count: a font baked across several resolutions (the eight design sizes
+// are baked at x2/3, x1, x4/3, x2 -- 720p/1080p/1440p/2160p) rounds
 // `want` to a DIFFERENT nearby integer at each scale, and that rounding
 // slop grows with the design size itself (a couple of px on a 56 px hero
 // is a much smaller fraction than the same couple of px on a 19 px
@@ -302,7 +301,7 @@ bool GsOverlay::layout(int screen_w, int screen_h, std::string* err) {
     y += standard->glyph_h + gap6;  // see the comment on the line above
     // Sized for dvr.target, not for every target (gs_layer.h rec_worst).
     const char* rec_worst_s = rec_worst(rec_target_);
-    // Half the secondary size (2026-09-26): the indicator only has to be
+    // Half the secondary size: the indicator only has to be
     // noticed, not read at a glance like the link numbers above it.
     const MaskAtlas* rec = font_.nearest(secondary->px / 2);
     const int rec_w = text_width(*rec, rec_worst_s);
@@ -347,7 +346,7 @@ bool GsOverlay::layout(int screen_w, int screen_h, std::string* err) {
     place(GsFieldId::kFpsValue, hero, fps_x, fps_base, "999");
     place(GsFieldId::kFpsLabel, label, fps_x + fps_val_w + gap12, fps_base, "FPS");
 
-    // The LAT row (Task 12) stacks ABOVE fps, one row further up in the
+    // The LAT row stacks ABOVE fps, one row further up in the
     // same right-flush column -- not below JIT/MBPS, which already sits
     // flush against `bottom` with no room to spare underneath it there.
     // (An earlier cut reserved a whole extra row at `bottom` for every
@@ -368,7 +367,7 @@ bool GsOverlay::layout(int screen_w, int screen_h, std::string* err) {
 
     // Three narrow RIGHT-flush rows, top to bottom: RTT, P50, P99 -- one
     // block, one right edge. The per-segment breakdown that used to sit
-    // beside each headline was dropped 2026-09-06 (see GsPlayerState),
+    // beside each headline was dropped (see GsPlayerState),
     // which is what lets these share the RTT field's right-flush
     // treatment: the old full-width lat column's left edge (~1494 at
     // 1080p) sat inside the centre-of-frame keep-clear band (y < 780·s,
@@ -392,7 +391,7 @@ bool GsOverlay::layout(int screen_w, int screen_h, std::string* err) {
     const int med_base =
         lat_box_top - gap8 - (secondary->glyph_h - secondary->baseline);
     place(GsFieldId::kLatP50Head, secondary, lat_x, med_base, kLatWidest);
-    // Control-path RTT (link-rtt 2026-09-02): one more line up -- adjacent
+    // Control-path RTT (link-rtt): one more line up -- adjacent
     // to the LAT pair for one-glance latency reading, but its own field
     // because it is two-way control-path time and must never look like a
     // segment of the video path.
@@ -780,7 +779,7 @@ void GsOverlay::draw_field_(GsFieldId id, const FieldState& st, const Surface& s
   // "id >= base && (id-base)%kFieldsPerCard==1" test silently recaptures
   // whichever LATER field happens to alias the same residue -- kLatP50Head
   // does, at index base+25, mod 6 == 1. Something always has: the LAT
-  // breakdown field held that slot before it was deleted (2026-09-06), and
+  // breakdown field held that slot before it was deleted, and
   // before EVM widened the row to a stride of 6 it aliased at base+21 under
   // the old stride of 5. Every edit to this enum so far has left SOME field
   // on the bars residue, which is how little this bound can be dispensed

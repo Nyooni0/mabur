@@ -77,7 +77,7 @@ VerdictOut HopVerdict::window(double now_ms, const std::vector<VerdictCardIn>& c
                                         : std::accumulate(au_hist_.begin(), au_hist_.end(), 0.0) / au_hist_.size());
   // starved: zero own frames on every valid card (main.cpp), OR the AU rate
   // collapsed under starved_frac of its trailing mean. A long-frame jam
-  // lets a trickle of own frames through (bench 2026-09-26, session 0232:
+  // lets a trickle of own frames through (bench session 0232:
   // 5-30/s vs ~3200/s), so the zero-frames rule alone read the second jam
   // window `healthy` and broke the 2-of-3 persistence. au_ref < 2 AUs per
   // window is no baseline (boot, or a stream that barely runs).
@@ -86,7 +86,7 @@ VerdictOut HopVerdict::window(double now_ms, const std::vector<VerdictCardIn>& c
                        static_cast<double>(link.au_count) < hv.starved_frac * au_ref);
   // recovered_min: a floor under the recovered term. On a clean channel
   // the trailing mean sits near 0.2/window, so 1-5 recovered symbols read
-  // "3x the reference" with 0 % loss (bench 2026-09-26, session 0232: 97 %
+  // "3x the reference" with 0 % loss (bench session 0232: 97 %
   // of recovered-only impaired windows had <= 8). starved (above): no
   // frames means no loss, but not healthy either.
   const bool impaired = link.pre_fec_loss * 100.0 > hv.loss_pct ||

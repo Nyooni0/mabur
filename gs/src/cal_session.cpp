@@ -169,8 +169,8 @@ std::optional<mabur::rc::CalResult> CalSession::due_result(uint64_t now_ms) {
   if (state_ == State::Result && result_ready_) {
     result_ready_ = false;
     // Applying the result is what arms the drone's self-initiated verify
-    // sweep (spec step 9: "the drone immediately sweeps the eight park
-    // indices with no further command"). There is no ack for
+    // sweep (the drone immediately sweeps the eight park indices with no
+    // further command). There is no ack for
     // T_CAL_RESULT, so the GS assumes delivery happens now and opens the
     // verify window immediately -- otherwise its own uplink blanks the
     // very sweep this whole kit exists to read cleanly.

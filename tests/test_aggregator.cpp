@@ -22,7 +22,7 @@ static mabur::node::RxBody msg(uint8_t card, uint16_t seq, bool crc_ok,
                                std::vector<uint8_t> body) {
   mabur::node::RxBody m;
   m.card_id = card; m.mac_seq = seq; m.crc_ok = crc_ok;
-  m.rssi[0] = 38; m.rssi[1] = 40;   // both chains sane (see docs/chain-a-rssi-validation-handoff.md (deleted 2026-10-11; in git history))
+  m.rssi[0] = 38; m.rssi[1] = 40;   // both chains sane: chain A is valid on the 8822E
   m.snr[0] = 10; m.snr[1] = 25;
   m.evm[0] = -48; m.evm[1] = -44;  // raw half-dB, negative = clean, 0 = not sampled
   m.mono_us = 1000u * seq;
@@ -93,8 +93,8 @@ TEST(routes_video_to_decoder_and_rc_to_control) {
   CHECK(agg.card(1).rc_frames == 1);
   // The drone's chip stamps one hardware seq on every frame it injects
   // (EN_HWSEQ), RC frames included, so the DISC_ACK — the last crc-ok frame
-  // fed here — advances the mark like any video body. (Pre-2026-09-03 the
-  // walk excluded RC on the belief it had its own counter: phantom loss.)
+  // fed here — advances the mark like any video body. (Excluding RC from
+  // the walk, on the belief it had its own counter, books phantom loss.)
   CHECK(agg.last_video_seq() == seq - 1);
 }
 
@@ -330,7 +330,7 @@ TEST(evm_zero_samples_are_skipped_not_folded) {
 }
 
 // -128 (int8 min) is the chip's "not measured" sentinel for an absent
-// spatial stream — measured on the bench 2026-08-10: every 1SS non-STBC
+// spatial stream — measured on the bench: every 1SS non-STBC
 // frame carries evm[1] = -128 (txagcbench sweep, all three MCS). Folding it
 // would peg the stream-B EMA at -64 dB and, via best-chain min(), the
 // combined EVM too.
@@ -450,8 +450,7 @@ TEST(msp_body_classified_into_msp_class) {
   CHECK(c.cls[int(RfClass::Msp)].has_ema);
 }
 
-// --- base+enh pooled RF track (spec 2026-08-15, re-scoped for the 2-stream
-// split-rate ladder by task-10-airtime-balance-uep) ---
+// --- base+enh pooled RF track (2-stream ladder) ---
 // The RF label source and the predictive fade trigger read this instead of
 // cls[S0]/cls[S1] alone: base and enh no longer share a PHY rate (base
 // mirrors mcs-1, enh runs the profile mcs), but RSSI/SNR/EVM are channel

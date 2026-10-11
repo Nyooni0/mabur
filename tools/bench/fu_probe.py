@@ -3,7 +3,7 @@
 RTP stream. The trustworthy successor to rtpsniff.py for loss/truncation
 NUMBERS (rtpsniff keeps the richer per-gap log, but its default-size
 AF_PACKET buffer drops captures under load and massively over-counts loss
-— reconfirmed 2026-07-17: it reported 4.7% missing / 62% bad frames on a
+— reconfirmed on the bench: it reported 4.7% missing / 62% bad frames on a
 stream this probe measured at 0.02% missing / 0 truncations).
 
 What it fixes over rtpsniff:

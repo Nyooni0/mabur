@@ -56,7 +56,7 @@ struct BootPickOut {
 };
 
 // The boot pick (docs/channel-select.md "The pick") and the relocation that
-// moves the link to ChannelPlan::want() (final review C1/I3, 2026-10-04).
+// moves the link to ChannelPlan::want().
 //
 // The pick is open from start (auto mode) until it freezes, exactly once:
 // "commit", "in place", "op unmeasured", "calibration running", "relocated",

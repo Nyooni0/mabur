@@ -239,12 +239,11 @@ TEST(frame_pipeline_shed_frames_consume_no_frame_id) {
   CHECK((h->flags & framewire::kFlagDiscont) != 0);
 }
 
-// Air-clock enh admission (spec 2026-09-06 §3): with the gate closed a
-// frame that resolves to sid 1 is dropped BEFORE frame_id allocation (no id
-// gap on the GS), booked in air_dropped() -- NOT in the encoder's shed
-// counter -- and leaves last_enc_us alone. Base, IDR and a protected-up
-// (enhance-disagree) frame ship regardless: the demote IDR is the frame
-// that must land.
+// Air-clock enh admission: with the gate closed a frame that resolves to sid 1
+// is dropped BEFORE frame_id allocation (no id gap on the GS), booked in
+// air_dropped() -- NOT in the encoder's shed counter -- and leaves last_enc_us
+// alone. Base, IDR and a protected-up (enhance-disagree) frame ship
+// regardless: the demote IDR is the frame that must land.
 TEST(frame_pipeline_air_gate_drops_enh_only_and_before_id) {
   UepEncoder enc(layers(), 15);
   FramePipeline pipe;
@@ -417,13 +416,13 @@ TEST(frame_pipeline_vanish_right_after_idr_is_refused_not_requested) {
 }
 
 TEST(frame_pipeline_rate_change_reanchors_the_period_instead_of_booking_holes) {
-  // Low-power mode drops the encoder 60 -> 15 fps LIVE (venc_set_fps, spec
-  // 2026-09-20). The period EMA learns only from deltas under kVanishFactor
-  // x period, so without a re-anchor every 66.7 ms step after the drop is a
-  // 4x "hole" and books 3 phantom vanishes, forever: bench 2026-09-20 read
-  // vanished 3/4 -> 5578/5582 in four minutes at a flat 15 reads/s.
-  // note_rate_change() is the actuator's signal that the next deltas are a
-  // new period, not missing frames.
+  // Low-power mode drops the encoder 60 -> 15 fps LIVE (venc_set_fps). The
+  // period EMA learns only from deltas under kVanishFactor x period, so
+  // without a re-anchor every 66.7 ms step after the drop is a 4x "hole" and
+  // books 3 phantom vanishes, forever: the bench read vanished 3/4 ->
+  // 5578/5582 in four minutes at a flat 15 reads/s. note_rate_change() is the
+  // actuator's signal that the next deltas are a new period, not missing
+  // frames.
   VanishFeeder f;
   f.warm_up();  // 6 frames at 60 fps confirm the 16.7 ms period
   f.pipe.note_rate_change();
@@ -546,8 +545,8 @@ TEST(frame_pipeline_stamps_slice_rows_only_for_the_expected_count) {
 MTEST_MAIN
 
 TEST(frame_pipeline_reset_vanish_counters_zeros_all_counters) {
-  // Boot-window churn books counts before the link exists (flight finding
-  // 2026-08-13: ~8-9 pre-link counts per boot); main zeroes at the FIRST
+  // Boot-window churn books counts before the link exists (flight finding:
+  // ~8-9 pre-link counts per boot); main zeroes at the FIRST
   // link-establish so telemetry reports in-flight vanishes only.
   VanishFeeder f;
   f.warm_up(6);
@@ -567,7 +566,7 @@ TEST(frame_pipeline_reset_vanish_counters_zeros_all_counters) {
   CHECK(f.pipe.self_idr_refused() == 0);
 }
 
-// ── enc_us passthrough + SBI patch round-trip (2026-08-30 latency accounting)
+// ── enc_us passthrough + SBI patch round-trip (latency accounting)
 //
 // encode() latches the producer meta's enc_us so the hot-thread push site
 // can patch it into every body it just got back (main.cpp does this outside

@@ -1,7 +1,6 @@
 #pragma once
 // Per-rate wall finding for the TX-power calibration kit. Pure: no I/O, no
 // state, no clock -- one row of measured cells in, one wall out.
-// Spec: docs/superpowers/specs/2026-09-10-tx-power-calibration-design.md.
 #include <array>
 #include <cstdint>
 #include <vector>
@@ -14,7 +13,7 @@ namespace maburgs {
 constexpr int kRssiNone = -999;
 
 // Indices are RELATIVE to the drone chip's per-channel anchor, in the 7-bit
-// signed diff-field range (spec 2026-09-13). -1 is a legal index.
+// signed diff-field range. -1 is a legal index.
 constexpr int kNoWall = -128;   // undetermined: caller leaves config untouched
 static_assert(kNoWall == mabur::rc::kWallUndetermined, "one sentinel");
 constexpr int kRailRel = mabur::rc::kRailRel;  // a no-dip row parks at the field's top

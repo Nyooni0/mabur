@@ -14,7 +14,7 @@ namespace maburplay {
 // decode -> NV12 dmabuf). Cross build only (MABUR_PLAYER_HW); registered by
 // make_backend("mpp") in null_backend.cpp.
 //
-// Task 8 fills the Task-7 stub bodies against rockchip_mpp's MPI:
+// Implemented against rockchip_mpp's MPI:
 // mpp_create/mpp_init, MPP_DEC_SET_IMMEDIATE_OUT for low-delay output,
 // decode_put_packet/decode_get_frame as the async feed/drain pair, info
 // change handled by acking MPP_DEC_SET_INFO_CHANGE_READY, decoded frames
@@ -45,7 +45,7 @@ class MppBackend : public VideoBackend, public StreamDecoder {
   uint64_t errors() const;     // hard failures only (see .cpp counter split)
   uint64_t concealed() const;  // errinfo frames emitted for display
 
-  // Streamed decode (spec 2026-10-10-h265-slices §6.3; StreamDecoder).
+  // Streamed decode (StreamDecoder).
   // set_stream(true) BEFORE init(): parser fast mode off, which the h265d
   // hal needs to stream at all (it decides at its init). Off = today's
   // decoder setup, untouched.

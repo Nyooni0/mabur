@@ -1,5 +1,5 @@
-// AuRouter (design-reader-thread.md, Task 11b): maburplay's ring sink as a
-// unit. Single-threaded here; FeedLoop (Task 11c) runs it on the feed thread.
+// AuRouter: maburplay's ring sink as a unit. Single-threaded here; FeedLoop
+// runs it on the feed thread.
 #include <cstdint>
 #include <memory>
 #include <vector>

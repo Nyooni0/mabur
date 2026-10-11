@@ -12,7 +12,7 @@
 
 namespace maburplay {
 
-// Design tokens (docs/superpowers/specs/2026-08-04-gs-osd-essential-design.md).
+// Design tokens.
 // Opaque 0xRRGGBB: alpha always comes from glyph coverage, never from here.
 // Shared by both styles -- the compact bar uses only the first and third.
 namespace tok {
@@ -42,7 +42,7 @@ struct RecState {
   };
   Kind kind = Kind::kArmed;
   int elapsed_s = 0;
-  // VTX onboard recorder leg (spec 2026-09-26). kNone = the VTX is not a
+  // VTX onboard recorder leg. kNone = the VTX is not a
   // target or the button is off; with kNone and gs_target the field renders
   // exactly as it did before the VTX recorder existed.
   enum class Vtx { kNone, kWait, kRecording, kNoCard, kFull, kFault, kOff };
@@ -64,7 +64,7 @@ struct GsPlayerState {
   int vid_w = 0;
   int vid_h = 0;
 
-  // Latency OSD rows (Task 12, spec 2026-08-30-latency-accounting).
+  // Latency OSD rows (latency accounting).
   // Player-measured, same as fps/jitter/mbps above -- current by
   // construction, never dimmed by `stale`. Sourced from
   // maburplay::LatTracker::p99_frame()/p50_frame() at 1 Hz: the REAL
@@ -74,12 +74,12 @@ struct GsPlayerState {
   // "LAT P99 --" rather than stale or fabricated numbers.
   //
   // Each frame's own 7-segment breakdown used to render beside these
-  // headlines; it was dropped 2026-09-06. Segment attribution is a
+  // headlines; it was dropped. Segment attribution is a
   // post-flight question the flight jsonl and flightreport.py answer
   // better, and on the glass it cost a full-width column that reached
   // into the centre-of-frame keep-clear band.
   bool lat_valid = false;
-  // link-rtt (2026-09-02): true once main folded the absolute network
+  // link-rtt: true once main folded the absolute network
   // floor (own anchor + sideport pts offset) into e2e — the rows then
   // read capture-stamp→scanout-start truth. False = today's relative
   // numbers (offset estimator cold, or sync lost at range); the headline
@@ -124,7 +124,7 @@ RecText rec_text(const RecState& r);
 // Widest string rec_text() can return for ANY target (the GS+VTX combos).
 extern const char* const kRecWorst;
 
-// dvr.target (spec 2026-09-26): which recorders the button drives. Both
+// dvr.target: which recorders the button drives. Both
 // layouts size their kRec box on rec_worst(target) -- the widest string
 // rec_text() can return for a player with that target -- rather than on
 // kRecWorst for everyone: the box is cleared whole on every REC redraw and

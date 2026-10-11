@@ -11,10 +11,8 @@ namespace maburgs {
 // Shared-memory access-unit ring: maburgs publishes reassembled AUs,
 // maburplay/ausniff consume. Fixed-slot seqlock design; layout is mirrored
 // byte-for-byte by tools/bench/ausniff.py and tools/bench/aucadence.py --
-// change all three together.
-// Spec: docs/superpowers/specs/2026-08-02-gs-player-au-ring-design.md;
-// ring v4 (a slot is readable while maburgs fills it):
-// docs/superpowers/specs/2026-10-10-h265-slices-design.md §6.2.
+// change all three together. Since ring v4 a slot is readable while
+// maburgs fills it.
 //
 // RingHdr (little-endian, kAuRingHdrBytes-byte header page):
 //    0 u32 magic            — 'AUBM' (kAuRingMagic)
@@ -61,7 +59,7 @@ namespace maburgs {
 //                              the caller passed 0
 //   48 u16 drone_q_ms        — from SBI q_ms via the AU's first fragment
 //   50 u16 enc_us            — from SBI enc_us, same latch
-//   52 u16 drone_air_ms      — from SBI air_ms, same latch (SlotHdr v3, 2026-09-06)
+//   52 u16 drone_air_ms      — from SBI air_ms, same latch (SlotHdr v3)
 //   54 u8  state             — v4: SlotState (closed/empty, open, aborted)
 //   55 u8  nslices           — v4: slices of the picture, 0/1 = whole AU
 //   56 u32 valid_len         — v4: payload [0, valid_len) is final; store-
@@ -82,7 +80,7 @@ inline constexpr size_t kAuSlotHdrBytes = 64;
 // bits grow upward from there).
 inline constexpr uint8_t kRecFlagComplete = 0x80;
 
-// Slice salvage (spec 2026-10-10-h265-slices §5): an AU FrameStream could
+// Slice salvage: an AU FrameStream could
 // not complete, rebuilt as a decodable picture -- every slice that arrived
 // whole, plus one synthetic all-skip fill per lost slice. Ring-local flag,
 // next to kRecFlagComplete at the top of the byte. A salvaged AU is never
@@ -126,25 +124,25 @@ struct AuRecordMeta {
 
 // GS-side per-AU latency stamps (SlotHdr v2). Passed to finish() so the
 // writer stamps them inside the same seqlock window as the rest of the
-// slot header; Task 8 (FrameStream) is the real producer, Task 9
-// (PtsAnchor) and Task 10 (sideport) the consumers.
+// slot header; FrameStream is the real producer, PtsAnchor and the
+// sideport the consumers.
 struct AuLatMeta {
   uint64_t t_first_us = 0;    // mono µs, first body of the AU (0 = unknown)
   uint64_t t_complete_us = 0; // mono µs at finish (writer stamps if 0)
   // mono µs, LAST body arrival of the AU (max over fragments' body_mono_us;
-  // same latch site as t_first_us). au_tail gauge only (usb-feed probe
-  // 2026-09-01): splits fec into arrival span (t_last - t_first) vs
-  // publish tail (finish - t_last: repair/decode/assembly/ring write).
+  // same latch site as t_first_us). au_tail gauge only (usb-feed probe):
+  // splits fec into arrival span (t_last - t_first) vs publish tail
+  // (finish - t_last: repair/decode/assembly/ring write).
   // Not written to the SlotHdr — internal to the writer's gauge.
   uint64_t t_last_arr_us = 0;
   uint16_t drone_q_ms = 0;    // from SBI q_ms via the AU's first fragment
   uint16_t enc_us = 0;        // from SBI enc_us, same latch
   uint16_t drone_air_ms = 0;  // from SBI air_ms, same latch as drone_q_ms
-  // fragment 0 of this AU arrived retx-marked (fec-nack, Task 5/7): a NACK
+  // fragment 0 of this AU arrived retx-marked (fec-nack): a NACK
   // retransmit filled the AU's header fragment, so the latency-anchor guard
-  // (Task 7) must not trust this AU's arrival time as a clean anchor sample.
+  // must not trust this AU's arrival time as a clean anchor sample.
   bool hdr_retx = false;
-  // Slice salvage (spec 2026-10-10-h265-slices §5): FrameStream's verdict
+  // Slice salvage: FrameStream's verdict
   // for this AU. finish() turns slice.salvaged into kRecFlagSliceSalvaged;
   // the counts ride to AuLog through last_record(). Not in the SlotHdr.
   SliceSalvage slice;
@@ -172,7 +170,7 @@ class AuRingWriter {
   // far. The append that would outgrow slot_bytes aborts the AU instead
   // (state = aborted, nothing more copied); finish() then counts it
   // dropped_oversize and publishes nothing.
-  // Contract (spec §6.2): for an AU begun with nslices >= 2, every append()
+  // Contract: for an AU begun with nslices >= 2, every append()
   // ends on a NAL boundary, so valid_len of a split AU always does.
   void append(const uint8_t* p, size_t n);
   // Copies into the slot without advancing valid_len: part of the closed

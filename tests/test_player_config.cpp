@@ -12,8 +12,8 @@ static std::string write_tmp_play(const char* text) {
   return path;
 }
 
-// dvr.target (spec 2026-09-26-vtx-recorder): which recorders the record
-// button drives. Default "gs" (identical to pre-feature behaviour).
+// dvr.target (VTX recorder): which recorders the record button drives. Default
+// "gs" (identical to pre-feature behaviour).
 TEST(dvr_target_values_and_strictness) {
   auto c = maburplay::load_config(write_tmp_play("[dvr]\ntarget = \"both\"\n"));
   CHECK(c.dvr.target == "both");
@@ -315,7 +315,7 @@ TEST(display_vsync_lead_range_enforced) {
   CHECK(threw == true);
 }
 
-// display.lat_log_dir went with the 2026-09-06 consolidation: maburplay holds
+// display.lat_log_dir went with the debug-log consolidation: maburplay holds
 // no logging config at all now, it follows /tmp/mabur-session.
 TEST(removed_lat_log_dir_is_rejected) {
   bool threw = false;
@@ -384,8 +384,8 @@ MTEST_MAIN
 
 TEST(display_chain_budget_key) {
   // display.chain_budget: frames a sequential-slot chain may run before
-  // the regulator cuts it with one drop. Default 3 (bench A/B
-  // 2026-09-02, operator choice); 0 = unbounded; range [0, 60].
+  // the regulator cuts it with one drop. Default 3 (bench A/B,
+  // operator choice); 0 = unbounded; range [0, 60].
   const auto bare = maburplay::load_config(write_tmp_play(""));
   CHECK(bare.display.chain_budget == 3);
   const auto cfg = maburplay::load_config(
@@ -420,7 +420,7 @@ TEST(colortrans_enable_key) {
   bool noted = false;
   for (const auto& d : defaulted) if (d.find("colortrans") != std::string::npos) noted = true;
   CHECK(noted);
-  // Only `enable` exists: the constants live in code (spec section 1).
+  // Only `enable` exists: the constants live in code.
   bool threw = false;
   try { maburplay::load_config(write_tmp_play("[colortrans]\ngain = 2.0\n")); }
   catch (const std::exception& e) {
@@ -430,8 +430,8 @@ TEST(colortrans_enable_key) {
 }
 
 TEST(decoder_stream_key) {
-  // [decoder] stream (spec 2026-10-10-h265-slices §6.3): A/B and kill switch
-  // for the streamed decode. Default on; the bundle sets it.
+  // [decoder] stream: A/B and kill switch for the streamed decode. Default on;
+  // the bundle sets it.
   CHECK(maburplay::load_config(write_tmp_play("")).decoder.stream);
   CHECK(!maburplay::load_config(write_tmp_play("[decoder]\nstream = false\n")).decoder.stream);
   std::vector<std::string> defaulted;

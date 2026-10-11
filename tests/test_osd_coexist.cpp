@@ -631,7 +631,7 @@ TEST(the_burn_index_map_tracks_the_screen_through_an_alternating_value) {
 // The burn sink must never be handed the DISPLAY surface. On hardware that
 // surface is a write-combine DRM dumb-buffer mapping, and quantize READING
 // it uncached measured 2-23 ms per OSD update on the pump loop (dvr-latency
-// probe, 2026-09-02) -- every burned recording stalled decode drain and
+// probe) -- every burned recording stalled decode drain and
 // blew vsync release deadlines, which is what "recording makes the display
 // laggy" was. The composer mirrors the picture into its own cached canvas
 // (heap memory, same lineage rules) and feeds THAT; the map must still
@@ -834,12 +834,11 @@ TEST(the_burn_restate_is_scoped_to_the_fields_the_collision_hit) {
 }
 
 // N2. The burn's index map is refreshed per COMPOSITION, and a composition
-// that publishes a blank may be one whose buffer was already clear -- it
-// never held this episode's grid. Keying the burn's blank feed off "this
-// buffer was cleared just now" misses exactly that composition, and the map
-// then carries a flight OSD the screen has already dropped for the whole
-// stale episode. The interleaving is the reviewer's: lit, blank, ONE screen
-// back, quiet again, then a GS publish.
+// that publishes a blank may be one whose buffer was already clear -- it never
+// held this episode's grid. Keying the burn's blank feed off "this buffer was
+// cleared just now" misses exactly that composition, and the map then carries
+// a flight OSD the screen has already dropped for the whole stale episode. The
+// interleaving: lit, blank, ONE screen back, quiet again, then a GS publish.
 TEST(the_burn_map_does_not_keep_a_grid_the_screen_dropped) {
   const mabur::MspScreen scr = full_screen('X');
   const GsSnapshot sn = snap_cards(3);

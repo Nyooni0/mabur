@@ -83,7 +83,7 @@ def main():
     r = airdrain.analyze(ctl, au)
     # The window runs to the LAST S line: a starve is link loss, not the end
     # of the flight (flight 0031 read as 72 s of 566 when it stopped at the
-    # first starved E line, 2026-09-06).
+    # first starved E line).
     assert r['t0'] == 10000 and r['t1'] == 161000, (r['t0'], r['t1'])
 
     # The cascade: one episode, 5->3 in 2 steps, peak ~120 ms at ~+800 ms,
@@ -124,7 +124,7 @@ def main():
     assert r['spike_secs'] == 2, r['spike_secs']
     assert r['standalone'] == [], r['standalone']
 
-    # Transition IDRs (the venc.min_iqp tuning readout, 2026-09-06): one row
+    # Transition IDRs (the venc.min_iqp tuning readout): one row
     # per non-starved E line with the first BASE IDR completing within
     # 600 ms of it. The cascade's two steps each own one 80 kB IDR; the
     # single demote at 90 s and every promote have none.

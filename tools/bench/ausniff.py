@@ -25,7 +25,7 @@ MAGIC = 0x4D425541
 VERSION = 4
 STATE_CLOSED, STATE_OPEN, STATE_ABORTED = 0, 1, 2
 FLAG_IDR, FLAG_DISCONT, FLAG_COMPLETE = 0x01, 0x02, 0x80
-# kRecFlagSliceSalvaged (gs/src/au_ring.h, spec 2026-10-10-h265-slices): the
+# kRecFlagSliceSalvaged (gs/src/au_ring.h): the
 # AU was truncated but maburgs rebuilt it from its complete slices plus
 # skip-slice fills, rather than dropping it whole.
 FLAG_SALVAGED = 0x40

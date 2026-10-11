@@ -1,7 +1,6 @@
-// StreamFeeder against a fake decoder (spec 2026-10-10-h265-slices §6.3/§6.5):
-// event order, START/append/LAST, every fallback, abort. Every kOpen/kGrow
-// here ends on a NAL boundary -- ring v4's writer contract for split AUs
-// (Tasks 4/5), which the feeder relies on.
+// StreamFeeder against a fake decoder: event order, START/append/LAST,
+// every fallback, abort. Every kOpen/kGrow here ends on a NAL boundary --
+// ring v4's writer contract for split AUs, which the feeder relies on.
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -381,7 +380,7 @@ TEST(salvaged_close_streams_and_is_counted) {
 }
 
 TEST(decoder_rebuild_keeps_the_aborted_picture_aborted) {
-  // Task 9 rebuilds the decoder after a watchdog fires: on_flush() aborts
+  // The player rebuilds the decoder after a watchdog fires: on_flush() aborts
   // the open picture first, then set_decoder(new). That picture's close
   // must still report kAborted -- set_decoder must not clear ended_.
   std::vector<size_t> s;

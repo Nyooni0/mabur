@@ -6,7 +6,7 @@
 // without the flags was weaker than rung 0's own data, and a DISC_ACK lost
 // at exactly the range where MAX_RANGE is needed defeats the floor).
 //
-// no_agg (2026-09-24, 40 MHz rungs): with A-MPDU on, the MAC folds
+// no_agg (40 MHz rungs): with A-MPDU on, the MAC folds
 // co-queued frames into one PPDU at ONE rate/width regardless of their
 // own descriptor (docs/findings/2026-09-23-bw40-sweep.md "Aggregation");
 // a control frame folded into an mcs4/40 aggregate airs at mcs4/40. The

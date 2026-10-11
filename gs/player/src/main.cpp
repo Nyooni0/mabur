@@ -1,6 +1,6 @@
 // maburplay -- GS native player: AU ring -> VideoBackend, with fMP4 DVR.
-// Host builds only ever link the null backend (this task); MppBackend /
-// DrmPresenter are cross-only (MABUR_PLAYER_HW, Task 7/8).
+// Host builds only ever link the null backend; MppBackend /
+// DrmPresenter are cross-only (MABUR_PLAYER_HW).
 #include <sys/statvfs.h>  // DVR free-space check behind the GS recording block
 
 #include <atomic>
@@ -37,11 +37,11 @@
 #include "osd_source.h"
 #include "player_config.h"
 #include "rec_button.h"
-#include "rec_control.h"  // maburgs::kRecControlPort (Task 7)
+#include "rec_control.h"  // maburgs::kRecControlPort
 #include "ring_client.h"
 #include "stream_feeder.h"
 #include "video_backend.h"
-#include "vtx_rec_client.h"  // sends the button's VTX wish to maburgs (Task 8)
+#include "vtx_rec_client.h"  // sends the button's VTX wish to maburgs
 #include "splash_image.h"  // startup splash asset + cover-fit painter
 
 #ifdef MABUR_PLAYER_HW
@@ -49,8 +49,8 @@
 #include "drm_presenter.h"  // KMS atomic NV12 presenter, the default display path
 #include "frame_regulator.h"  // phase-aware pts+D display release
 #include "gs_draw.h"         // set_colour_inverse() for the GS overlay pre-invert
-#include "lat_tracker.h"    // tail latency segments + 1 Hz lat line (Task 11)
-#include "lat_log.h"        // persist 1 Hz lat line to <dvr>/log/lat-NNNN.log (Task 7)
+#include "lat_tracker.h"    // tail latency segments + 1 Hz lat line
+#include "lat_log.h"        // persist 1 Hz lat line to <dvr>/log/lat-NNNN.log
 #include "mpp_backend.h"    // MppBackend::info_changes()/errors() for --decode-only
 #include "osd_palette.h"    // build_palette() for the encoder-side OSD
 #endif
@@ -124,8 +124,7 @@ void usage() {
                "   \"errors\":N,\"errors_after_sync_3s\":N,\"concealed\":N} and exits. fps is\n"
                "  over the whole window; fps_active is over first-to-last\n"
                "  decoded frame only (excludes the cold-attach/sid0-join\n"
-               "  wait). This is the hardware decode gate (see\n"
-               "  .superpowers/sdd/2026-08-02-pr-b-maburplay/task-8-brief.md).\n"
+               "  wait). This is the hardware decode gate.\n"
                "\n"
                "--fps-log: normal (non-decode-only) run only -- once per\n"
                "  second, prints \"fps-log: fps=X flips/s=X repl=N frames=N "
@@ -520,7 +519,7 @@ int main(int argc, char** argv) {
   // (install_colortrans, the burn-palette forward map) below, so a host
   // build would otherwise warn that they are unused. Silence that rather
   // than restructuring the declarations -- ct itself must stay at this
-  // scope for Task 12, and these two are declared alongside it.
+  // scope, and these two are declared alongside it.
   (void)ct_display_on;
   (void)lut_axis;
 #endif
@@ -624,10 +623,10 @@ int main(int argc, char** argv) {
   // (non-decode-only) run -- release_frame() is no longer called inline
   // here, it happens when the presenter is done with a frame (see
   // drm_presenter.h's ownership contract). --decode-only stays
-  // presenter-free per its own brief ("no presenter"): frames are counted
-  // and released immediately, same as before Task 9.
+  // presenter-free by design: frames are counted
+  // and released immediately.
 #ifdef MABUR_PLAYER_HW
-  // Tail latency segments + 1 Hz lat line (Task 11). Declared ahead of the
+  // Tail latency segments + 1 Hz lat line. Declared ahead of the
   // presenter (whose flip sink feeds it) and the regulator (whose release
   // feeds it too) so both are in scope by the time either is wired below.
   maburplay::LatTracker lat;
@@ -739,7 +738,7 @@ int main(int argc, char** argv) {
   uint64_t last_engage_ms = 0;
   uint64_t last_heal_ms = 0;
   // 1 Hz mark for the lat/regulator observability block in the main loop
-  // (independent of the GS-OSD block since 2026-08-31).
+  // (independent of the GS-OSD block).
   uint64_t lat_mark_ms = 0;
   // Regulator stderr line: printed both at 1 Hz from the main loop's stats
   // block (below) and once more at exit as the final tally -- same format
@@ -860,7 +859,7 @@ int main(int argc, char** argv) {
   // the record button flips it. Declared here because start_burn_if_needed
   // below reads it.
   bool rec_on = cfg.dvr.autostart;
-  // dvr.target (spec 2026-09-26): which recorders the button drives.
+  // dvr.target: which recorders the button drives.
   const bool rec_gs = cfg.dvr.target != "vtx";
   const bool rec_vtx = cfg.dvr.target != "gs";
   maburplay::VtxRecClient vtx_rec;
@@ -888,7 +887,7 @@ int main(int argc, char** argv) {
   // build_palette() histograms the whole MSP atlas (~2 M px through a hash
   // map) and runs a 255-step median cut: ~150 ms on the A55, and on the main
   // loop that was most of the ~200 ms display stall every record start used
-  // to cost (bench 2026-09-17). Its inputs -- the atlas, the
+  // to cost (bench). Its inputs -- the atlas, the
   // GS seeds, the forward map -- are fixed for a run, so the first build is
   // done at startup below, before video flows; a later key change (a
   // presenter acquired after startup flipping colour_inverse()) rebuilds
@@ -1087,7 +1086,7 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "maburplay: backend \"%s\" init failed\n", cfg.backend.c_str());
     return 2;
   }
-  // Streamed decode (spec 2026-10-10-h265-slices §6.3): split AUs go to the
+  // Streamed decode: split AUs go to the
   // decoder slice by slice as ring v4 publishes them. The VideoBackend seam
   // stays frozen; a backend that can stream also implements StreamDecoder
   // (MppBackend), reached by dynamic_cast like its other extensions.
@@ -1180,7 +1179,7 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "maburplay: rec: STOP (no recorder was running)\n");
   };
 
-  // Decoder input (spec 2026-10-10-h265-slices §6.3; design-reader-thread.md).
+  // Decoder input.
   // AuRouter is the ring sink: the sid-0 join gate (this encoder's GDR+SVC-T
   // config emits ONE real IRAP per session -- a mid-session join treats the
   // ~2 s parameter-set sid0 refresh as its cut point), the decodable gate,
@@ -1206,7 +1205,7 @@ int main(int argc, char** argv) {
     if (rec_on && !burned_mode && rec_gs && !n.au.empty())
       dvr.feed(n.au.data(), n.au.size(), n.meta.pts_us, n.decodable);
   };
-  // Flush-ordering contract carried from Task 8's review: MppBackend::flush()
+  // Flush-ordering contract: MppBackend::flush()
   // / mpi->reset() with DmaFrames still held is an unverified interaction, so
   // every holder -- presenter, regulator (the THIRD holder), recorder (the
   // SECOND; resealed with an IDR) -- lets go BEFORE flush() runs.
@@ -1238,8 +1237,8 @@ int main(int argc, char** argv) {
   };
 
   maburplay::RingClient ring({cfg.ring_path, cfg.socket}, sink);
-  // Wait indefinitely for maburgs to create the ring (GS boot race,
-  // 2026-09-08): the init scripts start us milliseconds after maburgs, so
+  // Wait indefinitely for maburgs to create the ring (GS boot race):
+  // the init scripts start us milliseconds after maburgs, so
   // losing the race is normal, not a config error -- and exiting made it
   // permanent, because S97maburplay reads our exit 2 as "config error, skip
   // restart". --oneshot is the exception: there the ring is the test fixture,
@@ -1277,8 +1276,8 @@ int main(int argc, char** argv) {
   std::signal(SIGUSR1, on_rec_toggle);
 
   if (decode_only) {
-    // Hardware decode gate (task-8-brief.md, amended per the sid0-join
-    // finding above): drive the backend straight off the live ring for
+    // Hardware decode gate (amended per the sid0-join finding above):
+    // drive the backend straight off the live ring for
     // `decode_only_seconds`, no presenter -- the frame_sink above (wired
     // at backend->init() time, shared with the normal run loop) counts
     // frames and timestamps the first/last decoded frame. info_changes
@@ -1482,7 +1481,7 @@ int main(int argc, char** argv) {
     int pump_ms = 2;
 #ifdef MABUR_PLAYER_HW
     // Wake for the next scheduled release, not just the AU doorbell
-    // (hw 2026-08-31): the fixed ceiling plus the decode work below put
+    // (measured on hw): the fixed ceiling plus the decode work below put
     // the release->submit path ~4 ms behind schedule, forcing
     // vsync_lead_ms up to ~9 -- and the lead sits inside every frame's
     // glass latency. Bound the pump by the release deadline, then
@@ -1549,7 +1548,7 @@ int main(int argc, char** argv) {
       // frames instead of resubmitting them a period late) -- follows the
       // servo state so the fallback path keeps the original behavior.
       presenter->set_paced(regulator.servo_locked());
-      // Chain-break heal, per-tick (hw 2026-08-31): a loop stall past the
+      // Chain-break heal, per-tick (seen on hw): a loop stall past the
       // lead window (the 1 Hz OSD/stats work) makes one release miss its
       // latch, and the miss self-sustains -- each parked resubmit lands
       // exactly on a vblank and misses the next latch, so every frame
@@ -1762,7 +1761,7 @@ int main(int argc, char** argv) {
         }
         gs_ps.rec = gs_rec.update(rin, now_ms);
         {
-          // VTX leg (spec 2026-09-26) from the drone's drone.rec via maburgs.
+          // VTX leg from the drone's drone.rec via maburgs.
           const maburplay::GsSnapshot& snap = gs_src->snapshot();
           maburplay::VtxRecTracker::Inputs vin;
           vin.requested = rec_on && rec_vtx;
@@ -1780,14 +1779,14 @@ int main(int argc, char** argv) {
     }
 #ifdef MABUR_PLAYER_HW
     // Player tail-latency aggregates + regulator line, 1 Hz. Deliberately
-    // OUTSIDE the gs_src gate (2026-08-31: originally nested in the GS-OSD
-    // block, so disabling the OSD silently killed the lat:/regulator:
-    // lines and the DVR lat log) and behind the idle-window gate so this
+    // OUTSIDE the gs_src gate (nested in the GS-OSD block, disabling the
+    // OSD would silently kill the lat:/regulator: lines and the DVR lat
+    // log) and behind the idle-window gate so this
     // block's own cost can never stall a release past its latch deadline.
     if (idle_ok && mono_ms() - lat_mark_ms >= 1000) {
       lat_mark_ms = mono_ms();
       const auto L = lat.flush_line();
-      // OSD LAT rows (Task 12): p99_frame() returns the REAL p99-by-e2e
+      // OSD LAT rows: p99_frame() returns the REAL p99-by-e2e
       // frame, computed as a side effect inside flush_line() above from
       // the window it is about to clear -- it is a member that
       // persists across flush_line() calls, not derived
@@ -1813,12 +1812,10 @@ int main(int argc, char** argv) {
       // reasoning as above: a stale post-reset bd would otherwise still
       // get copied into gs_ps.lat_e2e_ms even though the OSD is about to
       // ignore it, leaving gs_ps holding a phantom number.
-      // link-rtt (2026-09-02): absolute floor = own anchor + the sideport
+      // link-rtt: absolute floor = own anchor + the sideport
       // pts offset (floor_us_from owns the 32-bit-seed wrap rule). Folded
       // into e2e, turning it from "excess above the luckiest transit" into
-      // capture-stamp→scanout-start truth. (It used to be folded into the
-      // air+ segment as well, so the OSD breakdown still summed to the
-      // headline; that breakdown is gone as of 2026-09-06, and the jsonl
+      // capture-stamp→scanout-start truth. (The jsonl
       // lat: line below is deliberately untouched by the floor -- it is
       // the relative record the older recordings are in.) Sanity-bounded:
       // an offset that puts the floor outside (-1ms, 1s) is estimator
@@ -2071,7 +2068,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  // Clean shutdown (Task 11a; task-11D-report.md). A streamed picture still
+  // Clean shutdown. A streamed picture still
   // open in rkvdec when MPP is torn down gets mpp_dec_stop's empty LAST
   // (mpp_dec.c:877) -- 64 zero bytes in the kernel -- and decodes into an
   // error IRQ: one rkvdec reset per such kill (3 of 13). Finish it with its

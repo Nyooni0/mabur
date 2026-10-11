@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Bake a monospace TTF into a `.gfont` alpha-mask atlas for the GS
-link-status OSD (docs/superpowers/specs/2026-08-04-gs-osd-essential-design.md).
+link-status OSD.
 
 Usage:
   gen_gsfont.py <font.ttf> <out.gfont> [--sizes 19,21,22,24,26,34,38,56]
@@ -69,8 +69,7 @@ DEFAULT_SIZES = [19, 21, 22, 24, 26, 34, 38, 56]
 # the armed REC field went blank, but kept baked so the committed asset
 # needn't be regenerated for a glyph that costs a few hundred bytes.
 #
-# U+2014 was missing from this list until 2026-08-04 and the omission was
-# invisible: draw_text advances the pen for a codepoint the atlas lacks, so
+# U+2014 was once missing from this list and the omission was invisible: draw_text advances the pen for a codepoint the atlas lacks, so
 # "——" rendered as correctly-sized EMPTY SPACE. Every test passed, because
 # they assert the STRING a field formats, not the ink it puts down. A card
 # that had never been heard would have shown a blank where the design calls

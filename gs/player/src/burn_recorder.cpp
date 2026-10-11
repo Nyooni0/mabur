@@ -182,8 +182,8 @@ struct BurnRecorder::Impl {
   //
   // Both stages are hardware waits (GPU/RGA ~13-22 ms, rkvenc ~13 ms at
   // 1080p) and serialising them on one thread capped the burned DVR at
-  // 26-32 fps with a third of the admitted frames dropped (bench
-  // 2026-09-17). Overlapped, the DVR runs at max(stage) instead of the sum,
+  // 26-32 fps with a third of the admitted frames dropped (bench).
+  // Overlapped, the DVR runs at max(stage) instead of the sum,
   // and the GPU is busy enough for devfreq to actually clock it up.
   //
   // ct_out is a one-deep, latest-wins mailbox like `box`: a slow encoder

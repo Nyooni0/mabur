@@ -6,7 +6,7 @@
 # NOT the equal-tsfl burst marker, which does not fire on an 8812EU RX).
 #
 # First run + findings: docs/findings/2026-08-31-dq-spike.md §11
-# (2026-09-01: the E die aggregates; 93% of arrivals at pure MPDU airtime).
+# (the E die aggregates; 93% of arrivals at pure MPDU airtime).
 #
 # Prereqs:
 #   - txdemo cross-built for the drone:  cmake --build build-arm-glibc

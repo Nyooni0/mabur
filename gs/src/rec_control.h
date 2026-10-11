@@ -17,8 +17,8 @@ namespace maburgs {
 // block belongs to the stats sideport and the OSD feed.
 constexpr int kRecControlPort = 8401;
 
-// Loopback-only UDP listener for the record button's VTX wish
-// (spec 2026-09-26-vtx-recorder). Commands: "vtx_rec on" / "vtx_rec off".
+// Loopback-only UDP listener for the record button's VTX wish.
+// Commands: "vtx_rec on" / "vtx_rec off".
 // The wish is HELD until the next command -- no decay: a crashed player
 // must never stop the onboard recording by silence. It starts UNKNOWN
 // (wire byte 0), so a maburgs restart does not stop it either; the player

@@ -1,6 +1,5 @@
 #pragma once
 // Builds the three calibration sweep plans. Pure: no state, no I/O.
-// Spec: docs/superpowers/specs/2026-09-10-tx-power-calibration-design.md.
 #include <array>
 #include <cstdint>
 

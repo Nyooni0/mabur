@@ -45,8 +45,9 @@ static_assert(sizeof(kRow) / sizeof(kRow[0]) == (size_t)GsBarField::kCount,
 constexpr int kRowGap = 4;
 
 // Drone SoC caution threshold. The disarmed fan-off spike climbed to 84 C
-// in 15 min flattening at ~1 C/min (docs/low-power-spike-findings-
-// 2026-09-19.md); 70 leaves the pilot a margin to act before that.
+// in 15 min flattening at ~1 C/min
+// (docs/findings/2026-09-19-low-power-spike.md); 70 leaves the pilot a
+// margin to act before that.
 constexpr int kTempCautionC = 70;
 
 // Top inset for the corner-anchored recording indicator. Deeper than the
@@ -130,7 +131,7 @@ std::string GsCompactBar::worst_case(GsBarField id, int n_cards,
     // slot -- the two are mutually exclusive (see the render switch) and
     // exactly as wide, so no separate worst case is needed for it.
     case GsBarField::kCh:      return "ch:999(a)";
-    // 40 MHz rungs (2026-09-24): the width suffix makes the live form the
+    // 40 MHz rungs: the width suffix makes the live form the
     // WIDER one now ("mcs:9/40" beats the dash form "mcs:--"), the reverse
     // of the pre-bw worst case -- still an explicit worst case rather than
     // whatever the live value happens to be, just on the other side.
@@ -319,8 +320,8 @@ GsCompactBar::FieldState GsCompactBar::state_of_(const GsSnapshot& snap,
   switch (id) {
     case GsBarField::kCh:
       st.rgb = link;
-      // Our key file differs from the drone's (spec 2026-10-01
-      // link-pairing): no RCFs go out in this state, so this takes
+      // Our key file differs from the drone's (link pairing): no RCFs go
+      // out in this state, so this takes
       // priority over the hop/scan suffixes below -- the channel number
       // itself is irrelevant while the link can't be controlled. Gated on
       // !stale: a frozen last-known key_mismatch from a dead sideport
@@ -333,10 +334,10 @@ GsCompactBar::FieldState GsCompactBar::state_of_(const GsSnapshot& snap,
       st.text = snap.channel
                     ? "ch:" + ascii_int(std::clamp(*snap.channel, 0, 999))
                     : "ch:--";
-      // In-flight channel hop (spec 2026-09-14-inflight-channel-hop) takes
-      // priority over the boot-scan mark below -- both share one suffix
-      // slot (worst_case() reserves exactly "(a)"'s width), and a hop mid-
-      // flight is the more actionable of the two for the pilot.
+      // In-flight channel hop takes priority over the boot-scan mark below --
+      // both share one suffix slot (worst_case() reserves exactly "(a)"'s
+      // width), and a hop mid-flight is the more actionable of the two for
+      // the pilot.
       if (snap.hopped) {
         st.text += "(h)";
       } else if (snap.scan_auto) {

@@ -18,7 +18,7 @@
 namespace maburgs {
 
 // BENCH RIG — compiled only under MABUR_LOSS_SIM (CMake option, default
-// OFF; prod maburgs contains none of this). Mainlined 2026-08-29 so
+// OFF; prod maburgs contains none of this). Mainlined so
 // resilience gates can build it with -DMABUR_LOSS_SIM=ON instead of
 // merging a scaffolding branch.
 //

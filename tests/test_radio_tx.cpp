@@ -269,7 +269,7 @@ TEST(probe_stream_rides_third_slot) {
   const auto& f = sink.frames_[0];
   const uint16_t rl = read_le16(&f[2]);
   devourer::TxMode want_mode = to_tx_mode(probe, probe.bw);
-  want_mode.no_agg = true;  // the probe layer always airs alone (task 4)
+  want_mode.no_agg = true;  // the probe layer always airs alone
   const auto want = devourer::build_stream_radiotap(want_mode);
   REQUIRE(rl == want.size());
   CHECK(std::equal(want.begin(), want.end(), f.begin()));

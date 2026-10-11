@@ -25,9 +25,9 @@
 // passes through — that covers rendezvous, so DISC needs no bypass.
 // hold_max_ms 0 disables the slotter.
 //
-// Probe tail (spec 2026-09-04 probe-stream, fixed 2026-09-05): the
+// Probe tail: the
 // probe-stream body is the LAST PPDU of every video AU's burst while a
-// probe is commanded (probe per AU since 2026-09-16), and the AU
+// probe is commanded (probe per AU), and the AU
 // completes before it lands (bench: the probe's radio stamp is 0.9 ms p50
 // / 4 ms p99 after the completion stamp; a send's USB+chip latency is
 // 1-1.5 ms). A send released at the completion therefore puts the blast
@@ -61,8 +61,8 @@ struct RcfSlotCfg {
   int grace_ms = 2;          // offered this soon after a good AU -> send now
   int lead_ms = 3;           // send -> on air + blast (USB + chip + ~0.2 ms)
   int guard_ms = 1;          // margin before the predicted next burst
-  // Airtime of the probe-stream body that trails every ENH burst (spec
-  // 2026-09-04 probe-stream), ms, rounded up; 0 when no probe is commanded.
+  // Airtime of the probe-stream body that trails every ENH burst, ms,
+  // rounded up; 0 when no probe is commanded.
   // Floor of the learned completion->probe offset (tail_ub_ms()): the
   // burst cannot end sooner than one probe body after the completion.
   int probe_tail_ms = 0;

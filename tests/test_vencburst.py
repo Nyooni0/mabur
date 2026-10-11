@@ -143,7 +143,7 @@ class TwoCycles(unittest.TestCase):
 
 
 class SteadyToBurst(unittest.TestCase):
-    """The bench lens-uncover shape (2026-09-03): no quiet stretch at all --
+    """The bench lens-uncover shape: no quiet stretch at all --
     CBR spends its budget on a covered lens too -- then ONE scene-cut frame
     of ~6x the budget and straight back. Must be found via the steady->burst
     trigger and classified as a single >2x frame."""

@@ -45,6 +45,15 @@ Two kinds of doc, two rules:
   are snapshots and are never edited to match later code; each carries a
   one-line `**Status:**` pointing at the reference page that owns the
   topic now.
+- **Code comments say what the code does and why — no dates, no
+  spec/plan citations.** Never cite `docs/superpowers/` specs or plans,
+  `.superpowers/` reports, "spec section N", "Task 11", "fix round 2" or
+  review ids: those files are machine-local, so state the rationale in the
+  comment itself. No date stamps ("since 2026-09-16", "bench 2026-07-13"):
+  a comment is true at HEAD or it is wrong; history belongs in git and
+  `docs/findings/`. Code that still reads old recordings names the old
+  format by its version marker, not its date. Links to committed docs
+  (including dated `docs/findings/` paths) are fine.
 
 | If the task touches… | Read |
 |---|---|
@@ -72,9 +81,9 @@ Two kinds of doc, two rules:
 | H.265 row slices: slice salvage (SliceAssembler, skip-slice fills, `[venc] slices`, FrameHdr `slice_rows`, `kRecFlagSliceSalvaged`, aulog 5) and streamed decode (AU ring v4 open slots, StreamFeeder, the decoder-input thread (FeedLoop), `[decoder] stream`, the MPP patches in `gs/player/mpp-patches/`, the stream-mode GS image and its p1 flash) | docs/slices.md (as built) + docs/findings/2026-10-09-venc-slice.md; flashing: docs/deploy.md |
 | radio/PHY below mabur | `third_party/devourer/CLAUDE.md` |
 
-Design specs live in `docs/superpowers/specs/` — **gitignored**, so they
-are on this machine only and anything that must survive belongs in a
-committed `docs/` page instead.
+Design specs and plans live in `docs/superpowers/` — **gitignored**, so
+they are on this machine only and anything that must survive belongs in a
+committed `docs/` page instead. Never cite them from code comments.
 
 ## Compatibility policy — there isn't one
 

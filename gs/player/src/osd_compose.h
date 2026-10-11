@@ -68,7 +68,7 @@ struct OsdComposeOut {
 // to the sink in place of the display surface. It exists because the DRM
 // dumb buffers are WRITE-COMBINE mappings on hardware: writes stream fine,
 // but quantize_rects READING one back was measured at 2-23 ms per OSD
-// update on the pump loop (dvr-latency probe, 2026-09-02) against the
+// update on the pump loop (dvr-latency probe) against the
 // ~0.1-2.2 ms the cached-memory bench projects -- enough to stall decode
 // drain and blow vsync release deadlines on every burned recording. The
 // canvas costs one extra cached draw per update and 4 bytes/px of heap;

@@ -2,10 +2,9 @@
 // sequenced test stream, encodes it with mabur's sliding-window+SBI FEC
 // (single stream, id 0xB0), and injects it via devourer at the chosen
 // channel/MCS/power.
-// Spec: docs/superpowers/specs/2026-07-13-linkbench-design.md. Bring-up
-// order mirrors maburd run_real_mode (drone/src/main.cpp): InitWrite must
-// complete before the first send or the bulk-OUT FIFO fills mid-DLFW and
-// bricks TX for the session.
+// Bring-up order mirrors maburd run_real_mode (drone/src/main.cpp):
+// InitWrite must complete before the first send or the bulk-OUT FIFO fills
+// mid-DLFW and bricks TX for the session.
 #include <algorithm>
 #include <atomic>
 #include <chrono>
