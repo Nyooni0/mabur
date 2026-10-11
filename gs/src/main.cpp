@@ -892,7 +892,7 @@ static int run_radio(const maburgs::Config& cfg) {
     fec_log.emplace(*log_writer, debug.dir());
     // Gated on au_on too (not just debug.ok()): with au_ring.enable=false
     // there are never any rows to write, and an emplace here would leave
-    // au.log containing only its "# aulog 4" header -- reads as "the
+    // au.log containing only its "# aulog 5" header -- reads as "the
     // logger is broken" rather than "the ring is off".
     if (au_on) au_log.emplace(*log_writer, debug.dir());
   }

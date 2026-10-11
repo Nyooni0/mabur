@@ -656,7 +656,7 @@ def load_probelog(path):
 
 
 def load_aulog(path):
-    """flightrec's au-NNNN.log (docs/observability.md): '# aulog N' marker
+    """au.log (docs/observability.md; legacy flightrec au-NNNN.log): '# aulog N' marker
     then 't_us pts sid fid len flags nal0 [t_first t_complete enc dq]'.
     Only what the probe join needs: sid, fid, t_first/t_complete (mono µs).
     v1 rows (no marker) have no completion stamp and are skipped."""

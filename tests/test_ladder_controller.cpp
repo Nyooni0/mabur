@@ -623,8 +623,8 @@ TEST(noinfo_holds_while_a_probe_is_commanded) {
   CHECK(c.counters().probe_holds == 1);
 }
 
-// Low-power mode (docs/link-adaptation.md "Low-power (disarmed) mode") runs
-// the drone at 15 fps, so the per-AU probe books 15 AU/s x bpb 4 = 30
+// Low-power mode (docs/link-adaptation.md "Low-power (disarmed) mode") at
+// the code-default low_power.fps 15 (the bundle ships 30), so the per-AU probe books 15 AU/s x bpb 4 = 30
 // expected symbols in the gate's 500 ms window (bench session 0147 read
 // probe_n 28-32). The original min_syms = 40 floor was sized against 60 fps
 // (120 per window) and made every low-power sample unusable: the gate sat in

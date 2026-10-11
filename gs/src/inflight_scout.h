@@ -40,7 +40,7 @@ struct InflightScoutCfg {
 // `plan.desired(card)` every tick) is the real reconciliation path.
 //
 // Pure apart from the injected radio: no threads, no clock of its own.
-// main.cpp (Task 11) owns the thread that calls dwell()/burst() on a
+// ChannelCore owns the thread that calls dwell()/burst() on a
 // period_ms cadence, and picks the dwell card per cycle via set_radio().
 class InflightScout {
  public:
@@ -62,8 +62,8 @@ class InflightScout {
   // d.busy_valid/d.busy_pct and, on success, visit.busy_valid/busy_pct --
   // left at their false/0 defaults on radios without NHM support.
   //
-  // CONTRACT (relied on by gs/src/main.cpp's sideport dwell attribution,
-  // Task 12 -- HopVisit carries no card field, so main.cpp pairs each
+  // CONTRACT (relied on by ChannelCore's sideport dwell attribution
+  // -- HopVisit carries no card field, so ChannelCore pairs each
   // drained ScoutDwell against dwell_visits purely off this return-value/
   // flag/visit relationship, in order, across the two vectors):
   //   - Returns false, with d.survey.flags carrying kFlagRetuneFailed and
@@ -78,7 +78,7 @@ class InflightScout {
   //     kFlagRetuneFailed.
   // Breaking either half of this pairing (return value disagreeing with
   // the flag, or with whether `visit` was actually filled) silently
-  // corrupts main.cpp's per-card score/visit attribution without failing
+  // corrupts ChannelCore's per-card score/visit attribution without failing
   // any test at this call site -- see tests/test_inflight_scout.cpp's
   // dwell_return_value_flag_and_visit_population_stay_in_lockstep group.
   bool dwell(uint8_t ch, uint8_t back, ScoutDwell& d, HopVisit& visit);

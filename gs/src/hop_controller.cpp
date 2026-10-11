@@ -302,7 +302,7 @@ void HopController::flee(uint8_t ch, double now) { back_off(ch, now, BackoffWhy:
 // The escape is used only when (the callers have already established)
 // there is no ranked target: the caller supplied one, and the verdict in
 // hand says the channel we are on is blocked. A verify-failed channel is
-// excluded upstream (main.cpp skips backed_off_failed()) and again here,
+// excluded upstream (ChannelCore passes backed_off_failed() to the ranker) and again here,
 // so a stale tick can never order one.
 bool HopController::escape_allowed(const HopTick& in) const {
   if (!in.escape.has_value() || !(in.verdict.evidence & kEvBlocked)) return false;

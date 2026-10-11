@@ -98,9 +98,9 @@ class HopVerdict {
   VerdictOut window(double now_ms, const std::vector<VerdictCardIn>& cards,
                     const VerdictLinkIn& link, int rung);
   // After a hop's verify window ends (spec section 2's second thaw rule).
-  // Called from main.cpp on HopAction::VerifyPass -- see hop_controller.h.
+  // Called from ChannelCore::apply_hop_action_ on HopAction::VerifyPass -- see hop_controller.h.
   void reset();
-  // A new in-session verdict run is starting (main.cpp: hop_active's
+  // A new in-session verdict run is starting (ChannelCore: hop_active's
   // rising edge, where the AU/recovered counter baselines are re-primed).
   // Drops the AU history and its frozen reference only: the frame rate
   // before an outage is no baseline for the one after it (a session that

@@ -19,7 +19,7 @@ struct BootPickIn {
   bool scout_mature = false;
   bool scout_op_ranked = false;
   bool scout_prelude_done = false;
-  bool scout_owns = false;       // main.cpp's scout_owns(): the scout holds its card
+  bool scout_owns = false;       // ChannelCore::scout_owns_(): the scout holds its card
   uint8_t proposal = 0;
   // ChannelPlan
   uint8_t op = 0;

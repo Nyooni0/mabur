@@ -91,7 +91,7 @@ int ChannelScout::eff_min_rounds_() const {
 void ChannelScout::park_() {
   const uint8_t op = op_.load(std::memory_order_acquire);
   if (cfg_.link_width_mhz == 40) {
-    // Join the link at 40 (docs/bw40.md §3). A failure (dead or unready
+    // Join the link at 40 (docs/bw40.md "Boot scan scores every half"). A failure (dead or unready
     // card) is not retried here: the core loop's width resync
     // (width_resync.h) sets the card's width once it is ready again.
     if (!radio_.retune_width(op, 40))

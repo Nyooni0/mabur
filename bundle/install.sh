@@ -6,13 +6,10 @@
 # nothing extra is copied.
 # Usage: bundle/install.sh root@<camera-ip> [path/to/maburd]
 #
-# maburd now runs the encoder itself, so there is no waybeam to configure and
-# no frame-shm ring to cross-check. On a camera that still runs waybeam this
-# script is NOT enough: waybeam must be retired first (stop it, chmod a-x
-# /etc/init.d/S95waybeam -- plain `chmod -x` leaves the group/other bits and
-# root still runs it -- and move the binary aside) or two processes will fight
-# over the MI pipeline and neither will encode. Full sequence in
-# docs/deploy.md.
+# maburd runs the encoder itself (no waybeam). A camera still running
+# waybeam must have it retired first (stop it, chmod a-x
+# /etc/init.d/S95waybeam, move the binary aside) or two processes fight over
+# the MI pipeline and neither encodes.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

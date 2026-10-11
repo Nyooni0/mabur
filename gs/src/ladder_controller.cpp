@@ -327,7 +327,7 @@ bool LadderController::update(const LinkHealth& h, double now_ms) {
   // Observe-only rung statistics (spec 2026-08-13): gated on the same
   // post-transition blank as s3 decisions — FEC re-key artifacts must not
   // be attributed to the new rung (up to ~200 ms of pre-transition symbols
-  // can outlive the blanking; see CLAUDE.md tuning invariant). Fed BEFORE
+  // can outlive the blanking; see docs/link-adaptation.md "Demote inputs and transition handling"). Fed BEFORE
   // the decision blocks so the sample that triggers a demote still lands
   // on the rung it actually measured.
   if (now_ms >= s3_blank_until_ms_ && now_ms >= blank_store_until_ms_) {

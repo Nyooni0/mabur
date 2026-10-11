@@ -108,7 +108,7 @@ struct DisplayCfg {
   // Frames a sequential-slot chain may run before the regulator cuts it
   // with one dropped frame (frame_regulator.h chain_cuts). 0 = unbounded,
   // the pre-2026-09-02 behavior. Default 3 (operator choice after the
-  // bench A/B in docs/observability.md: e2e p50 -3.9 ms for 1.44 drops/s;
+  // bench A/B in docs/findings/2026-09-02-regulator-chain-budget.md: e2e p50 -3.9 ms for 1.44 drops/s;
   // 6 was -2.4 ms for 0.56/s; p99 unchanged at any value).
   int chain_budget = 3;
 };

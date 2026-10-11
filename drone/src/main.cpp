@@ -1764,7 +1764,7 @@ int run_real_mode(const Config& cfg, uint8_t start_ch, const std::string& cfg_pa
   // overflow makes the RTP packetizer abort NALs mid-chain — sender-side
   // slice truncation no FEC can repair (bench 2026-07-13, the PixelPilot
   // glitch root cause). ~256 bodies ≈ 150 ms at 1700 bodies/s.
-  constexpr size_t kTxQueueCap = 256;  // also feeds Telem.txq_cap
+  constexpr size_t kTxQueueCap = 256;  // also the congestion shed's txq_cap
   TxQueue txq(kTxQueueCap);
   // spec 2026-09-06 air clock. Lives out here, not in the hot thread, since
   // fec-nack: the hot thread prices it (set_rates via apply_op_to_clock),

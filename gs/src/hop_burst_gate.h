@@ -5,12 +5,12 @@ namespace maburgs {
 
 // Pure: whether the core loop's synchronous freshness burst (spec section
 // 3, HopController's ONLY source of ranking data on a one-card GS -- see
-// the call site's own comment in main.cpp) should run this tick.
+// the call site's own comment in channel_core.cpp) should run this tick.
 // Extracted (Task 15 fix round 1) so the four properties that were wrong
 // at various points in this plan have a direct unit test instead of only
 // ever running inside the hardware-touching burst body (inflight_mu,
 // fronts[], RadioFrontend, ranker, scan_log), which is NOT extracted and
-// stays exactly where it is in run_radio():
+// stays in ChannelCore:
 //   - "no hop in flight" is Idle OR Hold (Ordered/Verifying excluded: a
 //     hop is actually in progress and the radio must not wander);
 //   - the trigger must be live this tick;

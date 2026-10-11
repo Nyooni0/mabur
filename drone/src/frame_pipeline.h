@@ -103,7 +103,7 @@ class FramePipeline {
 
   // ── venc-ring vanish detection ──────────────────────────────────────────
   // (docs/findings/2026-08-12-venc-ring-vanish.md) Frames dropped between
-  // waybeam's encoder and this reader never get a frame_id — the wire closes
+  // the encoder (venc ring) and this reader never get a frame_id — the wire closes
   // seamlessly over the hole, so the pts step between consecutive ring reads
   // is the ONLY read-side evidence. A delta > 1.5x the observed period books
   // the missing frames here, classified from the neighbours' producer ENHANCE

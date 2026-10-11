@@ -19,12 +19,12 @@ the first 500 ms after the demote against the NEW rung's nominal PHY rate
 promotes get peak summaries; the steady-state excess per rung (frames >= 3 s
 from any transition) and standalone spike seconds close the report.
 
-Inputs (one boot -- the ctl and au indices are DIFFERENT counters, match
-them by mono span; the lat log is not needed and its index is a third
-counter, see docs/observability.md):
-  ctl    /media/dvr/ctl-NNNN_<date>.log   (ctllog >= 8 for the ov pairs)
-  aulog  /media/dvr/log/au-NNNN.log       (flightrec '# aulog 3', air_ms
-                                          column 12; aulog-2 logs still parse)
+Inputs: a debug-log session directory (its ctl.log + au.log; see
+docs/observability.md "Debug-log session directory"), or the legacy pair
+from before 2026-09-06 -- ctl-NNNN_<date>.log (ctllog >= 8 for the ov
+pairs) + flightrec's au-NNNN.log ('# aulog 3', air_ms column 12; aulog-2
+logs still parse). The legacy ctl and au indices are DIFFERENT counters:
+match them by mono span.
 
 Usage: python3 tools/bench/airdrain.py [<session-dir> | ctl-NNNN_<date>.log au-NNNN.log]
          [--from S --to S] [--spike MS] [--profiles] [--model]
