@@ -389,7 +389,7 @@ static int run_radio(const maburgs::Config& cfg) {
     std::fprintf(stderr, "debug-log: session %s%s\n", debug.dir().c_str(),
                  debug.rejoined() ? " (rejoined)" : "");
   }
-  // cal.log (callog 1): TX-power calibration's raw per-cell record (spec
+  // cal.log (callog 3): TX-power calibration's raw per-cell record (spec
   // 2026-09-10-tx-power-calibration-design.md). Unlike ctl.log/probe.log/
   // au.log below, this uses its own private LogWriter (cal_log.h) rather
   // than the shared `log_writer` -- a calibration run is rare and

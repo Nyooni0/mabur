@@ -90,8 +90,9 @@ bash bundle/install.sh root@<camera-ip>
 
 This copies `out/arm/maburd` to `/usr/bin/maburd`, seeds `/etc/mabur.toml`
 from `bundle/mabur.default.toml` if one isn't already present, installs
-`bundle/S96mabur` (a BusyBox-compatible init script with a respawn loop) to
-`/etc/init.d/S96mabur`, and (re)starts `S96mabur`. There is no waybeam step
+`bundle/S96mabur` (a BusyBox-compatible init script with a respawn loop) as
+`/etc/init.d/S00mabur` — the name the OpenIPC image uses — removing any old
+`S96mabur`, and (re)starts it. There is no waybeam step
 any more: since 2026-08-29 `maburd` owns the encoder itself, and a camera
 that still runs waybeam must have it retired first — see `docs/deploy.md`.
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Post-flight analysis of a mabur sideport flight.jsonl (schema v1 + link.ctl)
-or a maburgs ctl-NNNN_<date>.log (see gs/src/ctl_log.h; parses ctllog v1-v11,
+or a maburgs ctl-NNNN_<date>.log (see gs/src/ctl_log.h; parses ctllog v1-v12,
 warns on pre-v4, pre-v7, pre-v8, pre-v9 and pre-v10; prints a u/u3
 definition label -- arrival-booked vs completion-booked -- at the v11
 boundary). Format is auto-detected from the first line.

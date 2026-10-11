@@ -26,10 +26,20 @@ HOST=${1:?usage: install.sh root@<camera-ip> [binary]}
 BIN=${2:-out/arm/maburd}
 [ -f "$BIN" ] || { echo "error: $BIN not built (run tools/build-arm.sh)" >&2; exit 1; }
 
+# The wrapper is installed as /etc/init.d/S00mabur -- the name the OpenIPC
+# image uses (openipc-builder package/mabur/mabur.mk), so busybox rcS starts
+# maburd first. The repo file keeps its historical name, bundle/S96mabur.
+# A camera with an old /etc/init.d/S96mabur gets it stopped and removed
+# below, so one name owns the service. (Both copies share one pidfile, so
+# the second start at boot is a no-op, but stop/start by the wrong name
+# and the docs disagreeing is how a deploy goes wrong.)
+#
 # Stop maburd before overwriting its binary: a running maburd holds
 # /usr/bin/maburd busy, so scp'ing over it in place fails with "Text file
 # busy". Downtime spans the copy, which is fine here.
-ssh "$HOST" '/etc/init.d/S96mabur stop'
+ssh "$HOST" 'for s in S00mabur S96mabur; do
+  [ -x /etc/init.d/$s ] && /etc/init.d/$s stop
+done; true'
 
 # -O forces the legacy SCP transfer protocol: OpenIPC/BusyBox targets ship no
 # /usr/libexec/sftp-server, so modern scp's default sftp mode fails ("scp:
@@ -52,12 +62,13 @@ elif ssh "$HOST" '[ -f /etc/mabur.json ]'; then
 else
   scp -O bundle/mabur.default.toml "$HOST:/etc/mabur.toml"
 fi
-scp -O bundle/S96mabur "$HOST:/etc/init.d/S96mabur"
+scp -O bundle/S96mabur "$HOST:/etc/init.d/S00mabur"
 
 ssh "$HOST" '
   set -e
-  chmod +x /usr/bin/maburd /etc/init.d/S96mabur
-  /etc/init.d/S96mabur start
+  rm -f /etc/init.d/S96mabur
+  chmod +x /usr/bin/maburd /etc/init.d/S00mabur
+  /etc/init.d/S00mabur start
 '
 
 echo "installed. logs: ssh $HOST 'cat /tmp/mabur.log'  (or stderr via serial)"

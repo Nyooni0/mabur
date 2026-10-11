@@ -437,7 +437,7 @@ void CalSession::finish_phase(uint64_t now_ms) {
   // Ruling: analyze_rate's "never dipped" test (wall >= last cell) is only
   // sound on a full-range sweep. The fine phase feeds a +/-kFineHalfWidth
   // window, where a rate whose true wall sits at the window's edge would be
-  // misread as no-dip and fall through to a knee computed over a truncated
+  // misread as no-dip and park at the rail on the strength of a truncated
   // curve -- a silently wrong parked power. So the fine pass never
   // re-derives a row's classification: it only sharpens the wall index of a
   // row coarse already showed a real dip in, and any kCalNoDip/
