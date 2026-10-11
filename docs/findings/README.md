@@ -50,6 +50,7 @@ merged), and get a row added to the table below.
 | 2026-09-16 | [2026-09-16-fec-log-overhead-bench](2026-09-16-fec-log-overhead-bench.md) | Was the 1.0/0.5 rung overhead pair oversized? → First bench read; ladder since shipped tighter at 0.5/0.25 every rung. |
 | 2026-09-15 | [2026-09-15-handover-inflight-hop-bench](2026-09-15-handover-inflight-hop-bench.md) | Is in-flight channel hop ready to ship? → Bench passed (4 fixes); later became the production hop controller. |
 | 2026-09-15 | [2026-09-15-inflight-hop-bench-matrix](2026-09-15-inflight-hop-bench-matrix.md) | What did the first in-flight-hop bench matrix find? → Historical record; several early limitations later fixed. |
+| 2026-09-14 | [2026-09-14-chanmig-spike](2026-09-14-chanmig-spike.md) | Can the GS tell interference from a fade, where would it jump, does one card work? → Yes via foreign/FA sensors (not devourer's verdict); one card verdicts but dwells cost video. |
 | 2026-09-13 | [2026-09-13-channel-scan](2026-09-13-channel-scan.md) | Can devourer auto-select a clean channel? → Yes; sensor validated here, boot-time auto-pick shipped later. |
 | 2026-09-13 | [2026-09-13-channel-select-bench](2026-09-13-channel-select-bench.md) | Does the home/candidates channel-select design survive? → No, superseded; only silent-dwell + leak-subtraction logic survives. |
 | 2026-09-11 | [2026-09-11-maburcal-bench](2026-09-11-maburcal-bench.md) | Does the maburcal kit work end to end? → Yes; EVM recording reverted, one noisy-cell defect still open. |
