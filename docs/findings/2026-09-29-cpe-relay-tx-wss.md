@@ -6,9 +6,8 @@ Extracted from docs/cpe510-relay.md during the 2026-10-11 docs tidy.
 
 ## Bench record — TX mode, 2026-09-29 (CPE v3, `mabur-openwrt` 44f0190)
 
-Setup: CPE on host USB-Ethernet (192.168.1.101 ↔ 192.168.1.1) (pre-2026-09-29
-address); drone `.152`
-on ch136 HT40-. Full numbers and the per-window breakdown are in the relay
+Setup: CPE on host USB-Ethernet at the CPE's stock OpenWrt address
+192.168.1.1 (its address before 2026-09-29); drone on ch136 HT40-. Full numbers and the per-window breakdown are in the relay
 repo's `docs/verify-mabur-relay-on-device.md` ("TX mode" section); this is
 the summary.
 

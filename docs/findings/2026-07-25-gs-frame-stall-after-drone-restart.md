@@ -217,7 +217,7 @@ trusting the counter's magnitude; it does not affect the mechanism.
 
 1. Confirm a clean baseline: difference maburgs' `frames[clean/trunc/drop]`
    over 60 s — expect clean ≈ +60/s, drop +0.
-2. `ssh root@192.168.10.152 '/etc/init.d/S96mabur restart'` — do **not** touch
+2. `ssh $DRONE '/etc/init.d/S96mabur restart'` — do **not** touch
    maburgs.
 3. Difference the same counters every 10 s. Expect `clean` and `rtp` to freeze
    while `s1 p` keeps climbing and `drop` rises ~119/s.
@@ -257,7 +257,7 @@ directly — `tests/` has no coverage of a backward id64 rebase today.
 context, reduced to the four load-bearing columns (line, `rtp`, `s1 p`,
 `frames[clean/trunc/drop]`). The full 7308-line capture (2.8 MB) was not worth
 committing; if more of it is needed it can be re-taken from the rig with
-`ssh root@10.18.0.1 'cat /tmp/maburgs.log'` — but **capture before restarting
+`ssh $GS 'cat /tmp/maburgs.log'` — but **capture before restarting
 maburgs**, which truncates the log (`S96maburgs` redirects with `>`, the same
 pattern as S96mabur). Note the counters are cumulative and never reset without
 a restart, so a live capture still contains any episode since maburgs started.

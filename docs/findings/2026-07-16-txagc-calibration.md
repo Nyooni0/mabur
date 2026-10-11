@@ -326,8 +326,8 @@ for m in 0 1 2 3 4 5 6 7; do
 done
 ```
 
-Rig for the 2026-07-16 runs: drone (`root@192.168.10.152`, TX) and GS
-(`root@10.18.0.1`, RX chain B) 3 m apart on the bench, channel 149, 20 MHz.
+Rig for the 2026-07-16 runs: drone (TX) and GS
+(RX chain B) 3 m apart on the bench, channel 149, 20 MHz.
 Run quality: 0 CRC errors across all ten sweeps, drift ≤ 1 dB, no RX
 saturation (max −62 dBm), MCS0 delivery ~100% at every index.
 

@@ -141,8 +141,8 @@ thread (this is the SoC where >12 Mbps causes venc-ring vanishes — see
 
 ```sh
 # 1. sampler on the GS (:8300 must be free — stop the flight recorder first)
-ssh root@10.18.0.1 '/etc/init.d/S97flightrec stop'
-ssh root@10.18.0.1 'timeout 130 python3 -u -c "
+ssh $GS '/etc/init.d/S97flightrec stop'
+ssh $GS 'timeout 130 python3 -u -c "
 import socket,json,time
 s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
 s.bind((\"127.0.0.1\",8300)); s.settimeout(6)
@@ -158,10 +158,10 @@ while time.time()-t0 < 120:
 "' &
 
 # 2. force the climb (one boundary per rung, 0->5)
-ssh root@10.18.0.1 '/etc/init.d/S96maburgs restart'
+ssh $GS '/etc/init.d/S96maburgs restart'
 
 # 3. afterwards, put the recorder back
-ssh root@10.18.0.1 '/etc/init.d/S97flightrec start'
+ssh $GS '/etc/init.d/S97flightrec start'
 ```
 
 Ignore the first value printed (t<1 s): it is the carry-over from the
@@ -172,10 +172,10 @@ is expected, not a bug.
 Swapping maburd arms (rollback binary is on the device):
 
 ```sh
-ssh root@192.168.10.152 '/etc/init.d/S96mabur stop'
-ssh root@192.168.10.152 'mv /usr/bin/maburd /usr/bin/maburd.fade'
-ssh root@192.168.10.152 'mv /usr/bin/maburd.pre-fade /usr/bin/maburd'
-ssh root@192.168.10.152 '/etc/init.d/S96mabur start'
+ssh $DRONE '/etc/init.d/S96mabur stop'
+ssh $DRONE 'mv /usr/bin/maburd /usr/bin/maburd.fade'
+ssh $DRONE 'mv /usr/bin/maburd.pre-fade /usr/bin/maburd'
+ssh $DRONE '/etc/init.d/S96mabur start'
 # ...and the reverse to go back. Confirm with md5sum; the new binary is
 # 1fccda526a72fbe306c81aefe9f2d0f9.
 ```
@@ -185,11 +185,11 @@ ssh root@192.168.10.152 '/etc/init.d/S96mabur start'
 
 ## Bench end-state as left
 
-- **Drone** `root@192.168.10.152`: `/usr/bin/maburd` = new
+- **Drone** `$DRONE`: `/usr/bin/maburd` = new
   (`1fccda526a72fbe306c81aefe9f2d0f9`, branch `fade-demote`), rollback
   `/usr/bin/maburd.pre-fade`. `/etc/mabur.json` **unmodified**
   (`tick_ms: 100`, no `rc_drain_ms` → default 5).
-- **GS** `root@10.18.0.1`: `/usr/local/bin/maburgs` = new
+- **GS** `$GS`: `/usr/local/bin/maburgs` = new
   (`767db45d495a4f94531511c66bd2edaa`), rollback
   `/usr/local/bin/maburgs.pre-fade`. `/etc/maburgs.json` **unmodified**
   (no `link.fade` → all defaults, cascade+predict ON; `attrib` absent →

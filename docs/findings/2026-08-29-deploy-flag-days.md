@@ -154,7 +154,7 @@ image must carry them — the current one does; an image built from the radxa
 defconfig between sbc-groundstations `ef55018` and the 2026-09-16 mesa3d/librga
 re-add does not. That `readelf` check only proves what the *build host*
 produced; also check the *GS* before swapping, e.g.
-`ssh root@10.18.0.1 'ls /usr/lib/libEGL.so.1 /usr/lib/libGLESv2.so.2 /usr/lib/libgbm.so.1 /usr/lib/librga.so.2'`
+`ssh $GS 'ls /usr/lib/libEGL.so.1 /usr/lib/libGLESv2.so.2 /usr/lib/libgbm.so.1 /usr/lib/librga.so.2'`
 — miss it and the new binary will not exec at all.
 
 Binary BEFORE config: `[colortrans] enable` is a new key (in-code default

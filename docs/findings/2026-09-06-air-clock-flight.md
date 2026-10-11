@@ -13,7 +13,7 @@ build, one knob changed between each:
 | 0031 | `ctl-0352`, `log/{flight,au}-0031`, `lat-0057` | **0.5** | shed 0, eff 0.70 (observe) | 26–592 s | 9 cascades; starved at 98/180/576 s, drone pts reset at 231 s |
 | 0032 | `ctl-0353`, `log/{flight,au}-0032`, `lat-0058`, `record-0044` | 0.5 | **shed 25, eff 0.73 (armed)** | 42–344 s | range-limited, mostly mcs1–3, 7 cascades, 11 `s3_util` |
 
-All on `/run/media/gilankpam/DVR`. Instruments: `tools/bench/airdrain.py
+All on the GS DVR card. Instruments: `tools/bench/airdrain.py
 --model` (per-frame model vs GS-measured air+q), the flight jsonl for the
 drone's `air_backlog_max_ms` / `air_shed_drops` / `enc.cmd_kbps` and the
 cards' `rx_mbps`, the lat log for the segment decomposition of the

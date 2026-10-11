@@ -17,7 +17,7 @@ and hits ~90 % at 19 Mb/s.
 
 ## Method
 
-Bench, drone `.152` + GS `10.18.0.1`, 1080p60, channel 136, RSSI −48/−60,
+Bench, drone + GS, 1080p60, channel 136, RSSI −48/−60,
 SoC 56–58 °C throughout (no thermal effect). Video = the static bench
 scene; the encoder reached every requested rate (enc.mbps ≈ cmd_kbps), so
 the scene was not a limiter.
@@ -396,7 +396,7 @@ queue 512.
 
 ### Deploy state
 
-Drone `.152` runs the cap-256 build (`/usr/bin/maburd`, md5 466d8a2e…);
+Drone runs the cap-256 build (`/usr/bin/maburd`, md5 466d8a2e…);
 rollback `maburd.pre-nojoin` = the 867 kB binary of 2026-09-21 (binary
 only — no config or wire change, deploy order irrelevant).
 `maburd.pre-bro3` and `maburd.pre-crctab` were left in place (3.4 MB
@@ -523,7 +523,7 @@ beyond mcs7/20 MHz), the 22 Mb/s / ov 1.0 / agg6 backlog-cap graze has
 a third more headroom, and 5.6 points of cpu0 come back for the thermal
 budget.
 
-Deploy state: drone `.152` runs `lincomb_rows` (md5 fe0ba97e…);
+Deploy state: drone runs `lincomb_rows` (md5 fe0ba97e…);
 rollback `maburd.pre-gfrows` = the cap-256 build (binary only, no config
 or wire change, deploy order irrelevant). `maburd.pre-crctab` and
 `maburd.pre-bro3` were pruned for space (3.8 MB free, three binaries).
@@ -593,7 +593,7 @@ thread has now been taken from 46 % of its core (with the join) to 11 %
 without moving it. The hot thread is off the latency path for good;
 what remains of it is the CRC (8 %), the ring memcpy and the NAL scans.
 
-Deploy state: drone `.152` runs the diet build (the measured binary was
+Deploy state: drone runs the diet build (the measured binary was
 md5 6d14f7c8…; the deployed one adds only a captured-`sid` tidy so the
 envelope sink fits std::function's inline buffer — md5 cd51d65f…, ausniff
 clean after the swap); rollback `maburd.pre-diet` = the lincomb_rows build,

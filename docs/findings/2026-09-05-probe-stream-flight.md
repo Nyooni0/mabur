@@ -13,7 +13,7 @@ same build, same route, one knob changed between them:
 | 20 | `ctl-0280`, `probe-0280`, `log/{flight,au,lat}-0020` | 0.2 | 72–454 s (381 s) | landed, drone powered off at the GS |
 | 21 | `ctl-0281`, `probe-0281`, `log/{flight,au,lat}-0021` | 0.15 | 28–356 s (329 s) | crashed at 356.5 s |
 
-Both on `/run/media/gilankpam/DVR`. `flightreport.py` for the ctl+au
+Both on the GS DVR card. `flightreport.py` for the ctl+au
 pair, plus ad-hoc scripts over the S/E/P lines, the probe log and the
 AU log (the numbers below name which). Pre-probe comparison flights:
 `ctl-0219/0220/0221` (ctllog 9, the 2 s ENH-probe design, 2026-09-04).

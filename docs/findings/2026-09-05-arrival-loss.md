@@ -166,7 +166,7 @@ Deployed to the ground station on 2026-09-05, config unchanged (no new
 keys), drone untouched:
 
 ```sh
-ssh root@10.18.0.1 '/etc/init.d/S96maburgs stop; sleep 2; killall maburgs 2>/dev/null; sleep 1; \
+ssh $GS '/etc/init.d/S96maburgs stop; sleep 2; killall maburgs 2>/dev/null; sleep 1; \
   mv /usr/local/bin/maburgs /usr/local/bin/maburgs.pre-arrival; \
   mv /usr/local/bin/maburgs.arrival /usr/local/bin/maburgs; \
   chmod 755 /usr/local/bin/maburgs; /etc/init.d/S96maburgs start'

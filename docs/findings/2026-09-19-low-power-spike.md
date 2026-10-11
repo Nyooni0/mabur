@@ -8,8 +8,8 @@ docs/link-adaptation.md "Low-power (disarmed) mode".
 Question: can the drone run cool while still streaming video, and return to
 full power on arm? Bench only, **fan blowing on the drone the whole time**,
 so every delta below is compressed; relative ordering is what this page
-establishes. Drone .152 (SSC338Q, Runcam WiFiLink 2 / 8812EU), GS
-10.18.0.1, channel 136, ladder free (rung 5 on the bench). SoC temperature
+establishes. Drone (SSC338Q, Runcam WiFiLink 2 / 8812EU), GS,
+channel 136, ladder free (rung 5 on the bench). SoC temperature
 is `cpufreq/temp_out`; radio is devourer's `thermal_delta` (chip thermal
 meter minus efuse reference); video gate is `ausniff.py --seconds 90`.
 Each arm ran ~4 min after the change; the SoC settles within ~1 min with
@@ -156,7 +156,7 @@ cmd 150 len 27: cycle=124 sensors=0x002b flightModeFlags=0x00000002 ARM_bit0=0 p
 
 The 15 fps half of the mode needs the frame rate to change at runtime, and
 the fold-in findings rule out an encoder restart. Probed on the bench
-drone (.152, stock 1080p60 / 16 Mb/s config, ladder at rung 5) with two
+drone (stock 1080p60 / 16 Mb/s config, ladder at rung 5) with two
 throwaway debug verbs, `POST /venc/set?fps=N` and `?fps_rebind=N`, the
 GS reading the AU ring with `ausniff.py`:
 

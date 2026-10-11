@@ -4,7 +4,7 @@ An operator ssh'd into the ground station gets their own vtx's per-rate
 PA compression walls, measured, applied and verified, in about 75 seconds:
 
 ```
-$ ssh root@10.18.0.1
+$ ssh root@<gs>
 # maburcal start
 ```
 
@@ -504,7 +504,7 @@ a `frame_id_gap`; the first pass after a restart can show a phantom one.
 ### 2. `maburcal start` and the acceptance table
 
 ```sh
-ssh root@10.18.0.1 maburcal start
+ssh root@<gs> maburcal start
 ```
 
 Check every one of these against the run:

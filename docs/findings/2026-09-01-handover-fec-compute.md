@@ -15,7 +15,7 @@
 > (A-MPDU/656). The probe sequence below is kept for provenance; read
 > §19 + §20 first.
 
-2026-09-01, bench (drone `192.168.10.152`, GS `10.18.0.1`), branch
+2026-09-01, bench (drone + GS), branch
 `ampdu`. Continues `docs/findings/2026-08-31-dq-spike.md` §14–§18 (the
 lab notebook — §17 is the model, §18 the 656 trial; this page is the map
 for the next session). Supersedes the attack list of

@@ -9,7 +9,7 @@ Extracted from docs/cpe510-relay.md during the 2026-10-11 docs tidy.
 Standing gate `tools/bench/ausniff.py`; no `aucadence` (nothing touches the
 balancer, venc or UEP). One CPE, so every leg is single-relay. In order:
 
-Setup common to all legs: drone `.152` on ch136 HT40-, `low_power` off
+Setup common to all legs: drone on ch136 HT40-, `low_power` off
 (full rate, 60 fps); CPE v3 (`mabur-openwrt` 0b8804c); host = this build
 box (RTL8822E 0bda:a81a, USB-Ethernet to the CPE, host `maburgs` from
 `build/gs/`); Radxa = the GS, 2x RTL8822E + the same USB-Ethernet adapter

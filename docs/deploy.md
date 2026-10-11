@@ -346,22 +346,24 @@ squashfs. Everything else the GS keeps — `/etc` configs,
 the upper dir's `usr/` shadows the image's: check
 `find /overlay/root/usr -name 'librockchip_mpp*'` is empty after a swap.
 
+Below, `$GS` is the ground station's ssh target (`root@<gs-ip>`).
+
 Back up p1 first:
-`ssh root@10.18.0.1 'dd if=/dev/mmcblk1p1 bs=1M' > p1.orig.img`
+`ssh $GS 'dd if=/dev/mmcblk1p1 bs=1M' > p1.orig.img`
 (270,499,840 bytes); rollback is the same sequence with that file. The
 SD-card image stays the last resort if p1 does not boot.
 
 Flash any image `IMG` (from the image repo's `output/`):
 
     IMG=<squashfs>; SZ=$(stat -c %s $IMG); MD5=$(md5sum < $IMG | cut -d' ' -f1)
-    scp -O $IMG root@10.18.0.1:/tmp/p1.new.img
-    ssh root@10.18.0.1 'md5sum /tmp/p1.new.img'                 # == $MD5
-    ssh root@10.18.0.1 '/etc/init.d/S97maburplay stop'
-    ssh root@10.18.0.1 '/etc/init.d/S96maburgs stop'
-    ssh root@10.18.0.1 'pidof maburplay maburgs || echo none'   # none
-    timeout 60 ssh root@10.18.0.1 'dd if=/tmp/p1.new.img of=/dev/mmcblk1p1 bs=1M conv=fsync && sync && echo written && echo 1 > /proc/sys/kernel/sysrq && echo s > /proc/sysrq-trigger && echo b > /proc/sysrq-trigger' || true
+    scp -O $IMG $GS:/tmp/p1.new.img
+    ssh $GS 'md5sum /tmp/p1.new.img'                 # == $MD5
+    ssh $GS '/etc/init.d/S97maburplay stop'
+    ssh $GS '/etc/init.d/S96maburgs stop'
+    ssh $GS 'pidof maburplay maburgs || echo none'   # none
+    timeout 60 ssh $GS 'dd if=/tmp/p1.new.img of=/dev/mmcblk1p1 bs=1M conv=fsync && sync && echo written && echo 1 > /proc/sys/kernel/sysrq && echo s > /proc/sysrq-trigger && echo b > /proc/sysrq-trigger' || true
     # once it is back up (~25 s): the partition holds the image
-    ssh root@10.18.0.1 "head -c $SZ /dev/mmcblk1p1 | md5sum"   # == $MD5
+    ssh $GS "head -c $SZ /dev/mmcblk1p1 | md5sum"   # == $MD5
 
 Write and reboot in **one** ssh command, and reboot through sysrq only:
 once p1 is rewritten, nothing on the old lower filesystem can be exec'd

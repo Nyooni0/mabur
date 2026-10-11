@@ -6,7 +6,7 @@ Extracted from docs/vtx-recorder.md during the 2026-10-11 docs tidy. "Above"/"be
 
 ## Recording size — `record.size` (bench 2026-09-27)
 
-Measured on `.152`, rung 5 / mcs 4 / 24 Mb/s, `low_power.enable = false`:
+Measured on the drone, rung 5 / mcs 4 / 24 Mb/s, `low_power.enable = false`:
 
 | link | recording | link `enc` p50/p99 idle → recording | recording |
 |---|---|---|---|
@@ -32,7 +32,7 @@ Measured on `.152`, rung 5 / mcs 4 / 24 Mb/s, `low_power.enable = false`:
   pipeline derives from the encoded height. The raw `intra_refresh_rows`
   it replaced (2026-09-27) failed boot at 720p with the 1080p value 34.
 
-## Bench results (2026-09-26, `.152` Runcam WiFiLink 2 + bench GS)
+## Bench results (2026-09-26, Runcam WiFiLink 2 + bench GS)
 
 The binaries were built against devourer master 56eabe4. The link sat at
 mcs4/40 MHz, 24 Mb/s, 1080p60, with `low_power.enable = false` for the

@@ -1,6 +1,6 @@
 # maburgs counter excerpts — GS frame-stall after drone restart, 2026-07-25
 # Companion to docs/findings/2026-07-25-gs-frame-stall-after-drone-restart.md
-# Source: /tmp/maburgs.log on the GS (10.18.0.1), 7308 lines, ~1 stats line/s.
+# Source: /tmp/maburgs.log on the GS, 7308 lines, ~1 stats line/s.
 # Columns: <line>  rtp=<udp pkts out>  s1[p=<video pkts in>  frames[clean/trunc/drop]
 # During an outage rtp and clean freeze while p keeps climbing and drop rises ~119/s.
 # The sample just before each onset shows p frozen for one line: the drone restarting.

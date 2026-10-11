@@ -17,8 +17,8 @@
 #     restart + ausniff gate afterwards.
 # GS busybox has no pkill — killall only.
 set -u
-DRONE=${DRONE:-root@192.168.10.152}
-GS=${GS:-root@10.18.0.1}
+DRONE=${DRONE:?set DRONE=root@<drone-ip>}
+GS=${GS:?set GS=root@<gs-ip>}
 CH=${CH:-161}; RATE=${RATE:-MCS5}; PAYLOAD=${PAYLOAD:-1396}
 SECS=${SECS:-8}; AGG=${AGG:-16}; DENSITY=${DENSITY:-7}
 OUT=/tmp/ampdu_e_spike   # on the GS

@@ -54,6 +54,14 @@ Two kinds of doc, two rules:
   `docs/findings/`. Code that still reads old recordings names the old
   format by its version marker, not its date. Links to committed docs
   (including dated `docs/findings/` paths) are fine.
+- **No bench or host specifics in code, docs or commits.** Device IPs and
+  ssh logins (drone, GS, spare boards), credentials, MACs, and this
+  machine's paths/users/NICs stay out of the repo — they live only in
+  Claude's memory (`device-addresses`). Write "the drone", "the GS",
+  `root@<gs-ip>` or `$GS`; bench scripts take targets from the
+  environment (`DRONE=`, `GS=`) with no default. Product addresses the
+  software itself ships with (the CPE relay's firmware-fixed `10.83.11.1`,
+  loopback ports) and synthetic test values are not bench specifics.
 
 | If the task touches… | Read |
 |---|---|
@@ -134,8 +142,7 @@ NixOS host: wrap every cmake/ctest invocation in
 resolve. Host suite: `ctest --test-dir build -R 'test_|host_e2e'`.
 Cross-builds: `tools/build-arm64.sh` (maburgs), `tools/build-arm.sh`
 (maburd + the bench TX tools, OpenIPC glibc toolchain at
-`../openipc-builder`). Devices: drone `root@192.168.10.152`, GS
-`root@10.18.0.1`. Carve-out: `tools/build-arm64.sh` must run bare, never
+`../openipc-builder`). Carve-out: `tools/build-arm64.sh` must run bare, never
 inside that `nix-shell` wrapper — Nix's pkg-config wrapper overrides
 `PKG_CONFIG_LIBDIR` and breaks its stage 6 glibc build.
 Never load the 8812eu kernel module on the GS cards.

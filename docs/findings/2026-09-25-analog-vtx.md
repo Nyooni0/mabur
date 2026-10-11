@@ -22,7 +22,7 @@ sweeps, the two summarisers, and both `flightreport.py` outputs.
   hop-split fix; wire-compatible with the drone's 2026-09-24 `maburd`).
   Config = `gs/bundle/maburgs.default.toml` with home **128**, candidates
   `[144, 40, 136]`, `hop.enable = true`, debug log on. The real GS was off.
-- Drone on the bench (`192.168.10.152`), `/etc/mabur.toml` with
+- Drone on the bench, `/etc/mabur.toml` with
   `channel = 128` (backup `mabur.toml.pre-analog`), later also the TX wall
   table at its floor (`rate_walls_rel` −40 ×8, `legacy_wall_rel` −40,
   `wall_margin_db` 6.0). Disarmed on the bench, so ~30 fps.

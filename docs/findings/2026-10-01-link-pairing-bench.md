@@ -26,7 +26,7 @@ on its held nonce when video returned, had its RCFs rejected
 the `maburgs: link KEY MISMATCH` stderr line. Copying the same key to
 the GS and `restart maburgs` recovered to `session` with `key_fp = 2263`
 on both boot logs without touching the drone. Not run that day: the
-stranger drone (the .126 board is on vendor firmware), the web spotter
+stranger drone (the second VTX is on vendor firmware), the web spotter
 row, and the cold-boot `vtx_nonce` check (nothing logs the nonce).
 
 Also on the hardware gate: confirm the drone's first `vtx_nonce` differs
