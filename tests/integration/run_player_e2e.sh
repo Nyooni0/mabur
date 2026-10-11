@@ -52,7 +52,15 @@ OSD_SHA_EXPECTED=e202e5d127467752984bda2c135d166661f8c0eb2c8481a77d54b39ed8f76a8
 # the bar's size (nearest baked; 19 px here). Pixel diff old vs new: 11768 px
 # changed, all inside x 1639..1886 y 42..94 (the REC field), 0 outside; REC
 # ink still ends flush at x 1886 and its top stays on the 40 px inset.
-BAR_SHA_EXPECTED=6e8c67a6a3c8b0a498736d2a04ed56dc8acf5cabe41e3773528b08a328650d7c
+# Re-blessed (was 6e8c67a6...): item labels became icons ("ch:" -> the
+# wifi icon and a space, ...) and "res:1280x720" became "720p", at an
+# unchanged type size. Pixel diff old vs new (the old dump rebuilt from the
+# previous sources reproduces 6e8c67a6... exactly): the same three ink
+# bands at the same rows (y 42..70, 944..996, 1003..1055); ZERO differing px
+# in the REC band; both bar rows narrower and still centred (row 0 x
+# 264..1633 -> 407..1490, row 1 143..1688 -> 374..1457); lit 129,731 ->
+# 90,091 as the label text left.
+BAR_SHA_EXPECTED=a8df1c23b5534ec4b54db57dacdc1eb9ba18a09f57e1c7e8460c09badfdf20c7
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
@@ -261,11 +269,12 @@ fi
 # The DRM half of the GS OSD cannot run off-hardware, so this is the
 # host-side gate for everything below it: .gfont load, layout arithmetic,
 # formatting and the mask blitter. Same dump format as the MSP --osd-render
-# gate above. The bar is two plain-text rows along the bottom edge, plus the
-# recording indicator alone in the TOP-RIGHT corner, so the invariants are
-# three bands of ink and nothing else: the indicator up top, then the two
-# rows hugging the bottom inset. The synthetic font carries eight sizes; the
-# bar picks the largest whose worst-case rows fit.
+# gate above. The bar is two rows of icon-tagged items along the bottom
+# edge, plus the recording indicator alone in the TOP-RIGHT corner, so the
+# invariants are three bands of ink and nothing else: the indicator up top,
+# then the two rows hugging the bottom inset. The synthetic font carries
+# eight sizes (and a box for every icon); the bar takes its size from its
+# sizing reference row (gs_compact.h).
 echo "== GS render gate =="
 python3 tools/msp/gen_gsfont.py --synthetic "$TMP/syn.gfont" \
   --sizes 19,21,22,24,26,34,38,56

@@ -825,7 +825,7 @@ TEST(the_burn_restate_is_scoped_to_the_fields_the_collision_hit) {
   // The premise: this cell really did force a reclaim...
   CHECK(out.gs_reclaimed > 0);
   // ...and the restate is a small fraction of what a full one costs.
-  // Measured 29,780 of 173,839 px = 5.8x (the cell under `ch` reclaims it
+  // Measured 21,310 of 132,699 px = 6.2x (the cell under `ch` reclaims it
   // and its neighbour). The bar is 3x, which still fails hard on the
   // mutation this guards: reverting to invalidate() makes the two equal,
   // i.e. 1x.

@@ -154,9 +154,10 @@ Two deploy-time invariants, neither of which a daemon can check for itself:
 ## GS link-status OSD (player-side)
 
 A second, independent overlay drawn by maburplay from the maburgs stats
-sideport: two plain-text rows along the bottom edge (channel, mcs,
-airtime, per-card RSSI and SNR and drone temperature above; bitrate,
-resolution, fps, jitter, latency and the pre/post-FEC loss pair below),
+sideport: two rows of icon-tagged figures along the bottom edge (channel,
+mcs, airtime, per-card RSSI and SNR and drone temperature above; bitrate,
+resolution as `720p`/`1080p`, fps, jitter, latency and the pre/post-FEC
+loss pair below),
 plus the DVR recording clock alone in the top-right corner, so the centre
 of frame stays clear. `docs/observability.md` has the details. It shares the MSP overlay's plane and
 surface (MSP draws first, then the GS fields repaint over any collision, so
@@ -178,15 +179,19 @@ ignore it, being current by construction).
   new font.
 - The asset bakes **30 pixel sizes** (eight base sizes at ×⅔, ×1, ×4/3 and
   ×2); the bar takes the largest one whose worst-case rows fit the screen,
-  with no runtime scaling anywhere. That is what makes it ~13 MB — a mask
+  with no runtime scaling anywhere. That is what makes it ~15 MB — a mask
   atlas, two bytes per pixel, at every size.
-  Regenerate it (JetBrains Mono is a dev-host dependency only; the asset is
-  committed so a deploy needs no font toolchain) with:
+  Its characters are baked from JetBrains Mono Medium and the bar's item
+  icons from JetBrains Mono **Nerd Font Mono** Medium (Material Design
+  icons in the same cell). Regenerate it (both fonts are dev-host
+  dependencies only; the asset is committed so a deploy needs no font
+  toolchain) with:
 
   ```
-  nix-shell -p jetbrains-mono python3Packages.freetype-py --run \
+  nix-shell -p python3Packages.freetype-py --run \
     "tools/msp/gen_gsfont.py \
        <jetbrains-mono>/share/fonts/truetype/JetBrainsMono-Medium.ttf \
+       <nerd-fonts.jetbrains-mono>/share/fonts/truetype/NerdFonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Medium.ttf \
        gs/player/bundle/gs_osd.gfont --sizes <the 30-value list>"
   ```
 

@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "gs_compact.h"
@@ -58,6 +59,39 @@ GsPlayerState player_nominal() {
   p.rec.kind = RecState::Kind::kRecording;
   p.rec.elapsed_s = 767;
   return p;
+}
+
+// Tests spell each item by its name ("ch:149", "rssi:-70/-72"); the bar
+// draws its icon and a space instead. ic() swaps every "<name>:" that starts
+// an item for gs_icon's glyph and a space, so an expected row reads like the
+// bar's own field list.
+std::string ic(const std::string& spelled) {
+  static const std::pair<const char*, const char*> kNames[] = {
+      {"ch:", gs_icon::kCh},           {"mcs:", gs_icon::kMcs},
+      {"air:", gs_icon::kAir},         {"rssi:", gs_icon::kRssi},
+      {"snr:", gs_icon::kSnr},         {"temp:", gs_icon::kTemp},
+      {"bitrate:", gs_icon::kBitrate}, {"res:", gs_icon::kRes},
+      {"fps:", gs_icon::kFps},         {"jit:", gs_icon::kJit},
+      {"lat:", gs_icon::kLat},         {"loss:", gs_icon::kLoss},
+  };
+  std::string out;
+  size_t i = 0;
+  while (i < spelled.size()) {
+    bool swapped = false;
+    if (i == 0 || spelled[i - 1] == ' ') {
+      for (const auto& [name, icon] : kNames) {
+        const size_t len = std::char_traits<char>::length(name);
+        if (spelled.compare(i, len, name) == 0) {
+          out += std::string(icon) + " ";
+          i += len;
+          swapped = true;
+          break;
+        }
+      }
+    }
+    if (!swapped) out += spelled[i++];
+  }
+  return out;
 }
 
 // One row as a string, in draw order -- what the pilot actually reads.
@@ -125,9 +159,9 @@ TEST(the_rows_read_exactly_as_specified) {
   GsCompactBar bar(f);
   REQUIRE(bar.layout(1920, 1080, &err));
   CHECK(row_of(bar, nominal(), false, player_nominal(), 0) ==
-        "ch:149 mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41");
+        ic("ch:149 mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41"));
   CHECK(row_of(bar, nominal(), false, player_nominal(), 1) ==
-        "bitrate:8.1 res:1280x720 fps:60 jit:5.2 lat:45/78 loss:0.3/0.0");
+        ic("bitrate:8.1 res:720p fps:60 jit:5.2 lat:45/78 loss:0.3/0.0"));
 }
 
 // 40 MHz rungs: with 20/3 and 40/3 both live in the ladder, the
@@ -142,10 +176,10 @@ TEST(compact_mcs_cell_shows_width_and_dashes_without_it) {
   REQUIRE(bar.layout(1920, 1080, &err));
   GsSnapshot s = nominal();
   s.mcs = 3; s.bw = 40;
-  CHECK(row_of(bar, s, false, player_nominal(), 0).find("mcs:3/40") != std::string::npos);
+  CHECK(row_of(bar, s, false, player_nominal(), 0).find(ic("mcs:3/40")) != std::string::npos);
   s.bw.reset();
-  CHECK(row_of(bar, s, false, player_nominal(), 0).find("mcs:3/--") != std::string::npos);
-  CHECK(GsCompactBar::worst_case(GsBarField::kMcs, 2) == "mcs:9/40");
+  CHECK(row_of(bar, s, false, player_nominal(), 0).find(ic("mcs:3/--")) != std::string::npos);
+  CHECK(GsCompactBar::worst_case(GsBarField::kMcs, 2) == ic("mcs:9/40"));
 }
 
 // radio.scan enabled on the GS: the channel carries an "(a)" suffix so the
@@ -159,10 +193,10 @@ TEST(auto_channel_select_marks_the_channel) {
   GsSnapshot s = nominal();
   s.scan_auto = true;
   CHECK(row_of(bar, s, false, player_nominal(), 0) ==
-        "ch:149(a) mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41");
+        ic("ch:149(a) mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41"));
   s.channel.reset();
   CHECK(row_of(bar, s, false, player_nominal(), 0) ==
-        "ch:--(a) mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41");
+        ic("ch:--(a) mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41"));
 }
 
 // In-flight channel hop: the channel carries an "(h)" suffix -- same slot as
@@ -177,12 +211,12 @@ TEST(inflight_hop_marks_the_channel) {
   GsSnapshot s = nominal();
   s.hopped = true;
   CHECK(row_of(bar, s, false, player_nominal(), 0) ==
-        "ch:149(h) mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41");
+        ic("ch:149(h) mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41"));
   // hopped takes priority over scan_auto when (implausibly) both are set --
   // they share the one suffix slot worst_case() reserves.
   s.scan_auto = true;
   CHECK(row_of(bar, s, false, player_nominal(), 0) ==
-        "ch:149(h) mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41");
+        ic("ch:149(h) mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41"));
 }
 
 // A card count of four widens exactly two items and nothing else.
@@ -198,9 +232,9 @@ TEST(four_cards_extend_the_rssi_and_snr_lists) {
   s.cards = {s.cards[0], s.cards[1], c, d};
   const GsPlayerState ps = player_nominal();
   CHECK(bar.debug_field_text(s, false, ps, GsBarField::kRssi) ==
-        "rssi:-70/-72/-68/--");
+        ic("rssi:-70/-72/-68/--"));
   CHECK(bar.debug_field_text(s, false, ps, GsBarField::kSnr) ==
-        "snr:22/20/19/--");
+        ic("snr:22/20/19/--"));
 }
 
 // Nothing received is "--", never a fabricated zero. This is the whole
@@ -214,9 +248,9 @@ TEST(missing_values_render_as_double_dash_never_zero) {
   const GsSnapshot empty;          // nothing ever received, no cards
   const GsPlayerState cold;        // nothing ever decoded
   CHECK(row_of(bar, empty, false, cold, 0) ==
-        "ch:-- mcs:-- air:-- rssi:-- snr:-- temp:--");
+        ic("ch:-- mcs:-- air:-- rssi:-- snr:-- temp:--"));
   CHECK(row_of(bar, empty, false, cold, 1) ==
-        "bitrate:0.0 res:-- fps:0 jit:0.0 lat:--/-- loss:--/--");
+        ic("bitrate:0.0 res:-- fps:0 jit:0.0 lat:--/-- loss:--/--"));
 }
 
 // A heard card with no SNR yet still shows its RSSI: the two are separate
@@ -231,8 +265,33 @@ TEST(a_heard_card_missing_one_figure_keeps_the_other) {
   GsCard a; a.id = 0; a.heard = true; a.rssi_dbm = -64.0;  // no snr_db
   s.cards = {a};
   const GsPlayerState ps;
-  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kRssi) == "rssi:-64");
-  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kSnr) == "snr:--");
+  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kRssi) == ic("rssi:-64"));
+  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kSnr) == ic("snr:--"));
+}
+
+// The resolution item is the decoded HEIGHT plus "p": the short form a
+// pilot reads at a glance. A 4:3 mode reads as its 16:9 sibling, and a
+// corrupt size clamps inside the worst case ("9999p") rather than widening
+// the box.
+TEST(resolution_reads_as_height_p) {
+  GsFont f;
+  std::string err;
+  REQUIRE(f.load(GSFONT_SCALED, &err));
+  GsCompactBar bar(f);
+  REQUIRE(bar.layout(1920, 1080, &err));
+  const struct { int w, h; const char* want; } cases[] = {
+      {1280, 720, "res:720p"},   {1920, 1080, "res:1080p"},
+      {1440, 1080, "res:1080p"}, {3840, 2160, "res:2160p"},
+      {0, 0, "res:--"},          {1280, 0, "res:--"},
+      {1280, 1 << 30, "res:9999p"},
+  };
+  for (const auto& c : cases) {
+    GsPlayerState ps = player_nominal();
+    ps.vid_w = c.w;
+    ps.vid_h = c.h;
+    CHECK(bar.debug_field_text(nominal(), false, ps, GsBarField::kRes) == ic(c.want));
+  }
+  CHECK(GsCompactBar::worst_case(GsBarField::kRes, 2) == ic("res:9999p"));
 }
 
 // lat_valid false is the anchor being cold, not a latency of zero.
@@ -245,7 +304,7 @@ TEST(invalid_latency_renders_dashes_not_zero) {
   GsPlayerState ps = player_nominal();
   ps.lat_valid = false;
   CHECK(bar.debug_field_text(nominal(), false, ps, GsBarField::kLat) ==
-        "lat:--/--");
+        ic("lat:--/--"));
 }
 
 // --- the recording indicator ------------------------------------------
@@ -604,11 +663,11 @@ TEST(two_rows_buy_at_least_half_again_the_single_line_size) {
   CHECK(bar.debug_atlas_px() >= 33);  // 1.5x the 22 px a single line allowed
 }
 
-// One type size for both rows, and the biggest one that fits. The bar has
-// no design-size table -- "the largest baked size whose worst-case rows fit
-// between the insets and stack inside the surface" IS the rule, which is
-// what lets it render readably on a 720p panel and larger on a 4K one.
-TEST(layout_picks_the_largest_baked_size_that_fits) {
+// One type size for both rows: the largest baked size at which the sizing
+// reference row and both worst-case rows fit between the insets and the
+// stack fits the surface. No design-size table -- that rule is what renders
+// readably on a 720p panel and larger on a 4K one.
+TEST(layout_picks_the_largest_baked_size_the_rule_allows) {
   GsFont f;
   std::string err;
   REQUIRE(f.load(GSFONT_SCALED, &err));
@@ -624,6 +683,7 @@ TEST(layout_picks_the_largest_baked_size_that_fits) {
     const int avail = r.w - 2 * (int)(32 * scale + 0.5);
     const int row_gap = (int)(4 * scale + 0.5);
     auto fits_in = [&](const MaskAtlas& a) {
+      if (GsCompactBar::sizing_row_width(a) > avail) return false;
       for (int row = 0; row < GsCompactBar::kRows; ++row)
         if (GsCompactBar::worst_row_width(a, row, kMaxCards) > avail) return false;
       const int block = GsCompactBar::kRows * a.glyph_h +
@@ -639,6 +699,43 @@ TEST(layout_picks_the_largest_baked_size_that_fits) {
                     bigger);
       CHECK(!fits_in(*a));
     }
+  }
+}
+
+// The pin is load-bearing: the real rows are narrower than the reference
+// (the icons replaced longer text labels), so without it the bar would
+// grow -- strictly at the 1080p design resolution. Elsewhere the bake set
+// can leave no size between the two (at 2160p the next one up from 76 is
+// 112, which nothing fits), so there it is only "never larger". And at
+// every resolution the rows stay narrower than the reference, so a wider
+// item taking the size over shows up here.
+TEST(the_sizing_reference_not_the_rows_sets_the_type_size) {
+  GsFont f;
+  std::string err;
+  REQUIRE(f.load(GSFONT_SCALED, &err));
+  for (const Reso& r : kFourResolutions) {
+    GsCompactBar bar(f);
+    REQUIRE(bar.layout(r.w, r.h, &err));
+    const double scale = (double)r.h / 1080.0;
+    const int avail = r.w - 2 * (int)(32 * scale + 0.5);
+    int rows_alone = 0;  // largest size the rows alone would allow
+    for (int px = 1; px <= 512; ++px) {
+      const MaskAtlas* a = f.atlas(px);
+      if (!a) continue;
+      bool fits = true;
+      for (int row = 0; row < GsCompactBar::kRows; ++row)
+        if (GsCompactBar::worst_row_width(*a, row, kMaxCards) > avail) fits = false;
+      if (fits) rows_alone = px;
+    }
+    std::printf("  %dx%d: bar %d px, rows alone would allow %d px\n", r.w, r.h,
+                bar.debug_atlas_px(), rows_alone);
+    CHECK(bar.debug_atlas_px() <= rows_alone);
+    if (r.h == 1080) CHECK(bar.debug_atlas_px() < rows_alone);
+    const MaskAtlas* chosen = f.atlas(bar.debug_atlas_px());
+    REQUIRE(chosen != nullptr);
+    for (int row = 0; row < GsCompactBar::kRows; ++row)
+      CHECK(GsCompactBar::worst_row_width(*chosen, row, kMaxCards) <
+            GsCompactBar::sizing_row_width(*chosen));
   }
 }
 
@@ -873,7 +970,7 @@ TEST(more_cards_than_kMaxCards_are_truncated) {
   }
   const std::string rssi = bar.debug_field_text(s, false, GsPlayerState(),
                                                 GsBarField::kRssi);
-  CHECK(rssi == "rssi:-70/-70/-70/-70");
+  CHECK(rssi == ic("rssi:-70/-70/-70/-70"));
   Canvas c(1920, 1080);
   std::vector<DirtyRect> rects;
   bar.update(s, false, GsPlayerState(), c.s, &rects);
@@ -926,18 +1023,18 @@ TEST(low_power_tints_the_fps_cell) {
   ps.fps = 15.0;
   CHECK(bar.debug_field_rgb(s, false, ps, GsBarField::kFps) == tok::kTextPrimary);
   s.low_power = true;
-  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kFps) == "fps:15");
+  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kFps) == ic("fps:15"));
   CHECK(bar.debug_field_rgb(s, false, ps, GsBarField::kFps) == tok::kStatusCaution);
   // Row text is unchanged: the tint is colour only.
   CHECK(row_of(bar, s, false, ps, 1) ==
-        "bitrate:8.1 res:1280x720 fps:15 jit:5.2 lat:45/78 loss:0.3/0.0");
+        ic("bitrate:8.1 res:720p fps:15 jit:5.2 lat:45/78 loss:0.3/0.0"));
   // Stale sideport: low_power is the last value HEARD, not a current one,
   // while fps stays player-measured and live. The tint would claim the low
   // number is deliberate on evidence that may be arbitrarily old, so it is
   // dropped -- the cell reads as an ordinary (undimmed) player-measured
   // number until the link speaks again.
   CHECK(bar.debug_field_rgb(s, true, ps, GsBarField::kFps) == tok::kTextPrimary);
-  CHECK(bar.debug_field_text(s, true, ps, GsBarField::kFps) == "fps:15");
+  CHECK(bar.debug_field_text(s, true, ps, GsBarField::kFps) == ic("fps:15"));
 }
 
 // Drone SoC temperature (sideport drone.sys.soc_temp_c): a link-sourced
@@ -954,25 +1051,25 @@ TEST(drone_temp_reads_on_the_radio_row_and_tints_caution_from_70) {
   REQUIRE(bar.layout(1920, 1080, &err));
   GsSnapshot s = nominal();
   GsPlayerState ps = player_nominal();
-  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kTemp) == "temp:41");
+  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kTemp) == ic("temp:41"));
   CHECK(bar.debug_field_rgb(s, false, ps, GsBarField::kTemp) == tok::kTextPrimary);
   s.soc_temp_c = 69;
   CHECK(bar.debug_field_rgb(s, false, ps, GsBarField::kTemp) == tok::kTextPrimary);
   s.soc_temp_c = 70;
-  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kTemp) == "temp:70");
+  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kTemp) == ic("temp:70"));
   CHECK(bar.debug_field_rgb(s, false, ps, GsBarField::kTemp) == tok::kStatusCaution);
   s.soc_temp_c = 84;
   CHECK(bar.debug_field_rgb(s, false, ps, GsBarField::kTemp) == tok::kStatusCaution);
   // Stale: dimmed, last value held, no caution claim.
-  CHECK(bar.debug_field_text(s, true, ps, GsBarField::kTemp) == "temp:84");
+  CHECK(bar.debug_field_text(s, true, ps, GsBarField::kTemp) == ic("temp:84"));
   CHECK(bar.debug_field_rgb(s, true, ps, GsBarField::kTemp) == tok::kTextLabel);
   // Unavailable (no telemetry, older maburgs, -128 sentinel): dashes.
   s.soc_temp_c.reset();
-  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kTemp) == "temp:--");
+  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kTemp) == ic("temp:--"));
   // Clamped inside the worst case ("temp:127"): an int8 can't exceed it,
   // and a negative SoC is not a flight condition worth a wider box.
   s.soc_temp_c = -40;
-  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kTemp) == "temp:0");
+  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kTemp) == ic("temp:0"));
 }
 
 // The REC indicator draws at half the bar's type size (the nearest baked size

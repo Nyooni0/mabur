@@ -9,7 +9,7 @@
 // compact bar asks for no particular size -- it takes the largest baked
 // size whose worst-case rows fit -- so it renders from any set; this one is
 // kept because it is what the committed asset bakes, and changing it means
-// regenerating that ~13 MB file.
+// regenerating that ~15 MB file.
 //
 // This string is ALSO what generated the shipped asset: it is the --sizes
 // argument in gen_gsfont.py's "regenerating the shipped asset" recipe, and

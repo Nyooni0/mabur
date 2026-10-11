@@ -44,7 +44,7 @@ std::vector<int> scaled_sizes() {
   return v;
 }
 
-// Loaded once: the asset is ~13 MB and every test below wants the same
+// Loaded once: the asset is ~15 MB and every test below wants the same
 // mapping. GsFont is non-copyable and owns an mmap, so a function-local
 // static is both the cheapest and the only well-behaved way to share it.
 GsFont& asset() {
@@ -152,24 +152,39 @@ TEST(asset_metrics_are_sane_at_every_baked_size) {
     CHECK(a->advance_x > 0);
     CHECK(a->glyph_w > a->advance_x);       // the 4 px pad on each side
     CHECK(a->baseline > 0 && a->baseline < a->glyph_h);
-    CHECK(a->n_glyphs == 100);              // printable ASCII + gen_gsfont's 5
+    CHECK(a->n_glyphs == 112);              // ASCII + gen_gsfont's 5 + 12 icons
     std::printf("  px=%3d adv=%3d cell=%3dx%-3d baseline=%3d glyphs=%d\n", a->px,
                 a->advance_x, a->glyph_w, a->glyph_h, a->baseline, a->n_glyphs);
   }
 }
 
-// The recording dot is the one non-ASCII glyph the bar draws. A real TTF
-// missing it would render as a hole (index_of returns -1 and the blitter
-// draws nothing), so it must exist at EVERY size.
-TEST(asset_carries_the_recording_dot_at_every_size) {
+// Every glyph the bar can draw -- the item icons, the recording dot, the
+// ASCII figures -- must exist at EVERY size. A missing one renders as a
+// hole (index_of returns -1 and the blitter draws nothing) that every
+// string-level test passes. Walked off the bar's own worst-case strings, so
+// a new icon that never reached gen_gsfont.py's BAR_ICONS fails here.
+TEST(asset_carries_every_glyph_the_bar_draws_at_every_size) {
   GsFont& f = asset();
   REQUIRE(f.ok());
+  std::vector<uint32_t> cps;
+  for (int i = 0; i < (int)GsBarField::kCount; ++i)
+    for (RecTarget t : {RecTarget::kGs, RecTarget::kVtx, RecTarget::kBoth}) {
+      const std::string s = GsCompactBar::worst_case((GsBarField)i, kMaxCards, t);
+      const char* p = s.c_str();
+      while (*p) cps.push_back(utf8_next(&p));
+    }
+  for (const char* extra : {"KEY?--(h)0123456789"}) {
+    const char* p = extra;
+    while (*p) cps.push_back(utf8_next(&p));
+  }
   for (int px : scaled_sizes()) {
     const MaskAtlas* a = f.atlas(px);
     REQUIRE(a != nullptr);
-    const int gi = a->index_of(0x25CF);
-    CHECK(gi >= 0);
-    if (gi < 0) std::printf("  px=%d missing U+25CF\n", px);
+    for (uint32_t cp : cps) {
+      const int gi = a->index_of(cp);
+      if (gi < 0) std::printf("  px=%d missing U+%04X\n", px, cp);
+      CHECK(gi >= 0);
+    }
   }
 }
 
@@ -190,6 +205,25 @@ TEST(asset_layout_succeeds_at_every_resolution) {
     std::printf("  %dx%d: bar %d px, REC %d px\n", r.w, r.h, bar.debug_atlas_px(),
                 bar.debug_rec_atlas_px());
     CHECK(bar.debug_atlas_px() * 1080 >= 33 * r.h);  // >= 33 px at 1080p, scaled
+  }
+}
+
+// The sizes the operator signed off on, pinned. The bar's size comes from
+// the sizing reference row (gs_compact.h), not from its own rows, so
+// shortening an item must not move these -- and a regenerated asset whose
+// metrics shifted shows up as a changed size here rather than as a bar that
+// quietly grew on the glass.
+TEST(asset_type_size_is_the_signed_off_size_at_every_resolution) {
+  GsFont& f = asset();
+  REQUIRE(f.ok());
+  const struct { int w, h, px, rec; } want[] = {
+      {1280, 720, 25, 13}, {1920, 1080, 37, 19}, {2560, 1440, 48, 24}, {3840, 2160, 75, 37}};
+  for (const auto& w : want) {
+    GsCompactBar bar(f);
+    std::string err;
+    REQUIRE(bar.layout(w.w, w.h, &err));
+    CHECK(bar.debug_atlas_px() == w.px);
+    CHECK(bar.debug_rec_atlas_px() == w.rec);
   }
 }
 

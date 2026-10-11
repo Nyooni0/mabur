@@ -87,6 +87,9 @@ Chronological; each line names the section below that carries the detail.
 - 2026-10-11 — the `essential` (four-corner) GS OSD style is removed along
   with `osd.gs.style`: a burned DVR from before may show either layout
   (whichever the config picked), one from after shows only the compact bar.
+  The same day the bar's text labels (`ch:`, `rssi:`, …) become icons and
+  `res:1280x720` becomes `720p` — a display change only, at the same type
+  size; the figures themselves are unchanged.
 
 ## 2026-09-23 — `link.pre_fec_loss` scale break, twice
 
