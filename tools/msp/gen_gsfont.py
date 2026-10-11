@@ -61,13 +61,12 @@ SHADOW_ALPHA = 0.92
 SHADOW_DY = 1
 DEFAULT_SIZES = [19, 21, 22, 24, 26, 34, 38, 56]
 
-# Printable ASCII plus the five non-ASCII glyphs the design uses:
-# U+2014 EM DASH (the "——" pair that renders a never-received value --
-# gs_overlay.h's kEmDashPair), U+2212 MINUS SIGN (a true minus, not a
-# hyphen), U+2192 RIGHTWARDS ARROW, U+25CF BLACK CIRCLE (the recording dot)
-# and U+25CB WHITE CIRCLE -- the latter no longer drawn by anything since
-# the armed REC field went blank, but kept baked so the committed asset
-# needn't be regenerated for a glyph that costs a few hundred bytes.
+# Printable ASCII plus five non-ASCII glyphs: U+25CF BLACK CIRCLE (the
+# recording dot, gs_layer.h's kDotFilled) is the only one the OSD draws.
+# U+2014 EM DASH, U+2212 MINUS SIGN, U+2192 RIGHTWARDS ARROW and U+25CB
+# WHITE CIRCLE are drawn by nothing -- the plain-ASCII compact bar renders
+# "--" and "-" instead -- but stay baked so the committed asset needn't be
+# regenerated for glyphs that cost a few hundred bytes each.
 #
 # U+2014 was once missing from this list and the omission was invisible: draw_text advances the pen for a codepoint the atlas lacks, so
 # "——" rendered as correctly-sized EMPTY SPACE. Every test passed, because
@@ -75,7 +74,7 @@ DEFAULT_SIZES = [19, 21, 22, 24, 26, 34, 38, 56]
 # that had never been heard would have shown a blank where the design calls
 # for a dash pair -- absence reading as nothing rather than as absence,
 # which is precisely what the design's "never substitute zero" rule exists
-# to prevent. Any new glyph gs_overlay.h names must be added here too.
+# to prevent. Any non-ASCII glyph the OSD draws must be added here too.
 SUBSET = [c for c in range(0x20, 0x7F)] + [0x2014, 0x2212, 0x2192, 0x25CF, 0x25CB]
 
 

@@ -9,11 +9,10 @@
 namespace maburplay {
 namespace {
 
-// Design geometry at 1080p. Deliberately tighter than the essential
-// overlay's 96/54 safe inset: that inset reserves the corners a broadcast
-// safe area would clip, and this line is a single strip along the bottom
-// whose whole point is to fit the most figures at the largest readable
-// size. 32/24 still clears the panel bezel on the GS's own display.
+// Design geometry at 1080p. Deliberately tighter than a broadcast safe
+// area: this line is a single strip along the bottom whose whole point is
+// to fit the most figures at the largest readable size. 32/24 still clears
+// the panel bezel on the GS's own display.
 constexpr int kInsetX = 32, kInsetY = 24;
 
 // The eleven items, in draw order, and the row each one lands on. This IS
@@ -83,8 +82,8 @@ int item_gap(const MaskAtlas* a) {
   return std::max(a->advance_x, (a->glyph_w - a->advance_x) + 2);
 }
 
-// Plain ASCII integer, hyphen-minus for negatives. NOT fmt_signed_int: its
-// U+2212 is a typographic refinement this line does without, and the ASCII
+// Plain ASCII integer, hyphen-minus for negatives. Not U+2212: a true
+// minus is a typographic refinement this line does without, and the ASCII
 // form is a character narrower.
 std::string ascii_int(double v) { return fmt_int(v); }
 
@@ -151,8 +150,7 @@ std::string GsCompactBar::worst_case(GsBarField id, int n_cards,
     // Sized on rec_worst(target) (gs_layer.h): the widest REC text this
     // dvr.target can produce -- "● REC FAULT" for "gs", as it always was.
     // Armed renders nothing and leaves the box blank -- the same
-    // fixed-width reservation every other item makes, and the same thing
-    // the essential overlay does.
+    // fixed-width reservation every other item makes.
     case GsBarField::kRec:     return rec_worst(rec_target);
     case GsBarField::kCount:   break;
   }
@@ -182,9 +180,9 @@ bool GsCompactBar::layout(int screen_w, int screen_h, std::string* err) {
   atlas_ = nullptr;
   for (Field& f : fields_) f = Field{};
   bounds_ = DirtyRect{0, 0, 0, 0};
-  // Same reason as GsOverlay's: a re-layout must force the next update()
-  // to reconcile the card count again, even if it reports what it did
-  // before this layout() threw the boxes away.
+  // A re-layout must force the next update() to reconcile the card count
+  // again, even if it reports what it did before this layout() threw the
+  // boxes away: a stale n_cards_ would make that reconciliation a no-op.
   n_cards_ = -1;
 
   if (screen_w <= 0 || screen_h <= 0) {
@@ -196,9 +194,8 @@ bool GsCompactBar::layout(int screen_w, int screen_h, std::string* err) {
   const int inset_y = (int)(kInsetY * scale + 0.5);
   const int avail_w = screen_w - 2 * inset_x;
 
-  // Largest baked size whose WORST-CASE rows both fit. Unlike the essential
-  // overlay this asks for no particular design size: the bar has one type
-  // size and its only constraints are the width of its widest row and the
+  // Largest baked size whose WORST-CASE rows both fit. This asks for no
+  // particular design size: the bar has one type size and its only constraints are the width of its widest row and the
   // height of the stack, so "the biggest that fits" is the whole rule --
   // and it is what makes the bar render at a readable size on a 720p panel
   // and a bigger one on a 4K panel without a per-resolution table.
@@ -231,8 +228,7 @@ bool GsCompactBar::layout(int screen_w, int screen_h, std::string* err) {
   // rise by that much for the BOX -- shadow pad included -- to clear the
   // bottom inset. Rows stack by a full glyph_h plus a margin: a shorter
   // pitch would have row 0's padded box overlap row 1's, and an overlap is
-  // one row's clear erasing the other's ink (the mistake gs_overlay.cpp
-  // documents at kRung's placement).
+  // one row's clear erasing the other's ink.
   const int row_pitch = best->glyph_h + (int)(kRowGap * scale + 0.5);
   baseline_y_[kRows - 1] = screen_h - inset_y - (best->glyph_h - best->baseline);
   for (int row = kRows - 2; row >= 0; --row)
@@ -409,8 +405,7 @@ GsCompactBar::FieldState GsCompactBar::state_of_(const GsSnapshot& snap,
       st.text = "jit:" + fmt_one_dp(std::clamp(ps.jitter_ms, 0.0, 999.9));
       break;
     case GsBarField::kLat:
-      // p50 then p99, the same order the essential overlay stacks them in.
-      // No ~ marker for the relative case: this line has no room for a
+      // p50 then p99. No ~ marker for the relative case: this line has no room for a
       // qualifier, and lat_valid already gates the only state where the
       // number would be a fabrication.
       st.text = ps.lat_valid
@@ -432,9 +427,8 @@ GsCompactBar::FieldState GsCompactBar::state_of_(const GsSnapshot& snap,
                      : "--";
       break;
     case GsBarField::kRec: {
-      // Byte-for-byte the essential overlay's kRec, deliberately: one
-      // aircraft, one recording indicator. Never dimmed -- the recorder is
-      // the player's own business and says nothing about the link.
+      // Never dimmed -- the recorder is the player's own business and says
+      // nothing about the link.
       const RecText t = rec_text(ps.rec);
       st.text = t.text;
       st.rgb = t.rgb;
@@ -471,9 +465,11 @@ void GsCompactBar::draw_field_(GsBarField id, const FieldState& st,
   int pen_x = f.pen_x;
   if (id == GsBarField::kRec) {
     // kRec's box is sized to rec_worst(target) (gs_layer.h), wider than most
-    // of what rec_text() actually returns -- see the essential overlay's
-    // draw_field_ for the full reasoning. Right-align within the box so a
-    // GS-only "REC mm:ss"/"REC FAULT" lands exactly where it always did.
+    // of what rec_text() actually returns -- a GS-only "REC mm:ss"/"REC
+    // FAULT" must land exactly where it always did, not wherever the widest
+    // VTX+GS fault combo would start. Right-align within the box: the pad on
+    // both sides is symmetric, so box_right - pad - text_width mirrors
+    // layout()'s box_left + pad.
     const int pad = (a->glyph_w - a->advance_x) / 2;
     pen_x = f.box.x + f.box.w - pad - text_width(*a, st.text.c_str());
   }

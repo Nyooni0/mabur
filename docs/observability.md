@@ -117,10 +117,10 @@ drone's half-duplex TX, so `ms` inflates under saturation (an honest
 congestion signal, not PHY RTT), and the offset's residual error is the
 up/down asymmetry of the best samples, ±1–2 ms class. On the player OSD the
 offset (combined with the player's OWN anchor) folds the floor into the
-latency headline, which carries a `~` prefix in the essential overlay while
-its e2e is still relative (estimator cold, or sync lost at range: the floor
-freezes at last-good and drifts ~1 ms/min of outage). What the absolute
-figure still excludes: sensor exposure/readout before the pts stamp and
+`lat:` figures, which carry no marker while their e2e is still relative
+(estimator cold, or sync lost at range: the floor freezes at last-good and
+drifts ~1 ms/min of outage) — the cell has no room for a qualifier. What
+the absolute figure still excludes: sensor exposure/readout before the pts stamp and
 everything past scanout start (HDMI + display processing) — see
 `docs/findings/2026-08-31-latency-budget.md`.
 
@@ -586,10 +586,7 @@ cannot disagree — if the OSD shows something surprising, the answer is in
 `flight.jsonl`. Config is `[osd.gs]` in `/etc/maburplay.toml` (`enable`,
 code default false, bundle true; `stale_ms` dims every link-derived field
 after silence; fps/jitter/bitrate/REC are player-measured and never dim).
-`osd.gs.style` picks the layout; exactly one renders, and an unrecognised
-value fails the config load.
-
-**`"compact"` (the shipped default)** — two plain-text rows along the
+There is one layout, the compact bar — two plain-text rows along the
 bottom edge, radio above and picture below, with the REC indicator alone in
 the top-right corner (`gs/player/src/gs_compact.cpp`):
 
@@ -604,13 +601,18 @@ No meters or bars, one type size for both rows. `ch` comes from the
 sideport's `link.channel` (what the RECEIVER is tuned to) and carries an
 `(a)` (auto-selected) or `(h)` (hopped) suffix; `mcs` is mcs/width; `temp`
 is `drone.sys.soc_temp_c` (`temp:--` while unavailable); `lat` is
-p50/p99 and reads `--/--` while the latency anchor is cold. Two colour
+p50/p99 and reads `--/--` while the latency anchor is cold — each is ONE
+REAL FRAME from the last 1 s window, ranked by e2e, and the pair is read
+together because p99 alone is a tail statistic that gets misread as typical
+(`docs/findings/2026-08-31-dq-spike.md` §20); the per-segment breakdown is
+not on the glass (the `lat:` line, `lat.log` and `flightreport.py` carry
+it). Two colour
 exceptions, both single-threshold: the `fps` cell turns caution while
 `drone.low_power` is set, and `temp` turns caution from 70 °C; both tints
-drop while the sideport is stale. The REC indicator matches the essential
-overlay's (red dot, `REC`, mm:ss clock, `REC FAULT` in amber), with a VTX
-leg sized by `dvr.target` (`docs/vtx-recorder.md`); it sits in the corner
-because in a row it would cost the bar type size and shift that row
+drop while the sideport is stale. The REC indicator is a red dot, `REC`
+and an mm:ss clock (`REC FAULT` in amber), with a VTX leg sized by
+`dvr.target` (`docs/vtx-recorder.md`); armed draws nothing. It sits in the
+corner because in a row it would cost the bar type size and shift that row
 whenever the recorder was merely armed.
 
 Every item sits in a box sized for its WORST-CASE string, so the gaps
@@ -622,25 +624,14 @@ eleven items on one line would cap the type too small to read on the GS
 screen. Row 0 (radio) is the wider one, so moving an item between rows
 changes the size the whole bar renders at.
 
-**`"essential"`** — the four-corner layout with the signal bars, the
-airtime meter and the status hues; its latency block is two rows, `LAT P50
-<n> ms` and `LAT P99 <n> ms`, right-flushed under an `RTT <n> ms` row. Each
-is ONE REAL FRAME from the last 1 s window, ranked by e2e, and each carries
-a `~` prefix while its e2e is still relative. Read them together: `P99`
-alone is a tail statistic among averages and gets misread as typical
-(`docs/findings/2026-08-31-dq-spike.md` §20). `RTT` is two-way control time
-(`link.rtt`), never part of the e2e sum. The per-segment breakdown is not
-on the glass: the `lat:` line, `lat.log` and `flightreport.py` carry it.
-
 The glyph atlas is `/usr/local/share/mabur/gs_osd.gfont`, committed and
 staged by `tools/build-arm64.sh` — if it is missing, maburplay logs the
 reason and runs with the MSP overlay only. Host-side you can see the actual
 pixels without hardware: `maburplay --gs-render` dumps a rendered frame
-(`--style compact|essential`, plus `--res WxH` and `--lat P50/P99` for the
-bar's player-measured fields; both styles are pixel-gated in
-`tests/integration/run_player_e2e.sh` PARTS D and E),
+(`--res WxH` and `--lat P50/P99` set the bar's player-measured fields; the
+render is pixel-gated in `tests/integration/run_player_e2e.sh` PART D),
 `tests/test_gs_asset.cpp` gates the real asset's layout at
-720p/1080p/1440p/2160p, and `tools/bench/gs_overlay_bench.cpp` measures
+720p/1080p/1440p/2160p, and `tools/bench/gs_osd_bench.cpp` measures
 draw+quantize per update at 1080p and 2160p. Read that bench before
 changing anything on this path: it runs on the 2 ms pump loop, and the rule
 of thumb is that anything projecting past ~1.5 ms on the A55 is a defect. A

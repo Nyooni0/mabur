@@ -40,8 +40,8 @@ def main():
     for s in sizes:
         # Codepoints ascending and unique -- GsFont binary-searches them.
         assert list(s["cps"]) == sorted(set(s["cps"])), s["cps"][:8]
-        # The subset the overlay needs. Every non-ASCII codepoint named in
-        # gs_overlay.h belongs here -- U+2014 was missing from SUBSET for a
+        # The subset gen_gsfont.py bakes. Every non-ASCII codepoint the OSD
+        # draws belongs here -- U+2014 was missing from SUBSET for a
         # while and nothing noticed, because draw_text advances the pen for
         # a glyph the atlas lacks, so the never-received "——" rendered as
         # empty space of exactly the right width.

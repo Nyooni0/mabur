@@ -27,7 +27,6 @@
 #include "gs_font.h"
 #include "gs_metrics.h"
 #include "gs_layer.h"
-#include "gs_overlay.h"
 #include "osd_compose.h"
 #include "gs_source.h"
 #include "mabur/hevc_params.h"
@@ -106,7 +105,6 @@ void usage() {
                "            is the host e2e's OSD pixel-path gate.)\n"
                "       maburplay --gs-render <snap.json> --out-gs <out.bin>\n"
                "                 [--gsfont F] [--screen WxH] [--stale]\n"
-               "                 [--style compact|essential]\n"
                "                 [--rec recording|armed|fault] "
                "[--rec-elapsed N]\n"
                "                 [--fps N] [--jit N] [--mbps N] [--res WxH]\n"
@@ -271,14 +269,14 @@ int run_osd_render(const std::string& snap_path, const std::string& out_path,
 }
 
 // Test support (see usage()): renders one sideport snapshot through the
-// exact GsFont/GsOverlay/gs_draw path the live overlay uses and dumps the
+// exact GsFont/GsCompactBar/gs_draw path the live overlay uses and dumps the
 // ARGB surface. No ring, no backend, no DRM -- the DRM half of the overlay
 // cannot run off-hardware, so this is the host-side gate for everything
 // below it (layout arithmetic, thresholds, formatting, the mask blitter).
 // Dump format is byte-identical to --osd-render's.
 int run_gs_render(const std::string& snap_path, const std::string& out_path,
                   const std::string& font_path, int width, int height, bool stale,
-                  const maburplay::GsPlayerState& ps, maburplay::GsStyle style) {
+                  const maburplay::GsPlayerState& ps) {
   const std::vector<uint8_t> snap = read_whole_file(snap_path);
   if (snap.empty()) {
     std::fprintf(stderr, "maburplay: --gs-render: cannot read %s\n", snap_path.c_str());
@@ -297,7 +295,7 @@ int run_gs_render(const std::string& snap_path, const std::string& out_path,
                  snap_path.c_str());
     return 2;
   }
-  std::unique_ptr<maburplay::GsLayer> ovp = maburplay::make_gs_layer(style, font);
+  std::unique_ptr<maburplay::GsLayer> ovp = maburplay::make_gs_layer(font);
   maburplay::GsLayer& ov = *ovp;
   if (!ov.layout(width, height, &err)) {
     std::fprintf(stderr, "maburplay: --gs-render: %s\n", err.c_str());
@@ -389,7 +387,6 @@ int main(int argc, char** argv) {
     std::string font = maburplay::Config().osd.gs.font;
     int w = 1920, h = 1080;
     bool stale = false;
-    maburplay::GsStyle style = maburplay::GsStyle::kCompact;
     maburplay::GsPlayerState ps;
     for (int i = 2; i < argc; ++i) {
       const std::string a = argv[i];
@@ -404,11 +401,6 @@ int main(int argc, char** argv) {
         }
       } else if (a == "--stale") {
         stale = true;
-      } else if (a == "--style" && i + 1 < argc) {
-        if (!maburplay::parse_gs_style(argv[++i], &style)) {
-          usage();
-          return 2;
-        }
       } else if (a == "--res" && i + 1 < argc) {
         if (std::sscanf(argv[++i], "%dx%d", &ps.vid_w, &ps.vid_h) != 2) {
           usage();
@@ -455,7 +447,7 @@ int main(int argc, char** argv) {
       usage();
       return 2;
     }
-    return run_gs_render(snap, out, font, w, h, stale, ps, style);
+    return run_gs_render(snap, out, font, w, h, stale, ps);
   }
 
   std::string config_path = "/etc/maburplay.toml";
@@ -597,10 +589,6 @@ int main(int argc, char** argv) {
   // wiring: sources, fonts, and the decision to invoke it.
   maburplay::OsdComposer composer;
   bool want_gs_osd = false;
-  // Validated at config load (player_config.cpp fails an unknown value), so
-  // this cannot pick a layout the operator did not ask for.
-  maburplay::GsStyle gs_style = maburplay::GsStyle::kCompact;
-  maburplay::parse_gs_style(cfg.osd.gs.style, &gs_style);
   if (cfg.osd.gs.enable && !decode_only) {
     std::string err;
     if (!gs_font.load(cfg.osd.gs.font, &err)) {
@@ -824,14 +812,12 @@ int main(int argc, char** argv) {
       // parse_rec_target would.
       maburplay::RecTarget rec_target = maburplay::RecTarget::kGs;
       maburplay::parse_rec_target(cfg.dvr.target, &rec_target);
-      composer.set_gs(maburplay::make_gs_layer(gs_style, gs_font, rec_target),
-                      maburplay::make_gs_layer(gs_style, gs_font, rec_target),
-                      maburplay::make_gs_layer(gs_style, gs_font, rec_target));
+      composer.set_gs(maburplay::make_gs_layer(gs_font, rec_target),
+                      maburplay::make_gs_layer(gs_font, rec_target),
+                      maburplay::make_gs_layer(gs_font, rec_target));
       std::fprintf(stderr,
-                   "maburplay: gs osd on udp 127.0.0.1:%d font=%s style=%s "
-                   "stale_ms=%d\n",
-                   gs_src->port(), cfg.osd.gs.font.c_str(),
-                   cfg.osd.gs.style.c_str(), cfg.osd.gs.stale_ms);
+                   "maburplay: gs osd on udp 127.0.0.1:%d font=%s stale_ms=%d\n",
+                   gs_src->port(), cfg.osd.gs.font.c_str(), cfg.osd.gs.stale_ms);
     }
   }
 
@@ -1516,7 +1502,7 @@ int main(int argc, char** argv) {
 #endif
     backend->poll();
     // One ioctl per iteration (~500/s, microseconds each) -- far under the
-    // ~1.5 ms budget tools/bench/gs_overlay_bench.cpp polices for this loop.
+    // ~1.5 ms budget tools/bench/gs_osd_bench.cpp polices for this loop.
     if ((rec_button.is_open() && rec_button.poll(mono_ms())) || g_rec_toggle.exchange(false)) {
       if (rec_on) {
         rec_stop();

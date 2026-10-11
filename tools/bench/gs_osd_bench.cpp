@@ -1,6 +1,6 @@
-// gs_overlay_bench -- the measured gate on GS link-status overlay cost.
+// gs_osd_bench -- the measured gate on GS link-status OSD cost.
 //
-// GsOverlay::update() runs on maburplay's main loop: the same loop that pumps
+// GsCompactBar::update() runs on maburplay's main loop: the same loop that pumps
 // the AU ring and reaps DRM flip events every 2 ms. Whatever it draws is then
 // re-quantized for the burned DVR by quantize_rects(), also inline. So the
 // number that matters is not "how fast does the overlay draw" but
@@ -20,8 +20,8 @@
 // Deliberately NOT a ctest: it is a wall-clock measurement, so it is neither
 // fast nor deterministic. Build and run it by hand:
 //   nix-shell -p pkg-config libusb1 --run \
-//     "cmake --build build -j$(nproc) --target gs_overlay_bench"
-//   ./build/tests/gs_overlay_bench [--screen 1920x1080]
+//     "cmake --build build -j$(nproc) --target gs_osd_bench"
+//   ./build/tests/gs_osd_bench [--screen 1920x1080]
 //
 // Runs against the SHIPPED asset (gs/player/bundle/gs_osd.gfont), not a
 // synthetic one: real JetBrains Mono glyph boxes are what the target pays
@@ -35,7 +35,7 @@
 #include <vector>
 
 #include "gs_font.h"
-#include "gs_overlay.h"
+#include "gs_compact.h"
 #include "gs_snapshot.h"
 #include "osd_font.h"
 #include "osd_palette.h"
@@ -47,7 +47,10 @@ namespace {
 
 GsSnapshot nominal() {
   GsSnapshot s;
+  s.channel = 149;
   s.mcs = 5;
+  s.bw = 20;
+  s.soc_temp_c = 41;
   s.fec_pct = 25.0;
   s.air_pct = 61.0;
   s.pre_loss_pct = 2.1;
@@ -65,6 +68,11 @@ GsPlayerState player_nominal() {
   p.mbps = 24.6;
   p.rec.kind = RecState::Kind::kRecording;
   p.rec.elapsed_s = 767;
+  p.vid_w = 1280;
+  p.vid_h = 720;
+  p.lat_valid = true;
+  p.lat_p50_e2e_ms = 45;
+  p.lat_e2e_ms = 78;
   return p;
 }
 
@@ -93,9 +101,9 @@ int measure(GsFont& gf, const OsdPalette& pal, int w, int h, int msp_glyph_w,
   std::vector<uint32_t> px((size_t)w * (size_t)h, 0u);
   Surface s{px.data(), w, h, w};
 
-  GsOverlay ov(gf);
+  GsCompactBar ov(gf);
   if (!ov.layout(w, h, &err)) {
-    std::fprintf(stderr, "gs_overlay_bench: layout failed at %dx%d: %s\n", w, h, err.c_str());
+    std::fprintf(stderr, "gs_osd_bench: layout failed at %dx%d: %s\n", w, h, err.c_str());
     return 2;
   }
 
@@ -170,7 +178,7 @@ int measure(GsFont& gf, const OsdPalette& pal, int w, int h, int msp_glyph_w,
   }
 
   // --- Case 3: the recurring shape of the worst case. The MSP rasterizer
-  // repaints over the GS corners, and every GS field its rects touch has to
+  // repaints over the GS bar, and every GS field its rects touch has to
   // be redrawn so GS pixels win the collision. An MSP full-surface rect (a
   // first draw, a stale blank, a screen-size change) reclaims EVERY field --
   // which is the same work as case 2, but triggered by the MSP layer's
@@ -195,7 +203,7 @@ int measure(GsFont& gf, const OsdPalette& pal, int w, int h, int msp_glyph_w,
   // path whenever both overlays are on, not an edge case. Before scoping,
   // ANY such cell cost the case-2 figure above.
   {
-    const DirtyRect box = ov.debug_field_box(GsFieldId::kCard0Rssi);
+    const DirtyRect box = ov.debug_field_box(GsBarField::kRssi);
     const int cw = msp_glyph_w > 0 ? msp_glyph_w : 36;
     const int ch = msp_glyph_h > 0 ? msp_glyph_h : 54;
     const DirtyRect cell{box.x + 2, box.y + 2, cw, ch};
@@ -228,7 +236,7 @@ int main(int argc, char** argv) {
     else if (a == "--font" && i + 1 < argc) mspfont = argv[++i];
     else if (a == "--screen" && i + 1 < argc) std::sscanf(argv[++i], "%dx%d", &w, &h);
     else {
-      std::fprintf(stderr, "usage: gs_overlay_bench [--gs-font F] [--font F] [--screen WxH]\n");
+      std::fprintf(stderr, "usage: gs_osd_bench [--gs-font F] [--font F] [--screen WxH]\n");
       return 2;
     }
   }
@@ -236,7 +244,7 @@ int main(int argc, char** argv) {
   GsFont gf;
   std::string err;
   if (!gf.load(gsfont, &err)) {
-    std::fprintf(stderr, "gs_overlay_bench: %s\n", err.c_str());
+    std::fprintf(stderr, "gs_osd_bench: %s\n", err.c_str());
     return 2;
   }
 
@@ -253,7 +261,7 @@ int main(int argc, char** argv) {
   const int gw = have_msp ? mf.native().glyph_w : 0;
   const int gh = have_msp ? mf.native().glyph_h : 0;
 
-  std::printf("gs_overlay_bench: real JetBrains Mono asset %s (%d sizes), palette n=%d%s\n",
+  std::printf("gs_osd_bench: real JetBrains Mono asset %s (%d sizes), palette n=%d%s\n",
               gsfont.c_str(), gf.n_sizes(), pal.n,
               have_msp ? "" : " (NO MSP atlas -- seeds only)");
 

@@ -13,7 +13,7 @@ namespace maburplay {
 class GsFont;
 struct MaskAtlas;
 
-// osd.gs.style = "compact": two plain-text rows along the bottom edge.
+// The GS link-status OSD: two plain-text rows along the bottom edge.
 //
 //                                                   ● REC 12:47   <- top right
 //   ...
@@ -46,27 +46,18 @@ struct MaskAtlas;
 // exists to prevent. The player-measured items never dim -- they are
 // current by construction.
 //
-// The second is the RECORDING indicator, which is deliberately IDENTICAL
-// to the essential overlay's: a tok::kStatusRec dot, "REC" and an mm:ss
-// clock, or "REC FAULT" in tok::kStatusCaution. Same reasoning as
-// gs_overlay.h gives for the dot -- recording is a mode, not a status, and
-// a white dot does not read as recording -- plus the stronger one that a
-// pilot must not have to learn two recording indicators for one aircraft.
-// Armed draws nothing at all, exactly as it does there -- and, unlike
-// there, is not even reserved: a blank box inside a CENTRED row drags the
-// whole row 166 px off centre at 1080p for the entire flight, since armed
-// is the normal state. So the REC box appears and disappears with the
-// recorder, and row 0 re-centres when it does. That is a second thing
-// (besides the card count) that reflows the line, but it is a deliberate
-// button press rather than a cadence, and it takes the same erase-then-
-// re-place path.
+// The second is the RECORDING indicator: a tok::kStatusRec dot, "REC" and
+// an mm:ss clock, or "REC FAULT" in tok::kStatusCaution. The dot gets its
+// own hue because recording is a mode, not a status, and a white dot does
+// not read as recording. Armed draws nothing at all.
 //
-// It sits at the end of ROW 0 rather than with the other player-measured
-// items on row 1 for a purely mechanical reason: row 1 is the wider row
-// and therefore the one that sets the type size (see kRow in the .cpp), so
-// putting REC there would cost a size step -- 38 px to 34 at 1080p. On row
-// 0 it is free. That also happens to match where the essential layout puts
-// it, in the link block rather than the video one.
+// It sits alone in the top-right corner, at half the bar's type size,
+// rather than in either row for a purely mechanical reason: a row's width
+// sets the type size the whole bar renders at (see kRow in the .cpp), so
+// an item in a row costs every other figure a size step, and a box blank
+// for the whole flight (armed is the normal state) inside a CENTRED row
+// would drag that row off centre. Anchored in the corner it costs the bar
+// nothing and never moves when the recorder starts or stops.
 //
 // The third is low-power (pre-arm) mode: while
 // snap.low_power is set, the fps cell -- the one player-measured item
@@ -83,16 +74,19 @@ struct MaskAtlas;
 // The glyph mask's baked drop shadow stays. It is part of the glyph, not
 // styling: without it the line is unreadable over bright video.
 //
-// Same per-field dirty discipline as GsOverlay, and for the same reason --
-// see the budget paragraph in gs_overlay.h. Measured against the real asset
-// with four cards and a live REC, a FULL repaint is 199,715 px at 1080p and
-// 727,466 at 2160p: within ~12% of the four-corner layout's own 179,392 /
-// 649,429, i.e. the same ~3.7 ms and ~9.9 ms projected on the A55, both
-// past the 2 ms pump period. The two rows did not make this cheaper by
-// being simpler -- bigger type over two rows covers about the same ink --
-// so the rule is unchanged: a full repaint is a startup/re-layout event and
-// must never land on a cadence. A typical second redraws the one or two
-// items whose text moved, ~17 k px each at 1080p.
+// Dirty tracking is per FIELD: each item has a box sized at layout() from
+// its worst-case string, so a value change never reflows a row and a
+// typical second redraws only the one or two items whose text moved,
+// ~12 k px each at 1080p. That margin is load-bearing, not tidy: update()
+// runs on maburplay's 2 ms pump loop. Measured against the real asset with
+// four cards and a live REC (tools/bench/gs_osd_bench.cpp), a FULL repaint
+// is 194,974 px at 1080p and 729,568 at 2160p -- ~4.6 ms and ~13.7 ms of
+// draw + quantize projected on the A55, both past the pump period. So a full repaint is a
+// startup/re-layout event and must never land on a cadence; do not add a
+// caller that restates every field on a timer. (What that costs when it
+// happens is flip-reap latency, not a dropped AU: ring.pump(2) is a poll()
+// ceiling and the shm ring is slotted. And the quantize half is
+// burned-DVR-only.)
 // The order here is the draw order and the index into the shadow array.
 // Which ROW each item lands on is kRow in the .cpp, not this enum.
 enum class GsBarField {
@@ -137,7 +131,7 @@ class GsCompactBar final : public GsLayer {
 
   int field_count() const { return (int)GsBarField::kCount; }
 
-  // Test hooks, mirroring GsOverlay's. `debug_field_text` formats without
+  // Test hooks. `debug_field_text` formats without
   // drawing; `debug_field_box` is what the no-overflow tests measure text
   // against; `debug_atlas_px` is the size layout() resolved, 0 before it
   // has run.
@@ -186,8 +180,7 @@ class GsCompactBar final : public GsLayer {
     std::string text;
     uint32_t rgb = 0;
     // 1 = paint the leading glyph in tok::kStatusRec (the recording dot),
-    // -1 = unused. One field, two colours, same as GsOverlay's kRec: they
-    // change together, so splitting them would double the dirty rects for
+    // -1 = unused. One field, two colours: they change together, so splitting them would double the dirty rects for
     // nothing.
     int aux = -1;
     bool operator==(const FieldState&) const = default;

@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <optional>
 
-#include "gs_overlay.h"  // RecState
+#include "gs_layer.h"  // RecState
 
 namespace maburplay {
 
