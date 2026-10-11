@@ -343,7 +343,7 @@ void RcAgent::reapply_with_shed() {
 //    dropped when the RCF lands; deferring the shed lets the encoder flood
 //    a smaller pipe and TxQueue drop-oldest kills whole FEC bodies — a
 //    multi-rung demote cascade under a gated shed is the 2026-08-09
-//    freeze-crash (docs/shed-lag-findings-2026-08-09.md).
+//    freeze-crash (docs/findings/2026-08-09-shed-lag.md).
 //  - force=false, non-decrease (steady-state LINKED RCFs): the call is
 //    throttled to at most once per 1000ms, so repeated RCFs within one
 //    second collapse to a single call (scenario: bitrate hysteresis) and a
@@ -410,7 +410,7 @@ void RcAgent::run_bitrate_policy(uint64_t now_ms, bool force) {
   // per-width air_clock.efficiency_20/_40, so airtime_budget is a fraction
   // of what the link actually moves. Priced off nominal until 2026-09-17,
   // which is why budget 0.6 sat at ~99 % of real mcs2 capacity and spiked
-  // (docs/bandwidth-sweep-findings-2026-09-17.md).
+  // (docs/findings/2026-09-17-bandwidth-sweep.md).
   const double rate_b = delivered_mbps(applied_.ladder[0], cfg_.air_clock);
   // The probe stream has its own slot and is deliberately NOT a term here
   // — a probe costs zero encoder writes.

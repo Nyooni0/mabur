@@ -454,7 +454,7 @@ detail, updated for this feature.
   line: `scanlog 5 channels=<c1,c2,...> mode=<auto|pinned>
   dwell_ms=<n> min_rounds=<n> cards=<n>`. `C`/`D`/`K` record shapes are
   unchanged from `scanlog 4` (`docs/bw40.md`,
-  `docs/nhm-airtime-spike-findings-2026-09-25.md`). `M` loses the
+  `docs/findings/2026-09-25-nhm-airtime-spike.md`). `M` loses the
   `split_home`/`reunite` reasons — there is nothing to split from or
   reunite to any more — and keeps `commit`/`ack_override` plus the
   in-flight hop's `hop_lead`/`hop_follow`/`hop_withdraw`/`hop_one_card`.
@@ -572,7 +572,7 @@ drops 144 from its own set by hand; the scan has no way to ask the relay).
 ## History
 
 The material below is retained from the 2026-09-13 design
-(`docs/channel-scan-findings-2026-09-13.md`) because it explains why every
+(`docs/findings/2026-09-13-channel-scan.md`) because it explains why every
 scout dwell is silent and why the ranker subtracts a leak term — both
 still true, under the new no-home scheduler, exactly as they were under
 the old boot-only one.

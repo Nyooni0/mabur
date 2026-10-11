@@ -1,7 +1,7 @@
 # TX/RX timing: who transmits when, and what actually coordinates it
 
 Written 2026-09-05 after the probe-blanking fix
-(`docs/probe-blanking-fix-findings-2026-09-05.md`), because the question
+(`docs/findings/2026-09-05-probe-blanking-fix.md`), because the question
 "does mabur orchestrate the half-duplex radio?" kept coming up with the
 answer spread across six findings docs. This page is the holistic view;
 each claim points at where it was measured. Numbers marked *bench* are
@@ -16,13 +16,13 @@ agg 6, two GS cards) unless stated otherwise.
   sending the uplink.
 - **Carrier sense is ON on both daemons** (since 2026-09-23,
   `dev_cfg.tuning.disable_cca = false` in `drone/src/main.cpp` and
-  `gs/src/radio_frontend.cpp`; `docs/cca-on-findings-2026-09-23.md`).
+  `gs/src/radio_frontend.cpp`; `docs/findings/2026-09-23-cca-on.md`).
   Each radio defers to any decodable 802.11 preamble — the other end's
   and anyone else's — then AIFS + backoff. From 2026-08-05 to 2026-09-23
   both were OFF: neither deferred, and the only thing the chip did on its
   own was refuse to *start* a TX while an RX PPDU was in progress, firing
   the moment that PPDU ended
-  (`docs/gs-uplink-self-blanking-findings-2026-09-02.md` "Mechanism").
+  (`docs/findings/2026-09-02-gs-uplink-self-blanking.md` "Mechanism").
   That era's self-collision (next bullet) is gone with carrier sense on:
   measured 137 → 23 both-card holes per 97 s, 0 FEC repairs.
 - **A GS send blinds both GS cards** for ~180 µs: the transmitting card
@@ -31,7 +31,7 @@ agg 6, two GS cards) unless stated otherwise.
   cards, whole (one A-MPDU aggregate). Same doc, evidence 4–6.
 - **A drone burst deafens the drone** for its whole duration. An RCF
   that lands inside a burst is gone; delivery to the drone tracks
-  `1 − air_pct` (`docs/rcf-uplink-loss-findings-2026-08-14.md` §3).
+  `1 − air_pct` (`docs/findings/2026-08-14-rcf-uplink-loss.md` §3).
 - **The two clocks free-run.** The drone's sensor/encoder cadence and the
   GS's `feedback_ms` timer are independent oscillators. Nothing in mabur
   syncs them (no TSF exchange, no beacon-derived schedule).
@@ -58,7 +58,7 @@ GS → drone (the uplink, low duty cycle, but every send is a blast):
 | what | cadence | notes |
 |---|---|---|
 | RCF (rate-control feedback) | every `feedback_ms` (default 100; bench 50) → 10–20/s | ~20–27 B at HT MCS0, ~180 µs incl. preamble |
-| ~~RCF repeat burst~~ | REMOVED 2026-09-05 (was 3 copies 10 ms apart on an op-changing RCF) | the slotter batched the copies into one release, killing the next aggregate on both cards on 25–33 % of rung changes; single sends reach the drone ~90 % of the time — `docs/switch-loss-findings-2026-09-05.md` |
+| ~~RCF repeat burst~~ | REMOVED 2026-09-05 (was 3 copies 10 ms apart on an op-changing RCF) | the slotter batched the copies into one release, killing the next aggregate on both cards on 25–33 % of rung changes; single sends reach the drone ~90 % of the time — `docs/findings/2026-09-05-switch-loss.md` |
 | DISC keepalive | `beacon_keepalive_ms` 1000 | slotted like any RCF since 2026-09-03 |
 
 Bench totals: GS 20 sends/s, drone hears 18.5/s (93 %) *with the slotter
@@ -146,7 +146,7 @@ mitigate the resulting 30–50 % uplink loss:
    `feedback_ms`, but with the slotter the three copies were released as
    one batch at an AU completion and killed the next aggregate; a lost
    single send now costs one `feedback_ms` (~1 in 14 op changes at
-   flight-0023 range, `docs/switch-loss-findings-2026-09-05.md`);
+   flight-0023 range, `docs/findings/2026-09-05-switch-loss.md`);
 3. **failsafe timing** — `link.failsafe_ms` 3000 without any RCF drops
    the drone to the max-range op, `rendezvous_ms` 30000 to
    re-rendezvous. These are the only drone-side reactions to not hearing
@@ -155,7 +155,7 @@ mitigate the resulting 30–50 % uplink loss:
 Both-sides CCA was measured to add +15–22 delivery points on a clean
 channel (`rcf-uplink-loss` §6) and, on 2026-09-23, to remove the GS-send
 self-collision outright (RCF delivery 90.5 → 96.8 %, 0 FEC repairs); it
-is **shipped since 2026-09-23** (`docs/cca-on-findings-2026-09-23.md`).
+is **shipped since 2026-09-23** (`docs/findings/2026-09-23-cca-on.md`).
 The co-channel deferral it re-exposes the downlink to is what the drone's
 new `rx_foreign`/`rx_crcfail` telemetry measures in flight.
 

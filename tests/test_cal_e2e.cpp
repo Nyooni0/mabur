@@ -65,7 +65,7 @@ constexpr int kTrueWall[8] = {127, 127, 127, 95, 73, 54, 51, 49};
 constexpr int kAnchor = 53;
 int kTrueWallRel(int r) { return kTrueWall[r] - kAnchor; }
 
-// The TXAGC transfer curve of docs/txagc-calibration.md: flat floor, a
+// The TXAGC transfer curve of docs/findings/2026-07-16-txagc-calibration.md: flat floor, a
 // ~0.3 dB/idx ramp, then a flat ceiling. The knee at the top is what a
 // no_dip row's wall is derived from.
 int ramp_rssi(int idx) {

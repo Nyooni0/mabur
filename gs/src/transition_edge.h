@@ -25,7 +25,7 @@
 // dilutes them faster with post-close current entries. The residual
 // exposure that left -- old-rung util entries surviving up to 500 ms into
 // the new rung while the in-regime confirm is fade.confirm_ms (100 ms);
-// bench campaign 2 (8 pulses, docs/arrival-loss-findings-2026-09-05.md)
+// bench campaign 2 (8 pulses, docs/findings/2026-09-05-arrival-loss.md)
 // showed zero re-fires, but the control arm also showed none -- is what
 // flight 0026 then showed in every 5->0 cascade, hence (3). Observability
 // windows (pool_resid*, s1_loss, s3_loss) stay untouched -- they report,

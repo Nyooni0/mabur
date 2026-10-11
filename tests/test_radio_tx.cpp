@@ -297,7 +297,7 @@ static bool radiotap_no_agg(const std::vector<uint8_t>& frame) {
 
 TEST(probe_frames_are_no_agg_and_video_frames_are_not) {
   // With A-MPDU on, the chip folds co-queued frames into one PPDU at ONE
-  // rate/width (docs/bw40-sweep-findings-2026-09-23.md "Aggregation"): a
+  // rate/width (docs/findings/2026-09-23-bw40-sweep.md "Aggregation"): a
   // probe at the next rung pulled into the current rung's aggregate
   // measures nothing. The probe layer therefore airs alone.
   CaptureSink sink;

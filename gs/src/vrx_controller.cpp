@@ -103,7 +103,7 @@ std::optional<VrxController::Out> VrxController::step(double now_ms,
   // three copies as one batch at an AU completion, which overran the
   // inter-AU idle and killed the next aggregate on both cards on a quarter
   // to a third of all rung changes (bench A/B, ctl-0296/0298/0300,
-  // docs/switch-loss-findings-2026-09-05.md).
+  // docs/findings/2026-09-05-switch-loss.md).
   note_cmd(r);
   if (move_armed_ && ++rcfs_since_adopt_ >= kMoveAfterRcfs) {
     move_edge_ = true;

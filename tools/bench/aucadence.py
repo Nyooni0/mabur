@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Base-vs-enh AU completion-offset gate for the maburgs AU ring (metric
-# defined in docs/airtime-balance-spike-findings-2026-08-29.md; the spike's
+# defined in docs/findings/2026-08-29-airtime-balance-spike.md; the spike's
 # throwaway aucadence.py, mainlined 2026-08-30 after the airtime-balance-uep
 # flag day made this a standing acceptance number).
 #

@@ -8,7 +8,7 @@
 //
 // no_agg (2026-09-24, 40 MHz rungs): with A-MPDU on, the MAC folds
 // co-queued frames into one PPDU at ONE rate/width regardless of their
-// own descriptor (docs/bw40-sweep-findings-2026-09-23.md "Aggregation");
+// own descriptor (docs/findings/2026-09-23-bw40-sweep.md "Aggregation");
 // a control frame folded into an mcs4/40 aggregate airs at mcs4/40. The
 // devourer-private TX_FLAGS bit keeps it a PPDU of its own (Jaguar3:
 // AGG_EN=0 + BK=1). Same queue, ordering unchanged.

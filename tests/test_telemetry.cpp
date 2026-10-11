@@ -101,7 +101,7 @@ TEST(sys_readers_fail_soft) {
 
 // drone.sys.load was /proc/loadavg[0], which on the SigmaStar image counts
 // the SDK's parked D-state workers and read a flat ~13 idle or pegged
-// (docs/dq-spike-findings-2026-08-31.md). Replaced 2026-09-21 by the CPU
+// (docs/findings/2026-08-31-dq-spike.md). Replaced 2026-09-21 by the CPU
 // busy fraction of the tick, from a /proc/stat delta: bench read loadavg
 // 12.08 against 14 % busy over the same 2 s.
 TEST(cpu_busy_is_a_proc_stat_delta_not_loadavg) {

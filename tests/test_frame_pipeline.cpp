@@ -92,7 +92,7 @@ TEST(frame_pipeline_frame_id_increments_per_frame) {
 // The discont flag rides on EVERY frame for ~1 s, not exactly one: the first
 // frame after a restart is sent into a link that just came back up, so a
 // one-shot flag is systematically lost and the GS's emit cursor wedges above
-// the new epoch's ids (docs/gs-frame-stall-after-drone-restart-handoff.md).
+// the new epoch's ids (docs/findings/2026-07-25-gs-frame-stall-after-drone-restart.md).
 namespace {
 bool discont_at(UepEncoder& enc, FramePipeline& pipe, uint64_t now_ms) {
   auto buf = ring_buf(1, 0, 500);
@@ -295,7 +295,7 @@ TEST(frame_pipeline_air_gate_drops_enh_only_and_before_id) {
   CHECK(pipe.air_dropped() == 1);
 }
 
-// ── venc-ring vanish detection (docs/venc-ring-vanish-findings-2026-08-12.md)
+// ── venc-ring vanish detection (docs/findings/2026-08-12-venc-ring-vanish.md)
 //
 // Encoded frames can vanish between waybeam's encoder and maburd's ring read
 // with no counter anywhere: the wire sequence closes seamlessly over the hole.

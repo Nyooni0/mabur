@@ -35,7 +35,7 @@ class ArrivalTracker {
   // settles heard but never clean books `salvage_only` -- what salvage
   // actually bought, as opposed to UepDecoder's subblocks_salvaged, which
   // also counts sub-blocks the other card delivered clean anyway
-  // (docs/sbi-salvage-flights-2026-09-09.md).
+  // (docs/findings/2026-09-09-sbi-salvage-flights.md).
   void on_source(uint64_t v, uint64_t stale_end, bool clean = true) {
     if (!anchored_) anchor(v);
     if (v < settle_) { ++late_; return; }

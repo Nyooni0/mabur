@@ -117,7 +117,7 @@ class UepDecoder {
     // Of those salvaged sub-blocks, the seqs no clean copy ever delivered
     // inside the arrival guard (2026-09-09): the measured value of salvage.
     // subblocks_salvaged is its upper bound -- the other card's clean copy
-    // shadows most of it (docs/sbi-salvage-flights-2026-09-09.md).
+    // shadows most of it (docs/findings/2026-09-09-sbi-salvage-flights.md).
     uint64_t arr_salvage_only = 0;
     // Symbols first made known by a NACK retransmit body (fec-nack,
     // SwDecoder::syms_retx): neither delivered nor recovered.

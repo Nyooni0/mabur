@@ -107,7 +107,7 @@ bool RadioFrontend::open_and_start() {
   // because a blind GS send kills a drone PPDU on both of these cards and
   // carrier sense on BOTH ends removes that (docs/cca-on-findings-
   // 2026-09-23.md). The two must move together: GS-only carrier sense
-  // measured WORSE than blind (docs/rcf-uplink-loss-findings-2026-08-14.md
+  // measured WORSE than blind (docs/findings/2026-08-14-rcf-uplink-loss.md
   // §6). RadioFrontend is constructed per card, so every card gets the flag
   // and logs its own bring-up line below -- inert on RX-only cards, since
   // this gates TX only.

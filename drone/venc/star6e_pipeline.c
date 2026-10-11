@@ -1197,7 +1197,7 @@ static int bind_and_finalize_pipeline(Star6ePipelineState *state,
 
 	/* VTX onboard recorder: bound BEFORE the link channel, so the link is
 	 * the newest VPE peer and its encode runs first on the single-task
-	 * H.265 engine (docs/sd-record-findings-2026-09-26.md, R1 vs R2-R4).
+	 * H.265 engine (docs/findings/2026-09-26-sd-record.md, R1 vs R2-R4).
 	 * Nothing may bind a new ACTIVE peer to this port after the link.
 	 * Non-fatal: a failure leaves the recorder reporting Disabled. */
 	(void)venc_record_attach(&state->vpe_port, state->image_width,

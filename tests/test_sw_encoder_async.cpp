@@ -169,7 +169,7 @@ bool wait_worker_idle(SwEncoder& enc, int timeout_ms) {
 
 // The frame-end flush must return while repairs are still queued: the
 // hot thread no longer spin-waits for the worker (the 64 %-of-core join,
-// docs/bitrate-ceiling-findings-2026-09-21.md). A watchdog releases the
+// docs/findings/2026-09-21-bitrate-ceiling.md). A watchdog releases the
 // worker after 3 s so a regression fails instead of hanging.
 TEST(flush_returns_without_joining_a_held_worker) {
   SwConfig cfg{164, 16, 1.0};

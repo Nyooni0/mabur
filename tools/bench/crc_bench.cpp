@@ -6,7 +6,7 @@
 //   crc_bench [block_bytes=332] [air_kb_per_frame=72]
 //
 // Host build: tests CMake target `crc_bench`. Drone: cross-build like
-// encbench (docs/per-layer-symbol-debug-handoff.md) with common/src/crc16.cpp.
+// encbench (docs/per-layer-symbol-debug-handoff.md (deleted 2026-10-11; in git history)) with common/src/crc16.cpp.
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>

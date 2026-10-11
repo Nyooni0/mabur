@@ -809,7 +809,7 @@ TEST(rcf_apply_computes_ladder_fec_and_bitrate) {
   CHECK(act.bitrates.back() == 8500);
 }
 
-// 3b. Per-MCS efficiency (docs/bandwidth-sweep-findings-2026-09-17.md): the
+// 3b. Per-MCS efficiency (docs/findings/2026-09-17-bandwidth-sweep.md): the
 // policy prices each layer at nominal × air_clock.efficiency_<bw>[mcs], so
 // the budget is a fraction of the capacity the link DELIVERS. Same op as 3
 // (20 MHz) with efficiency_20[2] = 0.5: both rate terms halve, kbps
@@ -1295,7 +1295,7 @@ TEST(bitrate_policy_hysteresis_within_one_second) {
 // the same tick that applies the MCS. The radio capacity has already
 // dropped when the RCF lands; a swallowed shed means the encoder floods a
 // smaller pipe and TxQueue drop-oldest kills whole FEC bodies (the
-// 2026-08-09 freeze-crash — docs/shed-lag-findings-2026-08-09.md). The
+// 2026-08-09 freeze-crash — docs/findings/2026-08-09-shed-lag.md). The
 // v1 throttle/hysteresis exist to dedup repeated identical RCFs, never to
 // defer a decrease.
 TEST(demote_cascade_sheds_every_decrease_immediately) {

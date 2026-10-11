@@ -72,7 +72,7 @@ struct Args {
   // this tool's --bw/--ldpc/--stbc. Every frame is a mabur::cal payload
   // stamped (mcs, rel idx); absolute index = the chip's anchor (mcs7 ref
   // with rate diffs zeroed, as maburd reads it) + rel. linkbench-rx --wall
-  // tallies per cell (docs/bw40-sweep-findings-2026-09-23.md).
+  // tallies per cell (docs/findings/2026-09-23-bw40-sweep.md).
   bool no_cca = false;
   // --foreign-sa: flip the SA/BSSID so a GS books these frames as foreign
   // traffic (interferer role), not own.

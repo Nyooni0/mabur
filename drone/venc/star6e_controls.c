@@ -150,7 +150,7 @@ static int apply_bitrate(uint32_t kbps)
 }
 
 /* Live frame-rate change (spec 2026-09-20; probe 2026-09-20 in
- * docs/low-power-spike-findings-2026-09-19.md).  Ported from waybeam
+ * docs/findings/2026-09-19-low-power-spike.md).  Ported from waybeam
  * f956a52 src/star6e_controls.c apply_fps().
  *
  * The VPE->VENC bind RATIO is the frame-rate lever on this SDK: the RC

@@ -793,7 +793,7 @@ TEST(ladder_defaults_to_spec_six_rung_ladder) {
   CHECK(L[3].mcs == 5); CHECK(L[3].overhead_base > 0.499 && L[3].overhead_base < 0.501);
   // mcs6 rung at 0.5 (cmd-value 0.25, not the spec's cmd-value 0.15) since
   // 2026-07-29 — see the ladder_cfg comment in gs/src/config.h and
-  // docs/mcs6-bench-anomaly.md.
+  // docs/findings/2026-07-27-mcs6-bench-anomaly.md.
   CHECK(L[4].mcs == 6); CHECK(L[4].overhead_base > 0.499 && L[4].overhead_base < 0.501);
   CHECK(L[5].mcs == 7); CHECK(L[5].overhead_base > 0.199 && L[5].overhead_base < 0.201);
   // Same-rate-fixed-pairs (Task 3): the struct default duplicates each
@@ -1320,7 +1320,7 @@ TEST(bundle_default_sets_every_known_key_but_radio_cards) {
 }
 
 // spec 2026-09-25-nhm-airtime §6; default blocked_pct is 50, not the spec's
-// 30 -- hw spike findings (docs/nhm-airtime-spike-findings-2026-09-25.md).
+// 30 -- hw spike findings (docs/findings/2026-09-25-nhm-airtime-spike.md).
 // Under radio.scan since 2026-10-04: every measurer reads them.
 TEST(scan_busy_keys_parse_and_validate) {
   auto c = maburgs::load_config(write_tmp("[radio.scan]\nbusy_dbm = -86\nblocked_pct = 40\n"));

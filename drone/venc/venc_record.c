@@ -6,7 +6,7 @@
  * the same VPE channel's second scaler, port 1), created and bound BEFORE the
  * link channel so
  * the link is the newest peer and its encode runs first (bench R1 vs R2-R4,
- * docs/sd-record-findings-2026-09-26.md).
+ * docs/findings/2026-09-26-sd-record.md).
  *
  * Idle (no StartRecvPic) until venc_record_start(). A drain thread waits on
  * the channel fd (poll, 20 ms cap -- correctness never depends on the fd

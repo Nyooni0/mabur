@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """airdrain.py -- per-frame `air` excess around every rung transition: is the
 post-demote latency spike a drain, and how big/long is it? (flights 20/21,
-docs/probe-stream-flight-findings-2026-09-05.md section 9; the measurement
+docs/findings/2026-09-05-probe-stream-flight.md section 9; the measurement
 the drain-shed follow-up is A/B'd with)
 
 Replays the player's `air` arithmetic (gs/player/src/lat_tracker.cpp) over

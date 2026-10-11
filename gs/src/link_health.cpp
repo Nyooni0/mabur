@@ -78,7 +78,7 @@ LinkHealthAssembler::Tick LinkHealthAssembler::tick(double now_ms,
     w.add(lc.expected, lc.arrived, now_ms);
     const auto ls = w.sample(now_ms);
     // Idle layer reads 100, matching the deleted window_delivery_pct (the
-    // 2026-07 controller-wedge finding in docs/bench-validation.md turns
+    // 2026-07 controller-wedge finding in docs/bench-validation.md (deleted 2026-10-11; in git history) turns
     // on that convention). Truncating like the old integer ratio did.
     const int pct =
         ls.valid ? static_cast<int>(100.0 * (1.0 - ls.loss)) : 100;

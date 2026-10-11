@@ -171,9 +171,9 @@ struct AmpduCfg {
                       // default (0x70 ~= 3 ms — too slow, but valid for A/B)
   // Lowest op MCS that aggregates, PER WIDTH; rungs below fly QoS-Data
   // singles (drone/src/ampdu_policy.h). 20 MHz: agg6 delivers 6-13 points
-  // LESS than singles at mcs0-2 (docs/bandwidth-sweep-findings-2026-09-17.md),
+  // LESS than singles at mcs0-2 (docs/findings/2026-09-17-bandwidth-sweep.md),
   // the bundle ships 4. 40 MHz: frames are half as long on air and
-  // aggregation pays from mcs2 (docs/bw40-sweep-findings-2026-09-23.md),
+  // aggregation pays from mcs2 (docs/findings/2026-09-23-bw40-sweep.md),
   // the bundle ships 2. 0 = aggregate at every rung of that width.
   int min_mcs_20 = 0;
   int min_mcs_40 = 0;
@@ -190,9 +190,9 @@ struct AirClockCfg {
   int shed_ms = 0;
   // Delivered/nominal air capacity per HT MCS 0..7, measured at saturation,
   // one table per width (drone/src/air_rate.h picks by LayerTxSpec.bw).
-  // 20 MHz: docs/bandwidth-sweep-findings-2026-09-17.md (singles at
+  // 20 MHz: docs/findings/2026-09-17-bandwidth-sweep.md (singles at
   // mcs0-3 under ampdu.min_mcs_20 4, agg6 above). 40 MHz:
-  // docs/bw40-sweep-findings-2026-09-23.md (agg6, flat 0.74-0.77, no
+  // docs/findings/2026-09-23-bw40-sweep.md (agg6, flat 0.74-0.77, no
   // rung-0 exception). Priced into BOTH run_bitrate_policy
   // (encoder.airtime_budget is a fraction of this, not of nominal) and the
   // air clock. All ones = nominal = the pre-2026-09-17 policy.

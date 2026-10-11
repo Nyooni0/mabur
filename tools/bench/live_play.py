@@ -2,7 +2,7 @@
 """Streaming proto-GS viewer filter: rxdemo STREAM_OUT JSONL on stdin ->
 Annex-B H.265 elementary stream on stdout.
 
-Usage (see docs/bench-validation.md, E1):
+Usage (see docs/bench-validation.md (deleted 2026-10-11; in git history), E1):
   DEVOURER_RX_ZEROCOPY=0 DEVOURER_PID=0x8812 DEVOURER_CHANNEL=149 \
   DEVOURER_EVENTS=stdout DEVOURER_LOG_LEVEL=warn DEVOURER_STREAM_OUT=1 \
   ./build/rxdemo 2>/dev/null | python3 live_play.py | \

@@ -16,7 +16,7 @@ only, so anything that must survive belongs here instead.
 `maburcal` supersedes `bench/txagcbench/`, deleted 2026-09-10. The
 measurement *history* that tool produced — the wall table, the transfer
 curve, the comb finding — is still current hardware fact and lives on in
-`docs/txagc-calibration.md`; only the tooling for producing a *new* unit's
+`docs/findings/2026-07-16-txagc-calibration.md`; only the tooling for producing a *new* unit's
 numbers moved.
 
 Run `maburcal` with `[radio] relays = []`: a CPE510 relay card's sweep

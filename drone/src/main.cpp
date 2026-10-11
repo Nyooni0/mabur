@@ -1187,7 +1187,7 @@ int run_real_mode(const Config& cfg, uint8_t start_ch, const std::string& cfg_pa
   logger->set_level(Logger::Level::Warn);
   // MABUR_DEVOURER_EVENTS=1 keeps the stream on for a bench run from /tmp
   // (e.g. devourer's per-stage `init.timing` events, which are how the radio
-  // bring-up is attributed -- docs/boot-time-findings-2026-09-07.md). Never
+  // bring-up is attributed -- docs/findings/2026-09-07-boot-time.md). Never
   // set it under the S00mabur wrapper: see the /tmp-filling note above.
   if (const char* ev = std::getenv("MABUR_DEVOURER_EVENTS"); ev && ev[0] == '1') {
     // A private dup of stdout: the venc's sdk_quiet brackets dup2() /dev/null
@@ -1244,12 +1244,12 @@ int run_real_mode(const Config& cfg, uint8_t start_ch, const std::string& cfg_pa
   // ends removes outright -- 0 repairs, RCF delivery 90 -> 97 % -- and every
   // recorded session on the DVR showed a 0/s foreign-preamble channel, so
   // the deferral being avoided was never there (docs/tx-rx-timing.md §3,
-  // docs/cca-on-findings-2026-09-23.md). The altitude view the
+  // docs/findings/2026-09-23-cca-on.md). The altitude view the
   // ground cards cannot see rides Telem rx_foreign/rx_crcfail; if a flight
   // shows the drone deferring to neighbours the hop verdict ignores
   // (foreign_pps < 50), that is the number to act on. GS-only carrier sense
   // is NOT a fallback: it defers to the burst edge where a blind drone
-  // restarts (docs/rcf-uplink-loss-findings-2026-08-14.md §6).
+  // restarts (docs/findings/2026-08-14-rcf-uplink-loss.md §6).
   dev_cfg.tuning.disable_cca = false;
   // Pinned here now that devourer defaults both the other way. A multi-packet
   // bulk-OUT that times out mid-transfer wedges the 8822EU's TX endpoint for
@@ -1617,7 +1617,7 @@ int run_real_mode(const Config& cfg, uint8_t start_ch, const std::string& cfg_pa
   // Agent thread -> hot thread: link came up from BOOT/RENDEZVOUS, so every
   // frame encoded so far died before the air — re-mark the discontinuity
   // window so the GS gets the re-base signal on frames that can actually
-  // land (docs/gs-frame-stall-after-drone-restart-handoff.md).
+  // land (docs/findings/2026-07-25-gs-frame-stall-after-drone-restart.md).
   std::atomic<bool> link_up_discont{false};
 
   // RX callback: pulls RC frames (rc::frame_type >= 0) off the air and

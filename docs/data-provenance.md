@@ -15,7 +15,7 @@ pick), `air_clock.efficiency`/`ampdu.min_mcs` → `_20`/`_40`, new required
 NHM airtime evidence — `scanlog 4` (V card block gains `nhm_busy`/`own_air`,
 D gains `busy`, K entries reshape to `ch:worst_busy:floor:busy`), `[hop.verdict]`
 `busy_dbm`/`blocked_pct`, sideport `cards[i].energy.busy_pct`/`.own_air_pct`
-— 2026-09-25 (`docs/inflight-channel-hop.md`, `docs/nhm-airtime-spike-findings-2026-09-25.md`) ·
+— 2026-09-25 (`docs/inflight-channel-hop.md`, `docs/findings/2026-09-25-nhm-airtime-spike.md`) ·
 sideport key removals 2026-08-12, 2026-08-15, 2026-08-29, 2026-08-30 and
 2026-09-04 ·
 SNR half-dB scale break 2026-08-04 · EVM op-point dependence 2026-08-10 ·
@@ -66,7 +66,7 @@ not lost"); after it the same channel reads ~0.02 %. Compare
 `pre_fec_loss`.
 
 **Carrier sense is back ON on both daemons since 2026-09-23** (`RC_VERSION`
-10, `docs/cca-on-findings-2026-09-23.md`): both bring-up lines read
+10, `docs/findings/2026-09-23-cca-on.md`): both bring-up lines read
 `requested ON`, and `Telem`/the sideport carry the drone's own RX-side
 channel view (`drone.radio.rx`, per telemetry period) so a recording
 says what the drone deferred to. Recordings between the two dates below
@@ -178,7 +178,7 @@ below); 2026-08-30 `link.op.overhead` → `link.op.overhead_base`/
 scale-break note below); 2026-08-30 `link.deadline_ms` (the
 `fec.decode_deadline_ms` row-expiry knob it mirrored was deleted after
 the wall-2 bench measurement,
-`docs/wall2-deadline-findings-2026-08-30.md` addendum — the video
+`docs/findings/2026-08-30-wall2-deadline.md` addendum — the video
 decoders now rely on the seq horizon alone; MSP's SwDecoder keeps its
 own 2 s expiry); 2026-09-02 `link.attrib.suppressed` (deleted with the
 packet-level delivery window it was defined against — it counted windows
@@ -245,7 +245,7 @@ PA between compression and linear regimes. Never compare EVM across rungs
 or threshold it globally; use deviation from the same rung's baseline. The
 sweep that established this (and the interpretation: walls stay
 delivery-defined; EVM's job is per-rung baselines + live PA-compression
-watchdog) is `docs/evm-sweep-findings-2026-08-10.md`.
+watchdog) is `docs/findings/2026-08-10-evm-sweep.md`.
 
 **Scale break, 2026-08-29 — UEP overhead flatten.** `kUepRefOverhead`
 changed {1.00, 0.75, 0.50, 0.25} → {1.00, 0.50, 0.50, 0.50}. Sideport
@@ -373,7 +373,7 @@ predates the model; `airdrain.py --model` says so instead of comparing.
 column. Recordings from the observe-only period (`air_clock.shed_ms` 0)
 carry a live `air_ms` and zero `drone.air_shed_drops`; a non-zero drop
 count means the gate was armed for that flight. Two caveats from the
-first armed flight (`docs/air-clock-flight-findings-2026-09-06.md`
+first armed flight (`docs/findings/2026-09-06-air-clock-flight.md`
 §5): the counter runs from link-up, so ground-time drops before takeoff
 are in it (flight 0032 started at 12); and a missing enh AU in the AU
 log is not a shed unless a neighbouring `air_ms` is near `shed_ms` —
@@ -406,7 +406,7 @@ recorded before 2026-08-31.
 (→ player/flightrec `dq`, sideport `drone.txq_wait_ms`) spanned venc-ring
 wait (~2.6 ms, fictitious — the frame did not exist yet) + FEC/SBI-pack
 CPU (~3.4 ms) + true queue wait (~40 µs) — see
-`docs/dq-spike-findings-2026-08-31.md`. After it, bodies stream to the
+`docs/findings/2026-08-31-dq-spike.md`. After it, bodies stream to the
 TxQueue as each seals, stamped at the actual push: `dq` is the true
 TxQueue wait and reads ~0 in a healthy link; the pre-push CPU overlaps
 the radio drain instead of preceding it, which also moved real latency —
@@ -516,7 +516,7 @@ RcAgent's **ROI QP override** (`actuator.last_roi_qp`, 0 = normal,
 `encoder.roi_qp_low` when the bitrate sat under `roi_threshold_kbps`).
 It read 0 for whole flights and says nothing about the encoder's rate
 control — flight-0011's analysis fell for exactly that
-(`docs/handover-venc-overshoot-2026-09-03.md`). From this date
+(`docs/findings/2026-09-03-handover-venc-overshoot.md`). From this date
 `drone.enc.qp` is the **encoder's QP** for the last frame it published
 (venc `startQual`, 0 = unavailable — host build or no frame yet) and the
 override lives in the new `drone.enc.roi_qp` (signed). Do not compare a
@@ -779,7 +779,7 @@ Full detail: `docs/bw40.md`.
 
 Full detail: `docs/inflight-channel-hop.md` §2/§3/§8,
 `docs/channel-select.md` ("`scan.log`"), `docs/bw40.md`,
-`docs/nhm-airtime-spike-findings-2026-09-25.md` (the measured defaults).
+`docs/findings/2026-09-25-nhm-airtime-spike.md` (the measured defaults).
 
 - **`scanlog 4`.** Bumped from `scanlog 3`:
   - `V`'s per-card block grows from 7 fields to 9: `foreign fa cca crc rssi

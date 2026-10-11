@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Scene-change overshoot from a PASSIVE tools/bench/vencprobe capture
 (`vencprobe --cycles 0 --duration MS`), for the bench plan in
-docs/handover-venc-overshoot-2026-09-03.md.
+docs/findings/2026-09-03-handover-venc-overshoot.md.
 
 The flight data (1 Hz telemetry) showed the SigmaStar CBR encoder running
 10-40 % over its commanded bitrate for the first second of motion after a

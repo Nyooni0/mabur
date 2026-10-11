@@ -441,7 +441,7 @@ without either key ever having been written to the file.
 other way once the file HAS been touched: if `/etc/maburplay.json` picks
 up any `display.vsync_*` key or `lat_log_dir` — which the vsync A/B
 protocol does, by design, since it toggles `vsync_lock` in the file
-between arms (`docs/bench-protocols-latency-2026-08-31.md`) — a
+between arms (`docs/bench-protocols-latency-2026-08-31.md (deleted 2026-10-11; in git history)`) — a
 pre-vsync `maburplay.pre-vsync` binary will reject the file at boot and
 `S97maburplay` stops respawning on that exit code, same failure shape as
 the drone/GS mismatch above but silent (no crash-loop to notice; the
@@ -672,7 +672,7 @@ sideport key is renamed, so maburtop from before this reads `--`.
 `RC_VERSION` 9 → 10: `Telem` grows 89 → 95 bytes with the drone's RX-side
 channel view (`rx_own`, `rx_foreign`, `rx_crcfail`), and both daemons
 now leave the MAC carrier-sense gate at the chip default
-(`disable_cca = false`; `docs/cca-on-findings-2026-09-23.md`). **One new GS
+(`disable_cca = false`; `docs/findings/2026-09-23-cca-on.md`). **One new GS
 key, `link.arrival_guard_syms` (default 192, in the bundle)** — the
 ArrivalTracker settle line that decides when a symbol is booked missing
 (`docs/observability.md` "pre-FEC loss is late, not lost"). It has a
@@ -684,7 +684,7 @@ mismatched-pair window between them has no video and no control link
 exactly as every `RC_VERSION` bump, and clears once both are swapped).
 The carrier-sense flip is compiled in, not configured, and the two ends
 must never be split: a GS with carrier sense on against a blind drone is
-the measured-worse arm of `docs/rcf-uplink-loss-findings-2026-08-14.md`
+the measured-worse arm of `docs/findings/2026-08-14-rcf-uplink-loss.md`
 §6. Verify after the swap: both bring-up lines read `requested ON`, the
 sideport shows `drone.radio.rx`, the drone `stats:` line keeps
 `txq_drop=0`, and `streams[*].recovered` sits near 0/s on a clean bench

@@ -40,7 +40,7 @@ struct ClassTrack {
 // corrupt frame's seq and phystatus are untrustworthy). rssi_a/b_ema and
 // snr_a/b_ema track the two RX chains; rssi_ema/snr_ema track the per-frame
 // best chain. (An older claim that chain A reads off-scale 128-131 on the
-// 8822E was refuted on hardware — docs/chain-a-rssi-validation-handoff.md.)
+// 8822E was refuted on hardware — docs/chain-a-rssi-validation-handoff.md (deleted 2026-10-11; in git history).)
 struct CardTrack {
   uint64_t frames = 0, crc_fail = 0, rc_frames = 0, video_bodies = 0;
   uint64_t seq_expected = 0, seq_received = 0;

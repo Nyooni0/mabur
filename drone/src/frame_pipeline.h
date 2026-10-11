@@ -44,7 +44,7 @@ class FramePipeline {
   // frame for the next kDiscontStickyMs — a one-shot flag is sent right at
   // radio bring-up and is systematically lost, wedging the GS's emit cursor
   // above the new epoch for up to a full 16-bit id wrap
-  // (docs/gs-frame-stall-after-drone-restart-handoff.md). The GS rebases once
+  // (docs/findings/2026-07-25-gs-frame-stall-after-drone-restart.md). The GS rebases once
   // per flagged run and its decoder recovers at the next IDR.
   //
   // Also re-anchors the vanish tracker: a new producer may re-base pts (and
@@ -102,7 +102,7 @@ class FramePipeline {
   uint16_t next_frame_id() const { return next_frame_id_; }
 
   // ── venc-ring vanish detection ──────────────────────────────────────────
-  // (docs/venc-ring-vanish-findings-2026-08-12.md) Frames dropped between
+  // (docs/findings/2026-08-12-venc-ring-vanish.md) Frames dropped between
   // waybeam's encoder and this reader never get a frame_id — the wire closes
   // seamlessly over the hole, so the pts step between consecutive ring reads
   // is the ONLY read-side evidence. A delta > 1.5x the observed period books

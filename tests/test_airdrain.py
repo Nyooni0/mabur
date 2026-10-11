@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Test for tools/bench/airdrain.py (per-frame air-excess replay around rung
-transitions, docs/probe-stream-flight-findings-2026-09-05.md section 9).
+transitions, docs/findings/2026-09-05-probe-stream-flight.md section 9).
 
 Synthesizes one boot's ctl-NNNN log + au-NNNN log with a known ground truth:
 a cold climb, a 2-step cascade at t=60 s whose air excess ramps to 120 ms at

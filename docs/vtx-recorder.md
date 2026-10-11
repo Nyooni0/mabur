@@ -10,7 +10,7 @@ player OSD shows that reason.
 
 Design: `docs/superpowers/specs/2026-09-26-vtx-recorder-design.md` (local
 only). Spike and the bind-order root cause:
-`docs/sd-record-findings-2026-09-26.md`.
+`docs/findings/2026-09-26-sd-record.md`.
 
 ## Targets — `dvr.target` in `/etc/maburplay.toml`
 

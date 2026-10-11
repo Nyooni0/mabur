@@ -1,7 +1,7 @@
 # H.265 row slices and slice salvage (as built)
 
 Spec: `docs/superpowers/specs/2026-10-10-h265-slices-design.md` (gitignored).
-Evidence: `docs/venc-slice-findings-2026-10-09.md`. Part 2 (streamed decode)
+Evidence: `docs/findings/2026-10-09-venc-slice.md`. Part 2 (streamed decode)
 is built: see "Part 2 (as built)" below.
 
 ## Drone
@@ -83,7 +83,7 @@ is built: see "Part 2 (as built)" below.
 - Refresh-start pictures stay one slice (SDK: it won't cut through the
   whole-picture refresh stripe); damaged ones pass through. Splitting them
   needs `intra_refresh_frames >= 4`, which breaks base-loss self-healing
-  under SVC-T — measured, `docs/venc-slice-findings-2026-10-09.md`
+  under SVC-T — measured, `docs/findings/2026-10-09-venc-slice.md`
   "Can the refresh-start picture be split?".
 - A damaged IDR passes through (`islice`).
 - The web GS's local/replay recorder (`RawDvr` in `web/src/web_main.cpp`)
@@ -469,7 +469,7 @@ teardown.
 ## Slice-count sweep 2026-10-10 — measured vs predicted
 
 Every count the 1080p geometry allows (1, 2, 3, 4, 5, 6, 9, 17), checked
-against the predictions in `docs/venc-slice-findings-2026-10-09.md`
+against the predictions in `docs/findings/2026-10-09-venc-slice.md`
 "Slice cost, slice count, and fit with the transport". Rig: GS on the
 `slice-stream` image, maburplay `eed579d8` with `[decoder] stream = true`,
 maburgs = the `MABUR_LOSS_SIM` build of the ring-v4 code (`--loss-sim

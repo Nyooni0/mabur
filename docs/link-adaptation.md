@@ -28,7 +28,7 @@ The drone's `AirBalancer` redistributed that one commanded overhead
 between BASE and ENH every frame, anchored on ACTUAL emitted bytes
 rather than the nominal `len*(1+ov)/rate` model (which measured a
 reproducible ~2x gain error at large frames). See
-`docs/airtime-balance-spike-findings-2026-08-29.md` for the bench spikes
+`docs/findings/2026-08-29-airtime-balance-spike.md` for the bench spikes
 behind that design. The rate split had a structural floor, though: at
 the mcs1 rung's 2:1 base/enh rate ratio the balancer's rails could not
 reach air balance (3.3 ms/pair residual alternation) — the motivation
@@ -74,7 +74,7 @@ this (`_ov_cmd_cell`/`_ov_applied_cell`) — a mismatch there means an
 armed override or a stale/old-daemon snapshot, not a balancer at work.
 
 Measurement basis for the same-rate decision: ten static operating
-points plus a motion sweep, `docs/same-rate-uep-findings-2026-08-30.md`.
+points plus a motion sweep, `docs/findings/2026-08-30-same-rate-uep.md`.
 
 Everywhere below that still says "s1" or "s3" is pre-2026-08-29
 vocabulary for what is now sid0 (BASE) and sid1 (ENH — still the
@@ -97,7 +97,7 @@ Every GS control-frame send (RCF, DISC keepalive) blasts the
 sibling RX card at ~−4 dBm and deafens the TX card, so a drone PPDU whose
 preamble starts within ~180 µs of the send is lost on BOTH cards — one
 whole aggregate per hit, the source of the bench's ~0.35 %/PPDU loss and
-the 34 ms tail-repair stalls (`docs/gs-uplink-self-blanking-findings-2026-09-02.md`).
+the 34 ms tail-repair stalls (`docs/findings/2026-09-02-gs-uplink-self-blanking.md`).
 The chip already holds the TX until the PPDU it is receiving ends; what
 kills is the NEXT PPDU starting right behind the blast, i.e. sends inside
 an AU burst.
@@ -141,7 +141,7 @@ decaying max of the observed completion→probe offsets floored at the
 probe body's airtime, +1 ms. Base-AU completions release at once as
 before (no probe trails a base burst). Interleaved A/B, pinned mcs4 /
 probe mcs4 / `feedback_ms` 50, 8 min arms:
-`docs/probe-blanking-fix-findings-2026-09-05.md` — probe loss 0.21 % →
+`docs/findings/2026-09-05-probe-blanking-fix.md` — probe loss 0.21 % →
 0.06 %, below the enh stream's 0.08 %, enh unchanged.
 
 ## Probe stream (2026-09-04) — current promote gate
@@ -178,7 +178,7 @@ lands 0.9 ms p50 / 4 ms p99 after the completion stamp and the send's
 real USB+chip latency is 1–1.5 ms, so the slotter aimed the blast at the
 probe (~2.5× the enh stream's own loss, GS-inflicted, vanishing at
 `feedback_ms` 200). Fixed by releasing on the probe's arrival instead —
-"RCF slotting" above, `docs/probe-blanking-fix-findings-2026-09-05.md`.
+"RCF slotting" above, `docs/findings/2026-09-05-probe-blanking-fix.md`.
 A probe sent at a random time would land inside the ~180 µs blast
 ~0.35 %/PPDU of the time; with the probe-arrival release it is the one
 PPDU the slotter can never hit, and on the bench it now loses *less*
@@ -248,7 +248,7 @@ for demotes but does not drive one yet — the design's §10 keeps
 probe-driven demote explicitly out of scope. `flightreport.py`'s
 probe-lead report (`docs/observability.md`) is the input a v2 threshold
 would be tuned against.
-First flights 2026-09-05: `docs/probe-stream-flight-findings-2026-09-05.md`
+First flights 2026-09-05: `docs/findings/2026-09-05-probe-stream-flight.md`
 — the gate's loss quantum is 0.2 per lost body, so `max_util` must sit
 below 0.2 (0.15 flown: rung-5 median hold 16 s vs 1 s at 0.2).
 
@@ -355,7 +355,7 @@ rate-control question, not a ladder one.
 
 ## Drone air clock (2026-09-06)
 
-The post-demote latency spike (`docs/probe-stream-flight-findings-2026-09-05.md`
+The post-demote latency spike (`docs/findings/2026-09-05-probe-stream-flight.md`
 §9) is a drain: 2–3 IDRs plus the encoder still producing the OLD rung's
 bitrate for ~0.4–1 s after the RCF dropped the MCS, served at the new,
 lower rate. The backlog sits past the TxQueue pop, where the congestion
@@ -396,7 +396,7 @@ fits them against the player's measured air excess per frame
 (Stage A of the spec) before the gate is armed (Stage B).
 
 **Flown 2026-09-06, three flights
-(`docs/air-clock-flight-findings-2026-09-06.md`).** The model is only
+(`docs/findings/2026-09-06-air-clock-flight.md`).** The model is only
 calibratable when the link has headroom: at `encoder.airtime_budget`
 0.6 the bitrate policy's `rate/3` command plus uncounted framing puts
 ~70 % of nominal on air, which is 100 % of the model's capacity at
@@ -454,7 +454,7 @@ rung, so its denominator does not collapse after a re-key and no blank
 is needed there any more; `TransitionEdge` today blanks only the two
 residual windows. `flightreport.py` prints an
 "s3-settle-refire canary" that must read ~0 on any recording after this.
-See `docs/probe-stream-flight-findings-2026-09-05.md` §9. ⚠ SUPERSEDED 2026-08-15 — see
+See `docs/findings/2026-09-05-probe-stream-flight.md` §9. ⚠ SUPERSEDED 2026-08-15 — see
 the pooled-RF note below: `s3_residual_confirm_ms` is REMOVED and FAILS
 BOOT, so there is no longer a config knob to lower — the s3-residual
 confirm window this paragraph warns about is now permanently at 0 ms
@@ -730,7 +730,7 @@ completion-booked (`docs/data-provenance.md`).
 **Bench-validated ctl-0305..0339, deployed to the GS 2026-09-05**
 (rollback `maburgs.pre-arrival`, the `ctllog 10` completion-booked build;
 no config change); campaign-1 sweep inconclusive within bench noise — see
-`docs/arrival-loss-findings-2026-09-05.md`. What passed: the pulse
+`docs/findings/2026-09-05-arrival-loss.md`. What passed: the pulse
 campaign and the restart climbs — every demoting pulse `steps=1`, both
 canaries 0, **no util sample above `down_util` within 200 ms of any
 transition** now that the blank is gone, drone-switch p50 42 ms (control
@@ -807,7 +807,7 @@ exceed it (nothing deployed does this). Op actuation used to be U(0, `tick_ms` =
 on the device (verified via /proc thread wake rates), but close_ms median
 is ~65 ms at n=24, not ≤30 — because 30–50% of uplink RCFs are lost to
 the drone's own half-duplex TX airtime (CCA off at the time — ON again
-since 2026-09-23, `docs/cca-on-findings-2026-09-23.md`; GS injects blind into
+since 2026-09-23, `docs/findings/2026-09-23-cca-on.md`; GS injects blind into
 the drone's bursts; loss tracks `link.air_pct`, 51–59% delivery at climb
 rungs 0–4, 69% parked). A lost commit-RCF costs one `feedback_ms` (50 ms)
 quantum, so close_ms = an 11–28 ms fast path (Part C working, target met)
@@ -817,7 +817,7 @@ acceptance criterion is unreachable without an uplink-delivery fix
 `drone.applied` echoes it; time injection into post-frame-burst gaps).
 The same loss applies to ALL uplink control — probe RCFs, keepalive DISC,
 IDR requests — and `feedback_ms` is effectively the uplink retry quantum.
-Full analysis: `docs/rcf-uplink-loss-findings-2026-08-14.md`.** `link.fade`
+Full analysis: `docs/findings/2026-08-14-rcf-uplink-loss.md`.** `link.fade`
 and `link.rc_drain_ms` are optional with live defaults, so the new binary
 runs against an untouched config on either device. Once either is
 hand-tuned into `/etc/maburgs.toml` or `/etc/mabur.toml` — and the bench
@@ -940,7 +940,7 @@ While the FC reports DISARMED, `RcAgent` runs the encoder at
 ARMED report returns full power. The mode tracks the FC's **current** arm
 state both ways — it is not a one-shot pre-arm latch — so a DISARMED report
 re-enters it however many times the aircraft has armed before.
-Spike: `docs/low-power-spike-findings-2026-09-19.md` (bitrate is the
+Spike: `docs/findings/2026-09-19-low-power-spike.md` (bitrate is the
 thermal lever for SoC and radio alike, fps second-order, CPU clock not a
 lever at all).
 

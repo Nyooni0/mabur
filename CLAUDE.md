@@ -49,15 +49,15 @@ page the task needs rather than carrying all of it.
 | a specific past investigation | the dated `docs/*-findings-*.md` / `docs/handover-*.md` |
 | airtime/serialization math, per-stream FEC overhead, why jitter ∝ frame size, encoder size knobs (max_ipprop, presets, dead SDK caps) | `docs/airtime-model.md` |
 | half-duplex timing: who transmits when, the slotter, airtime budget, why RCFs get lost | `docs/tx-rx-timing.md` |
-| boot time, the OpenIPC init chain, U-Boot/serial console on the drone | `docs/boot-time-findings-2026-09-07.md` |
-| carrier sense (CCA) on/off, the GS-send self-collision, the drone's RX channel view (`drone.radio.rx`), why the OSD LOSS row reads what it reads, the pending cca-on flight gate | `docs/cca-on-findings-2026-09-23.md` |
-| 40 MHz (HT40): which rungs fly 40, per-width tables, pair candidates, the boot scan's pair pick, no_agg, scanlog 3 / ctllog 12 | `docs/bw40.md` (as built: per-rung width, pairs, scan, no_agg) + `docs/bw40-sweep-findings-2026-09-23.md` ("Start here") |
-| the VTX onboard SD recorder ([record], dvr.target, the RCF rec byte, OSD REC field), VENC bind-peer order, the MI /proc/mi_modules/mi_venc per-stage delay instrument, the startup vanish-counter ratchet | docs/vtx-recorder.md (as built) + docs/sd-record-findings-2026-09-26.md (spike) |
+| boot time, the OpenIPC init chain, U-Boot/serial console on the drone | `docs/findings/2026-09-07-boot-time.md` |
+| carrier sense (CCA) on/off, the GS-send self-collision, the drone's RX channel view (`drone.radio.rx`), why the OSD LOSS row reads what it reads, the pending cca-on flight gate | `docs/findings/2026-09-23-cca-on.md` |
+| 40 MHz (HT40): which rungs fly 40, per-width tables, pair candidates, the boot scan's pair pick, no_agg, scanlog 3 / ctllog 12 | `docs/bw40.md` (as built: per-rung width, pairs, scan, no_agg) + `docs/findings/2026-09-23-bw40-sweep.md` ("Start here") |
+| the VTX onboard SD recorder ([record], dvr.target, the RCF rec byte, OSD REC field), VENC bind-peer order, the MI /proc/mi_modules/mi_venc per-stage delay instrument, the startup vanish-counter ratchet | docs/vtx-recorder.md (as built) + docs/findings/2026-09-26-sd-record.md (spike) |
 | the browser GS / spotter (web/), WebUSB+WASM build, LinkHealthAssembler sharing, channel set form, CHANNEL line, spotter follower | docs/web-gs.md |
 | the CPE510 relay card (mabur-relay protocol v4, maburgs RemoteCard + radio.relays, web GS relay mode, relay TX, interference sweep/hop on a relay) | docs/cpe510-relay.md |
 | pairing / the link key file, SipHash tag, session nonces, KEY MISMATCH, auth_reject | docs/link-pairing.md |
-| the software NACK (base-layer selective repeat): T_NACK, the retx ring, the air bucket, the retx accounting class, feclog 3 | docs/fec-nack.md (as built) + docs/fec-nack-spike-findings-2026-10-05.md (spike) |
-| H.265 row slices: slice salvage (SliceAssembler, skip-slice fills, `[venc] slices`, FrameHdr `slice_rows`, `kRecFlagSliceSalvaged`, aulog 5) and streamed decode (AU ring v4 open slots, StreamFeeder, the decoder-input thread (FeedLoop), `[decoder] stream`, the MPP patches in `gs/player/mpp-patches/`, the stream-mode GS image and its p1 flash) | docs/slices.md (as built) + docs/venc-slice-findings-2026-10-09.md; flashing: docs/deploy.md |
+| the software NACK (base-layer selective repeat): T_NACK, the retx ring, the air bucket, the retx accounting class, feclog 3 | docs/fec-nack.md (as built) + docs/findings/2026-10-05-fec-nack-spike.md (spike) |
+| H.265 row slices: slice salvage (SliceAssembler, skip-slice fills, `[venc] slices`, FrameHdr `slice_rows`, `kRecFlagSliceSalvaged`, aulog 5) and streamed decode (AU ring v4 open slots, StreamFeeder, the decoder-input thread (FeedLoop), `[decoder] stream`, the MPP patches in `gs/player/mpp-patches/`, the stream-mode GS image and its p1 flash) | docs/slices.md (as built) + docs/findings/2026-10-09-venc-slice.md; flashing: docs/deploy.md |
 | radio/PHY below mabur | `third_party/devourer/CLAUDE.md` |
 
 Design specs live in `docs/superpowers/specs/` — **gitignored**, so they

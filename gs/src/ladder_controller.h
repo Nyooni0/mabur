@@ -159,7 +159,7 @@ struct LinkHealth {
   double rf_snr_db = std::numeric_limits<double>::quiet_NaN();
   // Label only: the RF EVM (dB, s1+s3 pooled) of the card that supplied
   // rf_snr_db. NaN when unsampled. Deliberately NOT a decision input — raw
-  // EVM is op-point-dependent (docs/evm-sweep-findings-2026-08-10.md).
+  // EVM is op-point-dependent (docs/findings/2026-08-10-evm-sweep.md).
   double rf_evm_db = std::numeric_limits<double>::quiet_NaN();
   // RF RSSI (dBm, s1+s3 pooled) of the same card, the second half of the
   // Part B fade trigger's joint condition. NaN = unsampled, which leaves it

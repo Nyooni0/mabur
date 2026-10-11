@@ -135,7 +135,7 @@ VerdictOut HopVerdict::window(double now_ms, const std::vector<VerdictCardIn>& c
   if (!impaired) o.v = Verdict::Healthy;
   else if (weak) o.v = Verdict::Fade;
   // blocked beats fading: a real fade lowers power and cannot raise NHM
-  // busy; analog desense reads as a fade (docs/analog-vtx-findings-2026-09-25.md).
+  // busy; analog desense reads as a fade (docs/findings/2026-09-25-analog-vtx.md).
   else if (blocked) o.v = Verdict::Interfered;
   else if ((contended || raised) && !fading) o.v = Verdict::Interfered;
   else o.v = Verdict::Unknown;

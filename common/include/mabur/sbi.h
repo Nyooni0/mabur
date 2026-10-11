@@ -8,7 +8,7 @@ namespace mabur {
 // constant enforces this in code — the chip accepts well past the 2304B
 // MSDU nominal via injection. The cap was 2900 from 2026-07 to 2026-09-08:
 // the July symbol-size sweep saw a 3207 B body lose 61.6% of frames whole
-// (docs/fec-symbol-size-328.md) and the constant fenced that envelope. No
+// (docs/findings/2026-07-25-fec-symbol-size-328.md) and the constant fenced that envelope. No
 // register explains it (GS RX packet limit 12 kB, HT MPDU max 3839 B) and
 // it predates A-MPDU, so on 2026-09-08 the cap was raised to the HT MPDU
 // ceiling — 3839 B less the 24 B MAC header and 4 B FCS = 3811 B on air,

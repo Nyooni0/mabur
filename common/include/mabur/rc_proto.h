@@ -240,7 +240,7 @@ struct Telem {
   // unavailable (first tick, unreadable). Replaced loadavg (`load_x100`)
   // 2026-09-21 in the SAME 16-bit slot: on this SoC loadavg counts the
   // SigmaStar SDK's parked D-state workers and read a flat ~13 idle or
-  // pegged (docs/dq-spike-findings-2026-08-31.md).
+  // pegged (docs/findings/2026-08-31-dq-spike.md).
   uint16_t cpu_busy_x100 = 65535;
   // Drone RX-side channel view, per telemetry period (cca-on 2026-09-23):
   // every frame the monitor-mode receiver handed the RX callback, split

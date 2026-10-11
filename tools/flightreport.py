@@ -175,7 +175,7 @@ def wall_fit(records):
     records: list of P dicts (one rung's worth). nan-snr probes are excluded
     from every stat but still counted. A FAIL whose snr exceeds the max PASS
     snr is an outlier (loss at high SNR is not an SNR wall -- see
-    docs/mcs6-bench-anomaly.md) and is excluded from the fit. Suggested wall
+    docs/findings/2026-07-27-mcs6-bench-anomaly.md) and is excluded from the fit. Suggested wall
     is the midpoint between the max inlier-fail snr and the min pass snr;
     "insufficient data" when either side is empty.
     """
@@ -420,7 +420,7 @@ def print_wall_report(ctllog):
             print(f"    fail snr: {min(fit['fail_snrs']):.1f}..{max(fit['fail_snrs']):.1f} dB")
         for s in fit["outlier_snrs"]:
             print(f"    outlier fail at snr={s:.1f} dB (loss at high SNR -- "
-                  f"not an SNR wall; see docs/mcs6-bench-anomaly.md)")
+                  f"not an SNR wall; see docs/findings/2026-07-27-mcs6-bench-anomaly.md)")
         if fit["wall"] is not None:
             print(f"    suggested wall: {fit['wall']:.1f} dB "
                   f"(between fail@{max(fit['inlier_fail_snrs']):.1f} "

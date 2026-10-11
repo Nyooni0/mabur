@@ -14,7 +14,7 @@ namespace maburplay {
 // follows the encoder's capture cadence instead of arrival jitter — the
 // dejitter spike measured today's mailbox presenter at ~750–940 vsync
 // repeat+skip pairs/min and a D of 12–16 ms removing ~70% of them for
-// under 5 ms of added mean latency (docs/dejitter-findings-2026-08-30.md).
+// under 5 ms of added mean latency (docs/findings/2026-08-30-dejitter.md).
 //
 // Clock map: pts is the drone's 32-bit µs counter; it is unwrapped by
 // deltas and anchored by the FASTEST observed frame (min of mono − pts),

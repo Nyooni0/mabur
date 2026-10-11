@@ -1,6 +1,6 @@
 #pragma once
 // RcfSlotter — slot the GS uplink into the drone's inter-AU idle
-// (docs/gs-uplink-self-blanking-findings-2026-09-02.md).
+// (docs/findings/2026-09-02-gs-uplink-self-blanking.md).
 //
 // Why: a GS control-frame send (RCF, DISC, repeat copies) blasts the
 // sibling RX card at ~-4 dBm and deafens the TX card, so any drone PPDU
@@ -33,7 +33,7 @@
 // exactly where the probe is -- measured 2x the enh stream's own loss,
 // and a fixed "one body airtime" deferral did nothing because it moved
 // the blast from one part of that spread to another
-// (docs/handover-probe-blanking-2026-09-04.md). So an ENH completion
+// (docs/findings/2026-09-04-handover-probe-blanking.md). So an ENH completion
 // releases NOTHING by itself: the release is the probe's own arrival
 // (on_probe_tail, fed from the probe sink), which is the exact "burst is
 // off air" signal at any MCS and frame size. A lost probe never arrives,

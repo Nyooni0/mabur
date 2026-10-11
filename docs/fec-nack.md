@@ -2,7 +2,7 @@
 
 Spec: `docs/superpowers/specs/2026-10-05-fec-nack-design.md` (gitignored;
 this page is the committed, as-built record). Spike and its bench numbers:
-`docs/fec-nack-spike-findings-2026-10-05.md`. RC_VERSION 15.
+`docs/findings/2026-10-05-fec-nack-spike.md`. RC_VERSION 15.
 
 ## What it is
 

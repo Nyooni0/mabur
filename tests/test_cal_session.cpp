@@ -32,7 +32,7 @@ std::vector<std::string> cal_log_lines(const std::string& dir) {
 }
 
 // The real TXAGC transfer curve is a flat floor below idx ~28, a ~0.3 dB/idx
-// ramp to ~91, then a flat ceiling to 127 (docs/txagc-calibration.md). A
+// ramp to ~91, then a flat ceiling to 127 (docs/findings/2026-07-16-txagc-calibration.md). A
 // CONSTANT curve is not a simplification of that, it is a different physical
 // claim -- power that never rises -- whose knee correctly sits at the bottom
 // of the sweep. Feeding one here made this test assert against a degenerate

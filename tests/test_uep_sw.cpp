@@ -3,7 +3,7 @@
 // block-FEC time-diversity buffer matrix: time diversity now comes from
 // overlapping repair windows, so sources never wait — the checks here pin
 // delivery under the same random/burst loss the old scheme was built for
-// (bench 2026-07-13, docs/handover-video-delivery.md §2).
+// (bench 2026-07-13, docs/handover-video-delivery.md (deleted 2026-10-11; in git history) §2).
 #include <array>
 #include <chrono>
 #include <cstdint>

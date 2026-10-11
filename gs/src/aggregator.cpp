@@ -158,7 +158,7 @@ void Aggregator::on_rx_body(const mabur::node::RxBody& m) {
     // excluded MSP and RC on the belief that they carried their own
     // counters and booked one phantom lost frame per such frame (~0.3 % of
     // loss_pct on the bench; measured 2026-09-03, both classes matched the
-    // missing seqs exactly — docs/gs-uplink-self-blanking-findings-2026-09-02.md).
+    // missing seqs exactly — docs/findings/2026-09-02-gs-uplink-self-blanking.md).
     // Self-originated frames were diverted above and never reach here.
     const bool decoder_bound_seq = true;
     static const bool gaplog = std::getenv("MABUR_GAPLOG") != nullptr;

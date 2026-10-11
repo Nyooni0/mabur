@@ -5,7 +5,7 @@
 # (paggr fraction + inter-frame tsfl-delta histogram + unique-counter fps —
 # NOT the equal-tsfl burst marker, which does not fire on an 8812EU RX).
 #
-# First run + findings: docs/dq-spike-findings-2026-08-31.md §11
+# First run + findings: docs/findings/2026-08-31-dq-spike.md §11
 # (2026-09-01: the E die aggregates; 93% of arrivals at pure MPDU airtime).
 #
 # Prereqs:

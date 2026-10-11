@@ -1144,8 +1144,8 @@ TEST(ampdu_rejects_bad_values) {
 // air_clock (spec 2026-09-06): shed_ms 0 = observe only; efficiency_20/
 // efficiency_40 are the per-MCS fraction of nominal PHY rate the link
 // delivers at each width (8 entries, HT mcs0..7, measured --
-// docs/bandwidth-sweep-findings-2026-09-17.md,
-// docs/bw40-sweep-findings-2026-09-23.md), priced into both the bitrate
+// docs/findings/2026-09-17-bandwidth-sweep.md,
+// docs/findings/2026-09-23-bw40-sweep.md), priced into both the bitrate
 // policy and the air clock; body_us a fixed per-body cost. Absent = all
 // ones = nominal, the pre-2026-09-17 policy.
 TEST(air_clock_defaults_when_absent) {

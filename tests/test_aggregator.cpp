@@ -22,7 +22,7 @@ static mabur::node::RxBody msg(uint8_t card, uint16_t seq, bool crc_ok,
                                std::vector<uint8_t> body) {
   mabur::node::RxBody m;
   m.card_id = card; m.mac_seq = seq; m.crc_ok = crc_ok;
-  m.rssi[0] = 38; m.rssi[1] = 40;   // both chains sane (see docs/chain-a-rssi-validation-handoff.md)
+  m.rssi[0] = 38; m.rssi[1] = 40;   // both chains sane (see docs/chain-a-rssi-validation-handoff.md (deleted 2026-10-11; in git history))
   m.snr[0] = 10; m.snr[1] = 25;
   m.evm[0] = -48; m.evm[1] = -44;  // raw half-dB, negative = clean, 0 = not sampled
   m.mono_us = 1000u * seq;
@@ -249,7 +249,7 @@ TEST(crc_failed_probe_body_is_delivered_for_salvage) {
 // or a DISC_ACK interleaved with video must advance the per-card seq walk
 // like any video body. Skipping them booked one phantom lost frame per
 // such frame — ~0.3 % of loss_pct on the bench
-// (docs/gs-uplink-self-blanking-findings-2026-09-02.md).
+// (docs/findings/2026-09-02-gs-uplink-self-blanking.md).
 TEST(msp_and_rc_frames_advance_card_seq_walk_no_phantom_loss) {
   mabur::MspSourceCfg cfg;
   std::vector<std::vector<uint8_t>> bodies;
