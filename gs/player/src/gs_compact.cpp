@@ -21,11 +21,13 @@ constexpr int kInsetX = 32, kInsetY = 24;
 // than by width -- an even split would put `snr` next to `bitrate`, which
 // reads as one continuous line of unrelated figures.
 //
-// Row 0 is the wider of the two (63 worst-case cells plus 5 gaps, against
-// row 1's 48 plus 5), but neither decides the type size any more -- the
-// sizing reference row does (gs_compact.h). REC sits in the corner because
-// in a row it would eat that reference's slack and pull a centred row off
-// centre whenever the recorder was merely armed.
+// The two rows share columns: an item's column is its position within its
+// row, so kOrder pairs ch/bitrate, mcs/res, air/fps, rssi/jit, snr/lat and
+// temp/loss. The worst-case grid is 72 cells plus 5 gaps, inside the
+// sizing reference row's 76 + 5, so the reference -- not the grid --
+// decides the type size (gs_compact.h). REC sits in the corner because in
+// the grid it would eat that slack and shift a column whenever the
+// recorder was merely armed.
 constexpr GsBarField kOrder[] = {
     GsBarField::kCh,   GsBarField::kMcs, GsBarField::kAir,     GsBarField::kRssi,
     GsBarField::kSnr,  GsBarField::kTemp, GsBarField::kRec,    GsBarField::kBitrate,
@@ -37,6 +39,13 @@ static_assert(sizeof(kOrder) / sizeof(kOrder[0]) == (size_t)GsBarField::kCount,
               "every field must appear exactly once in the draw order");
 static_assert(sizeof(kRow) / sizeof(kRow[0]) == (size_t)GsBarField::kCount,
               "every field needs a row");
+constexpr int items_in_row(int row) {
+  int n = 0;
+  for (int r : kRow) n += (r == row);
+  return n;
+}
+static_assert(items_in_row(0) == GsCompactBar::kCols && items_in_row(1) == GsCompactBar::kCols,
+              "both rows fill every column of the shared grid");
 
 // Gap between the two rows, on top of the cell height. The boxes span the
 // padded CELL, so stacking by glyph_h alone already separates them; this is
@@ -166,16 +175,37 @@ int GsCompactBar::row_of(GsBarField id) {
   return 0;
 }
 
-int GsCompactBar::worst_row_width(const MaskAtlas& a, int row, int n_cards) {
-  const int gap = item_gap(&a);
-  int w = 0, n = 0;
+int GsCompactBar::col_of(GsBarField id) {
+  int col[kRows] = {};
   for (int i = 0; i < (int)GsBarField::kCount; ++i) {
-    if (kRow[i] != row) continue;  // kCorner belongs to no row
-    if (n++) w += gap;
-    w += text_width(a, worst_case(kOrder[i], n_cards).c_str());
+    if (kRow[i] == kCorner) {
+      if (kOrder[i] == id) return -1;
+      continue;
+    }
+    if (kOrder[i] == id) return col[kRow[i]];
+    ++col[kRow[i]];
   }
-  // The first box's left pad and the last one's right.
-  return n ? w + 2 * pad_h(&a) : 0;
+  return -1;
+}
+
+// Each column's width in `a`: the wider of its items' worst cases.
+static void column_widths(const MaskAtlas& a, int n_cards, int* cw) {
+  for (int k = 0; k < GsCompactBar::kCols; ++k) cw[k] = 0;
+  for (int i = 0; i < (int)GsBarField::kCount; ++i) {
+    const int k = GsCompactBar::col_of(kOrder[i]);
+    if (k < 0) continue;
+    cw[k] = std::max(cw[k], text_width(a, GsCompactBar::worst_case(kOrder[i], n_cards).c_str()));
+  }
+}
+
+int GsCompactBar::worst_grid_width(const MaskAtlas& a, int n_cards) {
+  int cw[kCols];
+  column_widths(a, n_cards, cw);
+  int w = 0;
+  for (int k = 0; k < kCols; ++k) w += cw[k];
+  // Gaps between columns, then the first box's left pad and the last one's
+  // right.
+  return w + (kCols - 1) * item_gap(&a) + 2 * pad_h(&a);
 }
 
 int GsCompactBar::sizing_row_width(const MaskAtlas& a) {
@@ -210,9 +240,8 @@ bool GsCompactBar::layout(int screen_w, int screen_h, std::string* err) {
   for (int px = 1; px <= 512; ++px) {
     const MaskAtlas* a = font_.atlas(px);
     if (!a || a->advance_x <= 0) continue;
-    bool fits = sizing_row_width(*a) <= avail_w;
-    for (int row = 0; row < kRows; ++row)
-      if (worst_row_width(*a, row, kMaxCards) > avail_w) fits = false;
+    bool fits = sizing_row_width(*a) <= avail_w &&
+                worst_grid_width(*a, kMaxCards) <= avail_w;
     if (!fits) continue;
     // The stack also has to sit ABOVE the bottom inset without running off
     // the top of a short surface.
@@ -275,30 +304,27 @@ void GsCompactBar::place_(int n_cards) {
     bounds_ = union_of(bounds_, f.box);
   }
 
-  // Each row is centred on its OWN width, not on the block's: the two rows
-  // hold different amounts of text, and left-aligning the shorter one to
-  // the longer one's edge reads as a layout that slipped.
-  for (int row = 0; row < kRows; ++row) {
-    int total = 0, n = 0;
-    for (int i = 0; i < (int)GsBarField::kCount; ++i) {
-      if (kRow[i] != row) continue;
-      total += w[i] + (n++ ? gap_ : 0);
-    }
-    if (n == 0) continue;
-    // Centred, but never past the inset: with kMaxCards a row can be wide
-    // enough that centring and the inset disagree, and the inset wins.
-    int pen = (screen_w_ - total) / 2;
-    if (pen < inset_x_ + pad) pen = inset_x_ + pad;
-    for (int i = 0; i < (int)GsBarField::kCount; ++i) {
-      if (kRow[i] != row) continue;
-      Field& f = f_(kOrder[i]);
-      f.pen_x = pen;
-      f.baseline_y = baseline_y_[row];
-      f.box = DirtyRect{pen - pad, baseline_y_[row] - atlas_->baseline,
-                        w[i] + 2 * pad, atlas_->glyph_h};
-      bounds_ = union_of(bounds_, f.box);
-      pen += w[i] + gap_;
-    }
+  // The rows share a column grid (gs_compact.h), and the GRID is centred.
+  // Each item starts at its column's left edge; its box spans only its own
+  // worst case, not the column, so a narrow item's redraw stays narrow.
+  int cw[kCols];
+  column_widths(*atlas_, n_cards, cw);
+  int total = (kCols - 1) * gap_;
+  for (int k = 0; k < kCols; ++k) total += cw[k];
+  // Centred, but never past the inset: with kMaxCards the grid can be wide
+  // enough that centring and the inset disagree, and the inset wins.
+  int col_x[kCols];
+  col_x[0] = std::max((screen_w_ - total) / 2, inset_x_ + pad);
+  for (int k = 1; k < kCols; ++k) col_x[k] = col_x[k - 1] + cw[k - 1] + gap_;
+  for (int i = 0; i < (int)GsBarField::kCount; ++i) {
+    const int row = kRow[i];
+    if (row == kCorner) continue;
+    Field& f = f_(kOrder[i]);
+    f.pen_x = col_x[col_of(kOrder[i])];
+    f.baseline_y = baseline_y_[row];
+    f.box = DirtyRect{f.pen_x - pad, baseline_y_[row] - atlas_->baseline,
+                      w[i] + 2 * pad, atlas_->glyph_h};
+    bounds_ = union_of(bounds_, f.box);
   }
 }
 
@@ -497,12 +523,10 @@ int GsCompactBar::update(const GsSnapshot& snap, bool stale,
   if (!laid_out_) return 0;
   int drawn = 0;
 
-  // A changed card count changes the width of two items and therefore the
-  // x of every item after them -- and, because each row is centred, of
-  // every item before them on that row too. Both items live on row 0, but
-  // erase EVERYTHING anyway: it costs one extra clear of a row that did not
-  // move and removes the standing question of whether the split still keeps
-  // the widths apart. A field's own next draw only ever clears its NEW box.
+  // A changed card count changes the width of two items, so of their
+  // columns, and therefore -- the grid being centred -- the x of every
+  // column, on both rows. Erase everything: a column move takes the row-1
+  // item under it along. A field's own next draw only ever clears its NEW box.
   const int n = std::min((int)snap.cards.size(), kMaxCards);
   if (n != n_cards_) {
     if (n_cards_ >= 0) {

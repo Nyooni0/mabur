@@ -632,17 +632,21 @@ leg sized by `dvr.target` (`docs/vtx-recorder.md`); armed draws nothing.
 It sits in the corner because in a row it would eat into the bar's width
 and shift that row whenever the recorder was merely armed.
 
-Every item sits in a box sized for its WORST-CASE string (four cards), so
-the gaps between items are uneven and short values leave trailing space —
-that is what stops a row reflowing every time a figure gains a digit. The
+The two rows share columns: each item starts at the same x as the item
+above or below it (ch/bitrate, mcs/res, air/fps, rssi/jit, snr/lat,
+temp/loss), each column as wide as the wider of its two items' worst
+cases, and the grid as a whole is centred. Every item sits in a box sized
+for its WORST-CASE string (four cards), so short values leave trailing
+space — that is what stops a row reflowing every time a figure gains a
+digit. Only a card-count change moves the columns. The
 type size is one size for both rows, and it is pinned: the largest baked
 size at which a 76-character, 6-item reference row fits between the insets
 — 25/37/48/75 px at 720p/1080p/1440p/2160p with the shipped asset
 (`tests/test_gs_asset.cpp` pins them). That reference is the widest row
 from when the items carried text labels; the icons made the real rows
 narrower, and the freed width stays slack instead of growing the bar into
-the picture. The real rows must fit too, so a wider item can never
-overflow. Two rows because all twelve items on one line would cap the type
+the picture. The worst-case grid (72 cells plus 5 gaps) must fit too, so a
+wider item can never overflow. Two rows because all twelve items on one line would cap the type
 too small to read on the GS screen.
 
 The glyph atlas is `/usr/local/share/mabur/gs_osd.gfont`, committed and

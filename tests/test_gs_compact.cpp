@@ -148,6 +148,49 @@ TEST(the_scaled_fixture_bakes_exactly_kScaledSizes) {
 
 // --- the line ---------------------------------------------------------
 
+// The two rows share columns: every item starts at the x of the item
+// above/below it, at every card count and resolution, and the pairs are
+// the ones the layout promises.
+TEST(the_rows_share_columns) {
+  CHECK(GsCompactBar::col_of(GsBarField::kCh) == 0);
+  CHECK(GsCompactBar::col_of(GsBarField::kBitrate) == 0);
+  CHECK(GsCompactBar::col_of(GsBarField::kMcs) == 1);
+  CHECK(GsCompactBar::col_of(GsBarField::kRes) == 1);
+  CHECK(GsCompactBar::col_of(GsBarField::kAir) == 2);
+  CHECK(GsCompactBar::col_of(GsBarField::kFps) == 2);
+  CHECK(GsCompactBar::col_of(GsBarField::kRssi) == 3);
+  CHECK(GsCompactBar::col_of(GsBarField::kJit) == 3);
+  CHECK(GsCompactBar::col_of(GsBarField::kSnr) == 4);
+  CHECK(GsCompactBar::col_of(GsBarField::kLat) == 4);
+  CHECK(GsCompactBar::col_of(GsBarField::kTemp) == 5);
+  CHECK(GsCompactBar::col_of(GsBarField::kLoss) == 5);
+  CHECK(GsCompactBar::col_of(GsBarField::kRec) == -1);
+  GsFont f;
+  std::string err;
+  REQUIRE(f.load(GSFONT_SCALED, &err));
+  for (const Reso& r : kFourResolutions) {
+    for (int n : {0, 1, 2, 4}) {
+      GsCompactBar bar(f);
+      REQUIRE(bar.layout(r.w, r.h, &err));
+      Canvas c(r.w, r.h);
+      GsSnapshot s = nominal();
+      s.cards.resize((size_t)n, s.cards.empty() ? GsCard{} : s.cards[0]);
+      std::vector<DirtyRect> rects;
+      bar.update(s, false, player_nominal(), c.s, &rects);
+      for (int i = 0; i < (int)GsBarField::kCount; ++i)
+        for (int j = 0; j < (int)GsBarField::kCount; ++j) {
+          const GsBarField a = (GsBarField)i, b = (GsBarField)j;
+          if (GsCompactBar::col_of(a) < 0 || GsCompactBar::col_of(a) != GsCompactBar::col_of(b) ||
+              GsCompactBar::row_of(a) != 0 || GsCompactBar::row_of(b) != 1)
+            continue;
+          const int xa = bar.debug_field_box(a).x, xb = bar.debug_field_box(b).x;
+          if (xa != xb) std::printf("  %dx%d n=%d: fields %d/%d at x %d vs %d\n", r.w, r.h, n, i, j, xa, xb);
+          CHECK(xa == xb);
+        }
+    }
+  }
+}
+
 // The format the operator asked for, field by field. Pinned per row because
 // the ORDER and the SPLIT are as much a part of the layout as the labels --
 // and because which row an item sits on decides the type size (row 1 is the
@@ -523,7 +566,7 @@ TEST(rec_redraw_for_the_gs_target_leaves_the_strip_left_of_its_box_alone) {
 
 // The indicator is anchored top-right and stays there: neither the
 // recorder's state nor the card count may move it, and it must not drag
-// the centred rows around the way an in-row box did.
+// the centred grid around the way an in-row box did.
 TEST(the_recording_indicator_is_anchored_top_right_and_moves_nothing) {
   GsFont f;
   std::string err;
@@ -547,24 +590,25 @@ TEST(the_recording_indicator_is_anchored_top_right_and_moves_nothing) {
   // Nowhere near the rows.
   CHECK(rec.y + rec.h < 1080 / 2);
 
-  auto row0_extent = [&]() {
+  auto grid_extent = [&]() {
     int x0 = 1 << 30, x1 = -1;
     for (int i = 0; i < (int)GsBarField::kCount; ++i) {
       const GsBarField id = (GsBarField)i;
-      if (GsCompactBar::row_of(id) != 0) continue;
+      if (GsCompactBar::row_of(id) == GsCompactBar::kCorner) continue;
       const DirtyRect b = bar.debug_field_box(id);
       x0 = std::min(x0, b.x);
       x1 = std::max(x1, b.x + b.w);
     }
     return std::pair<int, int>(x0, x1);
   };
-  const auto armed = row0_extent();
-  // Row 0 is centred, and stays exactly where it is when recording starts.
+  const auto armed = grid_extent();
+  // The grid is centred, and stays exactly where it is when recording
+  // starts.
   CHECK(std::abs((armed.first + armed.second) / 2 - 960) <= 8);
   ps.rec.kind = RecState::Kind::kRecording;
   rects.clear();
   bar.update(s, false, ps, c.s, &rects);
-  CHECK(row0_extent() == armed);
+  CHECK(grid_extent() == armed);
   const DirtyRect rec2 = bar.debug_field_box(GsBarField::kRec);
   CHECK(rec2.x == rec.x && rec2.y == rec.y && rec2.w == rec.w && rec2.h == rec.h);
   // Starting a recording redraws ONE field -- no reflow.
@@ -685,7 +729,7 @@ TEST(layout_picks_the_largest_baked_size_the_rule_allows) {
     auto fits_in = [&](const MaskAtlas& a) {
       if (GsCompactBar::sizing_row_width(a) > avail) return false;
       for (int row = 0; row < GsCompactBar::kRows; ++row)
-        if (GsCompactBar::worst_row_width(a, row, kMaxCards) > avail) return false;
+        if (GsCompactBar::worst_grid_width(a, kMaxCards) > avail) return false;
       const int block = GsCompactBar::kRows * a.glyph_h +
                         (GsCompactBar::kRows - 1) * row_gap;
       return block + (int)(24 * scale + 0.5) <= r.h;
@@ -702,14 +746,14 @@ TEST(layout_picks_the_largest_baked_size_the_rule_allows) {
   }
 }
 
-// The pin is load-bearing: the real rows are narrower than the reference
-// (the icons replaced longer text labels), so without it the bar would
-// grow -- strictly at the 1080p design resolution. Elsewhere the bake set
-// can leave no size between the two (at 2160p the next one up from 76 is
-// 112, which nothing fits), so there it is only "never larger". And at
-// every resolution the rows stay narrower than the reference, so a wider
-// item taking the size over shows up here.
-TEST(the_sizing_reference_not_the_rows_sets_the_type_size) {
+// The reference, not the grid, sets the type size: at the chosen size the
+// worst-case grid is narrower than the reference row, so the size can
+// never be one only the grid allows -- and an item grown wide enough to
+// take the size over shows up here. (The grid is just 4 cells narrower
+// than the reference, so whether the reference ALSO holds the size below
+// what the grid alone would allow depends on the bake set; it is not
+// asserted.)
+TEST(the_grid_fits_inside_the_sizing_reference) {
   GsFont f;
   std::string err;
   REQUIRE(f.load(GSFONT_SCALED, &err));
@@ -718,24 +762,11 @@ TEST(the_sizing_reference_not_the_rows_sets_the_type_size) {
     REQUIRE(bar.layout(r.w, r.h, &err));
     const double scale = (double)r.h / 1080.0;
     const int avail = r.w - 2 * (int)(32 * scale + 0.5);
-    int rows_alone = 0;  // largest size the rows alone would allow
-    for (int px = 1; px <= 512; ++px) {
-      const MaskAtlas* a = f.atlas(px);
-      if (!a) continue;
-      bool fits = true;
-      for (int row = 0; row < GsCompactBar::kRows; ++row)
-        if (GsCompactBar::worst_row_width(*a, row, kMaxCards) > avail) fits = false;
-      if (fits) rows_alone = px;
-    }
-    std::printf("  %dx%d: bar %d px, rows alone would allow %d px\n", r.w, r.h,
-                bar.debug_atlas_px(), rows_alone);
-    CHECK(bar.debug_atlas_px() <= rows_alone);
-    if (r.h == 1080) CHECK(bar.debug_atlas_px() < rows_alone);
     const MaskAtlas* chosen = f.atlas(bar.debug_atlas_px());
     REQUIRE(chosen != nullptr);
-    for (int row = 0; row < GsCompactBar::kRows; ++row)
-      CHECK(GsCompactBar::worst_row_width(*chosen, row, kMaxCards) <
-            GsCompactBar::sizing_row_width(*chosen));
+    CHECK(GsCompactBar::sizing_row_width(*chosen) <= avail);
+    CHECK(GsCompactBar::worst_grid_width(*chosen, kMaxCards) <
+          GsCompactBar::sizing_row_width(*chosen));
   }
 }
 

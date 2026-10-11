@@ -60,7 +60,14 @@ OSD_SHA_EXPECTED=e202e5d127467752984bda2c135d166661f8c0eb2c8481a77d54b39ed8f76a8
 # in the REC band; both bar rows narrower and still centred (row 0 x
 # 264..1633 -> 407..1490, row 1 143..1688 -> 374..1457); lit 129,731 ->
 # 90,091 as the label text left.
-BAR_SHA_EXPECTED=a8df1c23b5534ec4b54db57dacdc1eb9ba18a09f57e1c7e8460c09badfdf20c7
+# Re-blessed (was a8df1c23...): the two rows share a centred column grid
+# instead of each centring on its own width. Pixel diff old vs new (old
+# dump rebuilt from the previous sources reproduces a8df1c23... exactly):
+# same three ink bands at the same rows, ZERO differing px in the REC band,
+# lit total identical at 90,091 (a pure horizontal translation of items),
+# and both rows now start at x 308 (row 0 308..1413, row 1 308..1523; were
+# 407..1490 and 374..1457).
+BAR_SHA_EXPECTED=46d4286e152e61ca499602cf59122e83c4820b5945008a5415d6160c15be7937
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
@@ -325,15 +332,21 @@ assert 1920 - 32 - 24 <= rx1 <= 1920 - 32, "rec not flush right (x1=%d)" % rx1
 assert rx0 > w // 2, "rec is not in the right half (x0=%d)" % rx0
 
 # --- the two bottom rows ---
+row_x = []
 for i, (y0, y1) in enumerate(bands[1:]):
     x0, x1 = extent(y0, y1)
+    row_x.append((x0, x1))
     print("  row %d: x %d..%d y %d..%d" % (i, x0, x1, y0, y1))
-    # Centred on the surface, loosely: every box is sized from its worst
-    # case, so short values sit legitimately off centre -- 160 px still discriminates against an
-    # edge-anchored row.
-    assert abs((x0 + x1) // 2 - w // 2) <= 160, "row %d not centred" % i
     # Inside the bar's own 32 px horizontal inset.
     assert x0 >= 32 and x1 <= w - 32, "row %d crosses its inset" % i
+# The rows share a column grid: both start at column 0's left edge (each
+# first item opens with its icon, so the ink lines up too).
+assert row_x[0][0] == row_x[1][0], "rows do not share a left edge: %r" % (row_x,)
+# The GRID is centred, loosely: every box is sized from its worst case, so
+# short values sit legitimately off centre -- 160 px still discriminates
+# against an edge-anchored grid.
+gx0, gx1 = min(x for x, _ in row_x), max(x for _, x in row_x)
+assert abs((gx0 + gx1) // 2 - w // 2) <= 160, "grid not centred (x %d..%d)" % (gx0, gx1)
 
 # The block hugs the bottom: within the 24 px inset plus the cell's own
 # descender.

@@ -60,6 +60,12 @@ constexpr const char* kLoss = "\U000F033A";     // link-variant-off
 // twelve items on one line would cap the type too small to read on the GS
 // screen.
 //
+// The two rows share COLUMNS: an item starts at the same x as the item
+// above or below it (ch/bitrate, mcs/res, air/fps, rssi/jit, snr/lat,
+// temp/loss), each column as wide as the wider of its two worst cases, and
+// the grid -- not each row -- is centred. Rows centred on their own widths
+// put every item at an arbitrary offset from its neighbour on the other row.
+//
 // The TYPE SIZE is pinned, not "whatever fits": layout() takes the largest
 // baked size at which a reference row of kSizingChars characters in
 // kSizingItems items fits between the insets -- 25/37/48/75 px at
@@ -67,7 +73,7 @@ constexpr const char* kLoss = "\U000F033A";     // link-variant-off
 // widest row from when the items carried text labels, and the operator
 // chose that size; the icons made the real rows narrower, and the width
 // they freed stays slack rather than growing the bar into the picture. The
-// real worst-case rows must fit too, so a wider item can never overflow.
+// real worst-case grid must fit too, so a wider item can never overflow.
 //
 // No status colours, no meters, no bars -- every glyph takes
 // tok::kTextPrimary, with three deliberate exceptions.
@@ -145,10 +151,11 @@ class GsCompactBar final : public GsLayer {
   explicit GsCompactBar(GsFont& font, RecTarget rec_target = RecTarget::kGs)
       : font_(font), rec_target_(rec_target) {}
 
-  // Picks the LARGEST baked atlas whose worst-case rows (kMaxCards cards,
-  // every value at the magnitude its clamp allows) both fit between the
-  // insets and stack inside the surface, then centres each row for however
-  // many cards are actually reported. Type size is fixed at the worst case
+  // Picks the LARGEST baked atlas at which the sizing reference row and the
+  // worst-case grid (kMaxCards cards, every value at the magnitude its
+  // clamp allows) fit between the insets and the rows stack inside the
+  // surface, then centres the grid for however many cards are actually
+  // reported. Type size is fixed at the worst case
   // on purpose: sizing it to the live card count would change the font
   // under the pilot the first time a card dropped out. Fails (with *err
   // set) when even the smallest baked size cannot fit.
@@ -176,13 +183,14 @@ class GsCompactBar final : public GsLayer {
   DirtyRect debug_field_box(GsBarField id) const;
   int debug_atlas_px() const;
   int debug_rec_atlas_px() const;  // the REC indicator's size, 0 before layout()
-  // Width of worst-case row `row` in `a`, boxes included -- exactly what
-  // layout() compares against the space between the insets. Exposed so the
-  // size-choice test can assert "no larger baked size fits" by the same
-  // measurement layout() makes, rather than by reimplementing it.
-  static int worst_row_width(const MaskAtlas& a, int row, int n_cards);
+  // Width of the worst-case column grid in `a` with `n_cards` cards, boxes
+  // included -- exactly what layout() compares against the space between
+  // the insets. Exposed so the size-choice test can assert "no larger baked
+  // size fits" by the same measurement layout() makes, rather than by
+  // reimplementing it.
+  static int worst_grid_width(const MaskAtlas& a, int n_cards);
   // Width of the sizing reference row in `a` (see the type-size paragraph
-  // above), measured the same way as worst_row_width.
+  // above), measured the same way as worst_grid_width.
   static int sizing_row_width(const MaskAtlas& a);
   static constexpr int kSizingChars = 76;
   static constexpr int kSizingItems = 6;
@@ -190,6 +198,9 @@ class GsCompactBar final : public GsLayer {
   // kCorner for the recording indicator, which is right-flushed at the top
   // inset and belongs to no row.
   static int row_of(GsBarField id);
+  // Which grid column an item draws in, 0..kCols-1; -1 for the corner item.
+  static int col_of(GsBarField id);
+  static constexpr int kCols = 6;
   static constexpr int kRows = 2;
   static constexpr int kCorner = -1;
   // The widest string field `id` can render with `n_cards` cards -- what
@@ -199,7 +210,7 @@ class GsCompactBar final : public GsLayer {
   // clamp in state_of_ exists to keep the live string inside this one.
   // Public (not just an implementation detail of layout()) so a worst-case
   // format change -- like the 40 MHz rung's width suffix -- can be pinned
-  // by its own test rather than only indirectly through worst_row_width.
+  // by its own test rather than only indirectly through worst_grid_width.
   // kRec's worst case depends on dvr.target (gs_layer.h rec_worst); every
   // other field ignores rec_target.
   static std::string worst_case(GsBarField id, int n_cards,
