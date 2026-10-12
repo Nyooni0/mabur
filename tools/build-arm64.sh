@@ -413,7 +413,7 @@ echo "maburplay NEEDED:"; "$MABUR_BR_HOST/bin/aarch64-none-linux-gnu-readelf" -d
 #        libavcodec/libavutil from that sysroot; no MPP, no GPU stage, no
 #        burned DVR. Skipped (with a note) when that output does not exist,
 #        so a Radxa-only checkout still builds stages 1-6.
-rm -f out/arm64/maburplay-opi
+rm -f out/arm64/maburplay-opi out/arm64/v4l2req_streamcheck
 MABUR_BR_HOST_OPI="${MABUR_BR_HOST_OPI:-$PWD/../sbc-groundstations-gilankpam/output/orangepi_zero2w_defconfig/host}"
 OPI_SYSROOT="$MABUR_BR_HOST_OPI/aarch64-buildroot-linux-gnu/sysroot"
 if [ ! -x "$MABUR_BR_HOST_OPI/bin/aarch64-none-linux-gnu-gcc" ]; then
@@ -434,6 +434,10 @@ else
   [ -e "$OPI_SYSROOT/usr/lib/pkgconfig/libavcodec.pc" ] || {
     echo "error: $OPI_SYSROOT has no libavcodec.pc -- build ffmpeg-v4l2request in the OPi" >&2
     echo "       Buildroot output first" >&2; exit 1; }
+  grep -q "AV_PKT_FLAG_PARTIAL" "$OPI_SYSROOT/usr/include/libavcodec/packet.h" || {
+    echo "error: the OPi sysroot's libavcodec lacks mabur's stream patch -- rebuild" >&2
+    echo "       ffmpeg-v4l2request with gs/player/ffmpeg-patches (image repo" >&2
+    echo "       package/ffmpeg-v4l2request/0002-*)" >&2; exit 1; }
   (
     unset CPATH
     export MABUR_BR_HOST="$MABUR_BR_HOST_OPI"
@@ -449,9 +453,10 @@ else
       -DDEVOURER_KESTREL_8852B=OFF -DDEVOURER_KESTREL_8852C=OFF \
       -DDEVOURER_LOG_MAX_LEVEL=WARN \
       -DMABUR_PLAYER_HW=ON -DMABUR_PLAYER_DECODER=v4l2req
-    cmake --build build-arm64-opi -j"$(nproc)" --target maburplay
+    cmake --build build-arm64-opi -j"$(nproc)" --target maburplay v4l2req_streamcheck
   )
   "$MABUR_BR_HOST_OPI/bin/aarch64-none-linux-gnu-strip" build-arm64-opi/gs/player/maburplay -o out/arm64/maburplay-opi
+  "$MABUR_BR_HOST_OPI/bin/aarch64-none-linux-gnu-strip" build-arm64-opi/bench/v4l2req_streamcheck/v4l2req_streamcheck -o out/arm64/v4l2req_streamcheck
   echo "maburplay-opi NEEDED:"
   _needed=$("$MABUR_BR_HOST_OPI/bin/aarch64-none-linux-gnu-readelf" -d out/arm64/maburplay-opi | grep NEEDED)
   echo "$_needed"
