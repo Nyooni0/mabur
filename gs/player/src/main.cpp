@@ -1314,6 +1314,11 @@ int main(int argc, char** argv) {
           errors_at_3s = mpp->errors();
         }
 #endif
+#ifdef MABUR_PLAYER_V4L2REQ
+        if (auto* v4 = dynamic_cast<maburplay::V4l2ReqBackend*>(backend.get())) {
+          errors_at_3s = v4->errors();
+        }
+#endif
       }
       if (ring.dead()) {
         std::fprintf(stderr, "maburplay: ring reader dead, exiting\n");
@@ -1350,6 +1355,15 @@ int main(int argc, char** argv) {
       // pipeline integrity, not bitstream cleanliness.
       error_count = mpp->errors();
       concealed_count = mpp->concealed();
+    }
+#endif
+#ifdef MABUR_PLAYER_V4L2REQ
+    if (auto* v4 = dynamic_cast<maburplay::V4l2ReqBackend*>(backend.get())) {
+      error_count = v4->errors();
+      std::fprintf(stderr, "maburplay: v4l2req frames=%llu shape_drops=%llu gated=%llu\n",
+                   static_cast<unsigned long long>(v4->frames()),
+                   static_cast<unsigned long long>(v4->dropped_shape()),
+                   static_cast<unsigned long long>(v4->gated()));
     }
 #endif
     // If the 3s-post-sync mark was never reached (run ended too soon, or
@@ -1419,6 +1433,15 @@ int main(int argc, char** argv) {
                  static_cast<unsigned long long>(ring.open_aborted()), wk.p50, wk.p99, wk.n,
                  static_cast<unsigned long long>(stream_refused),
                  static_cast<unsigned long long>(feed.parks()));
+#ifdef MABUR_PLAYER_V4L2REQ
+    // backend read on the feed thread: safe only because the watchdog re-creates it while the feed is parked.
+    if (auto* v4 = dynamic_cast<maburplay::V4l2ReqBackend*>(backend.get()))
+      std::fprintf(stderr, "v4l2req: frames=%llu errors=%llu shape_drops=%llu gated=%llu\n",
+                   static_cast<unsigned long long>(v4->frames()),
+                   static_cast<unsigned long long>(v4->errors()),
+                   static_cast<unsigned long long>(v4->dropped_shape()),
+                   static_cast<unsigned long long>(v4->gated()));
+#endif
   }, 5000);
   feed.start();
   std::fprintf(stderr, "maburplay: feed thread on (ring reader + decoder input off the render loop)\n");

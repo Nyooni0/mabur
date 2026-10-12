@@ -1,0 +1,52 @@
+#ifndef MABUR_PLAYER_V4L2REQ_BACKEND_H_
+#define MABUR_PLAYER_V4L2REQ_BACKEND_H_
+
+#include <cstdint>
+#include <memory>
+
+#include "video_backend.h"
+
+namespace maburplay {
+
+// HEVC hardware decode on a V4L2 stateless (request API) decoder -- Cedrus on
+// the Allwinner H618 -- through libav's v4l2request hwaccel, to DRM-PRIME
+// linear NV12. Cross build only (MABUR_PLAYER_V4L2REQ); registered by
+// make_backend("v4l2req").
+//
+// Threads: libav may only be driven from one thread, so every libav call --
+// decode, and the frees that return buffers to its pool -- runs on the thread
+// that calls submit_au() (the feed thread, or main when there is none).
+// poll() and release_frame() run on main and only touch a locked handoff:
+// decoded frames wait in a ready queue for poll() to hand to the FrameSink;
+// released frames wait in a release queue that the next submit_au() frees,
+// which is exactly when the decoder needs a free buffer again. flush() and
+// the destructor run on main only while the feed is parked (FeedLoop's flush
+// contract) and free both queues before resetting or freeing the decoder.
+//
+// No libav include here, as with mpp_backend.h: null_backend.cpp includes
+// this on every v4l2req build.
+class V4l2ReqBackend : public VideoBackend {
+ public:
+  V4l2ReqBackend();
+  ~V4l2ReqBackend() override;
+
+  bool init(const BackendCfg&, FrameSink) override;
+  void submit_au(const uint8_t* au, size_t n, uint32_t pts_us) override;
+  void flush() override;
+  void release_frame(const DmaFrame&) override;
+  void poll() override;
+
+  // Diagnostics (read by --decode-only and the feed thread's 5 s line).
+  uint64_t frames() const;         // frames handed to the FrameSink
+  uint64_t errors() const;         // send/receive hard failures
+  uint64_t dropped_shape() const;  // decoded frames not in DrmPresenter's NV12 shape
+  uint64_t gated() const;          // AUs held back waiting for an IRAP
+
+ private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+};
+
+}  // namespace maburplay
+
+#endif  // MABUR_PLAYER_V4L2REQ_BACKEND_H_

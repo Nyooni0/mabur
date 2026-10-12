@@ -42,7 +42,7 @@ TEST(values_and_strictness) {
   threw = false;
   try { maburplay::load_config(write_tmp_play("backend = \"vaapi\"\n")); }
   catch (const std::exception&) { threw = true; }
-  CHECK(threw);  // backend must be one of mpp|null
+  CHECK(threw);  // backend must be one of mpp|v4l2req|null
   threw = false;
   try { maburplay::load_config(write_tmp_play("[dvr]\nfragment_ms = 50\n")); }
   catch (const std::exception&) { threw = true; }

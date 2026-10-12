@@ -5,7 +5,7 @@
 
 ring_path   = "/dev/shm/mabur-au"   # must match maburgs' au_ring.path
 socket      = "/run/mabur-au.sock"  # must match maburgs' au_ring.socket
-backend     = "mpp"                 # "mpp" = hardware decode to the screen; "null" = decode nothing (testing)
+backend     = "mpp"                 # "mpp" = hardware decode to the screen; "v4l2req" = Cedrus hardware decode (Orange Pi); "null" = decode nothing (testing)
 screen_mode = "1920x1080@60"        # display resolution and refresh rate
 
 # Video recorder (DVR).

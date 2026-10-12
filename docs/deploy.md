@@ -325,6 +325,18 @@ prints it, only the fingerprint).
   `out/arm64/maburplay-static` is the musl-static build of the same player
   without the GPU stage, for an image that lacks Mesa.
 
+**Orange Pi Zero 2W GS** (`docs/opi-zero2w.md`). Same layout and init
+scripts as above; the player binary is `out/arm64/maburplay-opi`
+(installed as `/usr/local/bin/maburplay`), glibc-dynamic against the OPi
+image's libav: NEEDED `libavcodec.so.61`, `libavutil`, `libdrm.so.2`,
+libstdc++. Its config must say `backend = "v4l2req"`, `dvr.mode = "raw"`
+— a Radxa `maburplay.toml` exits 2. Check the target first:
+`ssh $GS cat /proc/device-tree/model` must read `OrangePi Zero 2W`.
+
+    ssh $GS '/etc/init.d/S97maburplay stop'
+    scp -O out/arm64/maburplay-opi $GS:/usr/local/bin/maburplay
+    ssh $GS '/etc/init.d/S97maburplay start'
+
 **CPE510 relay** (`radio.relays`, `docs/cpe510-relay.md`). The Radxa ZERO 3
 has no Ethernet: the CPE needs a USB-Ethernet adapter on the GS. The CPE
 serves DHCP on its LAN, 10.83.11.100-199, with **no router and no DNS**
