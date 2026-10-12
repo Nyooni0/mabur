@@ -18,9 +18,10 @@ DRM-PRIME linear NV12 and are handed to `DrmPresenter` unchanged.
   (`frame_handoff.h`). Released frames are freed before the next decode.
 - **Entry gate.** After init and every flush, AUs are dropped until the
   first entry point (`mabur::au_is_entry_point`: an IRAP, or an AU carrying
-  an SPS), counted as `gated`. The drone's intra-refresh stream sends no
-  IRAP at all: its periodic refresh AU is VPS/SPS/PPS + TRAIL_R (every
-  `venc.gop_s`), so that is where decode starts. Joining on a bare P
+  an SPS), counted as `gated`. The drone's intra-refresh stream sends a
+  real IRAP only at session start and on an encoder reconfiguration; its
+  periodic refresh AU is VPS/SPS/PPS + TRAIL_R (every `venc.gop_s`), so
+  that is where a mid-session join starts. Joining on a bare P
   picture would make Cedrus reference never-decoded buffers. Not re-armed
   on decode errors.
 - **Synchronous.** The hwaccel waits for the capture buffer before
@@ -32,8 +33,8 @@ Counters: `--decode-only` JSON's `errors`/`errors_after_sync_3s` and the
 `maburplay: v4l2req ...` / `v4l2req: frames= errors= bitstream= shape_drops=
 gated=` lines (the latter every 5 s in `/tmp/maburplay.log`) both name
 `errors` and `bitstream` separately. `errors` is hard failures only --
-device/alloc failure, a rejected packet, a decoded frame in a shape
-`DrmPresenter` can't import -- the same meaning `errors_after_sync_3s` has
+device/alloc failure, a rejected packet, a frame that comes back other
+than DRM-PRIME -- the same meaning `errors_after_sync_3s` has
 for MPP. `bitstream` is `AVERROR_INVALIDDATA` from send/receive: bitstream
 damage from a lossy link, not a decoder fault, and NOT included in
 `errors`.
@@ -47,17 +48,33 @@ damage from a lossy link, not a decoder fault, and NOT included in
 | Streamed (slice) decode | MPP-only | `decoder.stream = false` (true falls back to whole pictures) |
 | Record button | the H618's GPIO lines carry no names, so `[input.rec]` cannot resolve | stripped from the image's default |
 
-Raw DVR, both OSDs, the vsync servo and the latency log work as on the
-Radxa.
+**Raw DVR is the only DVR here, and it starts on a real IRAP.** `RawDvr`
+opens a file only at an IRAP (`docs/observability.md`), which the drone
+sends at session start and on an encoder reconfiguration (a rate change),
+not at every refresh. A recording started mid-session therefore waits
+for the next one; with no record button, `dvr.autostart = true` is the
+way to record a whole flight.
 
 ## Display
 
-`DrmPresenter` probes the DE33 like any other CRTC: video on the NV12 VI
-overlay plane, OSD on an ARGB plane above it, zpos mutable on all three
-planes. Full-screen scaling needs the image's DE33 scaler kernel patch
-(`board/orangepi/zero2w/linux-patches/` in the image repo). Record here
-what the bench shows for async flip and `vsync_ts_exact` (Task 6 fills
-this in).
+`DrmPresenter` probes the DE33 like any other CRTC. On a 1080p60 HDMI sink
+the topology is:
+
+- video on the overlay NV12 (VI) plane at zpos 1, scaled to the mode
+  (the image's DE33 scaler kernel patch,
+  `board/orangepi/zero2w/linux-patches/` in the image repo);
+- the OSD on the primary plane (ARGB8888 linear, full mode) at zpos 2,
+  its transparent buffer doubling as the backdrop;
+- no `CUBIC_LUT` on the CRTC, so no display colortrans.
+
+`PAGE_FLIP_ASYNC` is refused (EINVAL), so flips are vsync-paced; the
+regulator's vsync servo locks and runs in paced mode. Page-flip
+timestamps are kernel CLOCK_MONOTONIC (`DRM_CAP_TIMESTAMP_MONOTONIC`, as
+on every DRM driver), so the latency log's `dsp` segment is exact.
+
+Decode keeps up with 1080p60: Cedrus decodes an AU in about 7 ms
+(`lat:` `dec`), and the GS OSD layer costs no measurable frame rate.
+Bench record: `docs/findings/2026-10-12-opi-zero2w-bringup.md`.
 
 ## Build and deploy
 

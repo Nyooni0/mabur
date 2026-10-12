@@ -22,8 +22,8 @@ namespace maburplay {
 
 namespace {
 
-// Extra buffers av_hwdevice_ctx_create's DRM-PRIME pool preallocates beyond
-// the decoder's own references: on screen + pending flip + mailbox
+// Extra buffers the hwaccel's DRM-PRIME frame pool (sized at avcodec_open2)
+// preallocates beyond the decoder's own references: on screen + pending flip + mailbox
 // (DrmPresenter), the regulator's held frame, and slack for a frame in the
 // ready queue. Not a ceiling -- the pool is an av_buffer_pool that grows on
 // demand past this if the handoff backs up further.

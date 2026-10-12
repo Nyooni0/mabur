@@ -29,9 +29,10 @@ std::vector<NalView> split_nals(const uint8_t* au, size_t n);
 bool au_is_irap(const uint8_t* au, size_t n);
 
 // True where a decoder joining the stream can start: an IRAP, or an AU that
-// carries an SPS. An intra-refresh encoder never sends an IRAP; its periodic
-// refresh AU leads with VPS/SPS/PPS and codes the picture as a TRAIL_R, so on
-// such a stream the SPS-carrying AU is the only entry there is.
+// carries an SPS. An intra-refresh encoder sends a real IRAP only at session
+// start and on an encoder reconfiguration; its periodic refresh AU leads with
+// VPS/SPS/PPS and codes the picture as a TRAIL_R, so mid-stream the
+// SPS-carrying AU is the only entry there is.
 bool au_is_entry_point(const uint8_t* au, size_t n);
 
 // Harvests VPS(32)/SPS(33)/PPS(34) NAL units from Annex-B access units.
