@@ -23,7 +23,8 @@ add_library(mabur_player_core STATIC
   src/lat_tracker.cpp
   src/lat_log.cpp
   src/splash_image.cpp
-  src/colortrans.cpp)
+  src/colortrans.cpp
+  src/prime_frame.cpp)
 target_include_directories(mabur_player_core
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
   PRIVATE ${CMAKE_SOURCE_DIR}/third_party)
