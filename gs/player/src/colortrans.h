@@ -72,6 +72,18 @@ bool affine_3x4(const ColorTrans& t, float out[12]);
 // The kernel CTM blob's words: S31.32 sign-magnitude (bit 63 = sign).
 void pack_ctm_3x4(const float m[12], uint64_t out[12]);
 
+// The display stage's mechanism. kLut: the CRTC's CUBIC_LUT, which also
+// covers the OSD planes, so the OSD is pre-inverted. kPlaneCtm: the video
+// plane's CSC, which the OSD plane never passes through, so the OSD is left
+// alone. A LUT wins when both exist (it is exact where the CTM is not).
+enum class DisplayCt { kLut, kPlaneCtm, kFlat };
+struct DisplayCtChoice {
+  DisplayCt how;
+  bool invert_osd;
+};
+DisplayCtChoice pick_display_colortrans(bool enable, bool lut_avail, bool ctm_avail,
+                                        bool affine_ok);
+
 // --- CRTC 3D LUT (VOP2 CUBIC_LUT, 9x9x9, 12-bit) -------------------------
 // Which input channel varies fastest across the 729 entries. Undocumented;
 // pinned on the bench (docs/colortrans.md). kRedFastest is the default.

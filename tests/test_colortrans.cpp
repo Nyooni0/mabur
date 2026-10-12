@@ -232,4 +232,29 @@ TEST(pack_ctm_3x4_is_s31_32_sign_magnitude) {
   CHECK(w[4] == (5ull << 31));
 }
 
+// Which display mechanism, and whether the OSD is pre-inverted.
+// (Revert check: let kPlaneCtm set invert_osd -> the CTM CHECKs fail; let
+// the CTM be tried before the LUT -> the "LUT wins" CHECK fails.)
+TEST(pick_display_colortrans_prefers_the_lut_and_inverts_only_for_it) {
+  const auto pick = pick_display_colortrans;
+  // Off: never a mechanism, never an inverted OSD.
+  for (int lut = 0; lut < 2; ++lut)
+    for (int ctm = 0; ctm < 2; ++ctm) {
+      const DisplayCtChoice c = pick(false, lut, ctm, true);
+      CHECK(c.how == DisplayCt::kFlat && !c.invert_osd);
+    }
+  // Radxa: the LUT, OSD inverted -- and it wins over a CTM.
+  CHECK(pick(true, true, false, true).how == DisplayCt::kLut);
+  CHECK(pick(true, true, false, true).invert_osd);
+  CHECK(pick(true, true, true, true).how == DisplayCt::kLut);
+  CHECK(pick(true, true, false, false).how == DisplayCt::kLut);  // LUT needs no affine
+  // Orange Pi: the CTM, OSD untouched.
+  CHECK(pick(true, false, true, true).how == DisplayCt::kPlaneCtm);
+  CHECK(!pick(true, false, true, true).invert_osd);
+  // CTM but gamma != 1, or neither mechanism: flat.
+  CHECK(pick(true, false, true, false).how == DisplayCt::kFlat);
+  CHECK(pick(true, false, false, true).how == DisplayCt::kFlat);
+  CHECK(!pick(true, false, false, true).invert_osd);
+}
+
 MTEST_MAIN

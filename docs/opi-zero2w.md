@@ -85,7 +85,6 @@ capture comes from `tools/bench/ausniff.py --oneshot --dump-annexb`.
 | Feature | Why | Config |
 |---|---|---|
 | Burned DVR | no hardware encoder in mainline | `dvr.mode = "burned"` exits 2 at startup |
-| colortrans | no CRTC `CUBIC_LUT`, no RGA | `colortrans.enable = false` (true only logs that the CRTC has no LUT) |
 | Record button | the H618's GPIO lines carry no names, so `[input.rec]` cannot resolve | stripped from the image's default |
 
 **Raw DVR is the only DVR here, and it starts on a real IRAP.** `RawDvr`
@@ -105,7 +104,9 @@ the topology is:
   `board/orangepi/zero2w/linux-patches/` in the image repo);
 - the OSD on the primary plane (ARGB8888 linear, full mode) at zpos 2,
   its transparent buffer doubling as the backdrop;
-- no `CUBIC_LUT` on the CRTC, so no display colortrans.
+- no `CUBIC_LUT` on the CRTC; colortrans runs in the video plane's CSC
+  through the image kernel's `CTM` plane property (`docs/colortrans.md`,
+  "Live picture (H618)"). The OSD plane is untouched by it.
 
 `PAGE_FLIP_ASYNC` is refused (EINVAL), so flips are vsync-paced; the
 regulator's vsync servo locks and runs in paced mode. Page-flip
@@ -126,3 +127,7 @@ Bench record: `docs/findings/2026-10-12-opi-zero2w-bringup.md`.
 libavcodec to carry mabur's FFmpeg patch (`gs/player/ffmpeg-patches/`) and
 builds `v4l2req_streamcheck` against it. Deploy: `docs/deploy.md`
 ("Orange Pi Zero 2W").
+
+Display colortrans needs the image kernel's patch `0002` (the `CTM` plane
+property); on a kernel without it maburplay logs `DrmPresenter: video
+plane N CTM absent` and shows the picture flat.

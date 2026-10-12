@@ -192,6 +192,14 @@ void pack_ctm_3x4(const float m[12], uint64_t out[12]) {
   }
 }
 
+DisplayCtChoice pick_display_colortrans(bool enable, bool lut_avail, bool ctm_avail,
+                                        bool affine_ok) {
+  if (!enable) return {DisplayCt::kFlat, false};
+  if (lut_avail) return {DisplayCt::kLut, true};
+  if (ctm_avail && affine_ok) return {DisplayCt::kPlaneCtm, false};
+  return {DisplayCt::kFlat, false};
+}
+
 int cubic_lut_index(int ri, int gi, int bi, LutAxis axis) {
   const int e = kCubicLutEdge;
   return axis == LutAxis::kRedFastest ? ri + e * gi + e * e * bi : bi + e * gi + e * e * ri;
