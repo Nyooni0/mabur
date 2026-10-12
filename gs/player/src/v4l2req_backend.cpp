@@ -58,7 +58,7 @@ struct V4l2ReqBackend::Impl {
   AVBufferRef* hw = nullptr;
   AVPacket* pkt = nullptr;
   FrameHandoff<DmaFrame> handoff;
-  IrapGate gate;
+  EntryGate gate;
   std::atomic<uint64_t> frames{0}, errors{0}, dropped_shape{0}, gated{0};
   bool logged_shape = false;
 
@@ -159,7 +159,7 @@ void V4l2ReqBackend::submit_au(const uint8_t* au, size_t n, uint32_t pts_us) {
   if (!impl_ || !au || n == 0) return;
   Impl& m = *impl_;
   m.free_releases();
-  if (!m.gate.admit(mabur::au_is_irap(au, n))) {
+  if (!m.gate.admit(mabur::au_is_entry_point(au, n))) {
     m.gated.store(m.gate.gated(), std::memory_order_relaxed);
     return;
   }

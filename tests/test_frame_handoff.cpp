@@ -62,12 +62,12 @@ TEST(two_threads_conserve_frames) {
   CHECK(released_sum == static_cast<long>(kN) * (kN + 1) / 2);
 }
 
-TEST(irap_gate) {
-  maburplay::IrapGate g;
+TEST(entry_gate) {
+  maburplay::EntryGate g;
   CHECK(!g.open());
   CHECK(!g.admit(false));
   CHECK(!g.admit(false));
-  CHECK(g.admit(true));     // opens on the IRAP and admits it
+  CHECK(g.admit(true));     // opens on the entry point and admits it
   CHECK(g.admit(false));    // stays open for P pictures
   CHECK(g.gated() == 2);
   g.arm();                  // a flush

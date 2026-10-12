@@ -63,16 +63,18 @@ class FrameHandoff {
   std::deque<T> release_;
 };
 
-// Holds a decoder's input back until an IRAP. A stateless decoder joining
-// on a P picture references pictures it never decoded; libav's HEVC decoder
-// then allocates placeholder references that, under a hwaccel, are never
-// filled, so the hardware reads uninitialised buffers. Armed at init and by
-// every flush; deliberately NOT re-armed by a decode error, since mid-stream
-// loss keeps real (damaged) references that the intra refresh heals.
-class IrapGate {
+// Holds a decoder's input back until an entry point (mabur::au_is_entry_point:
+// an IRAP, or the SPS-led refresh AU of an intra-refresh stream). A decoder
+// has nothing to parse a picture with before the parameter sets, and every
+// picture before the refresh references pictures it never decoded; libav's
+// HEVC decoder then allocates placeholder references that, under a hwaccel,
+// are never filled, so the hardware reads uninitialised buffers. Armed at
+// init and by every flush; deliberately NOT re-armed by a decode error, since
+// mid-stream loss keeps real (damaged) references that the refresh heals.
+class EntryGate {
  public:
-  bool admit(bool is_irap) {
-    if (!open_ && is_irap) open_ = true;
+  bool admit(bool is_entry) {
+    if (!open_ && is_entry) open_ = true;
     if (!open_) ++gated_;
     return open_;
   }

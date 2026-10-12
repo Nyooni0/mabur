@@ -40,7 +40,7 @@ class V4l2ReqBackend : public VideoBackend {
   uint64_t frames() const;         // frames handed to the FrameSink
   uint64_t errors() const;         // send/receive hard failures
   uint64_t dropped_shape() const;  // decoded frames not in DrmPresenter's NV12 shape
-  uint64_t gated() const;          // AUs held back waiting for an IRAP
+  uint64_t gated() const;          // AUs held back waiting for an entry point
 
  private:
   struct Impl;

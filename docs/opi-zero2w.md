@@ -16,9 +16,13 @@ DRM-PRIME linear NV12 and are handed to `DrmPresenter` unchanged.
 - **One thread for libav.** Decode and frame frees run on the feed
   thread; `poll()`/`release_frame()` on main only touch a locked handoff
   (`frame_handoff.h`). Released frames are freed before the next decode.
-- **IRAP gate.** After init and every flush, AUs are dropped until the
-  first IRAP (`gated` counter). Joining on a P picture would make Cedrus
-  reference never-decoded buffers. Not re-armed on decode errors.
+- **Entry gate.** After init and every flush, AUs are dropped until the
+  first entry point (`mabur::au_is_entry_point`: an IRAP, or an AU carrying
+  an SPS), counted as `gated`. The drone's intra-refresh stream sends no
+  IRAP at all: its periodic refresh AU is VPS/SPS/PPS + TRAIL_R (every
+  `venc.gop_s`), so that is where decode starts. Joining on a bare P
+  picture would make Cedrus reference never-decoded buffers. Not re-armed
+  on decode errors.
 - **Synchronous.** The hwaccel waits for the capture buffer before
   returning a frame, so `submit_au` blocks the feed thread for the decode.
 - **Shape check.** A frame not in single-object linear NV12 is dropped and
