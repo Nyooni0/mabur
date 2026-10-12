@@ -16,6 +16,7 @@ merged), and get a row added to the table below.
 
 | Date | Record | Question → answer |
 |---|---|---|
+| 2026-10-11 | [2026-10-11-cu-ht40-tx](2026-10-11-cu-ht40-tx.md) | Why does an RTL8812CU VTX stall on 40 MHz rungs? → devourer-side: DISDATAFB=0 wedged the first HT40 frame, and on a quiet channel the 8822C receiver below IGI 0x24 never reads the secondary idle; fixed in devourer `cu-ht40-tx` (DISDATAFB=1 + IGI floor 0x26 at 40/80 on the C die) |
 | 2026-10-10 | [2026-10-10-web-gs-8812cu](2026-10-10-web-gs-8812cu.md) | Does the web GS run on an RTL8812CU? → Yes natively (spotter, 0 loss); driver-disk eject and ~20 s bring-up are the caveats. |
 | 2026-10-10 | [2026-10-10-slice-salvage](2026-10-10-slice-salvage.md) | Do slice salvage + streamed decode both ship? → Yes; 94–97% truncated-AU rescue, `dec` p50 −2.7 ms. |
 | 2026-10-09 | [2026-10-09-venc-slice](2026-10-09-venc-slice.md) | Can VENC slices cut latency via early output? → No; the by-frame split was reused for loss confinement instead, shipped. |
