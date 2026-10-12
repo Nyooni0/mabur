@@ -61,10 +61,10 @@ uint64_t fnv(uint64_t h, const uint8_t* p, size_t n) {
 // Hash of the visible NV12 picture, read through a dmabuf mmap. `row` is a
 // scratch buffer the caller keeps across frames: each visible row is
 // memcpy'd into it (wide, cached loads) before FNV hashes it -- byte-wise
-// FNV straight off the dmabuf mmap is a byte-at-a-time uncached-memory read,
-// ~620 ms/frame on the board; copying the row first and hashing the cached
-// copy keeps the same bytes in the same order (so the hash is unchanged)
-// while hashing cached memory instead.
+// FNV straight off the dmabuf mmap is a byte-at-a-time read of uncached
+// memory, very slow; copying the row first and hashing the cached copy
+// keeps the same bytes in the same order (so the hash is unchanged) while
+// hashing cached memory instead.
 std::optional<uint64_t> hash_frame(const AVFrame* f, std::vector<uint8_t>* row) {
   const auto* d = reinterpret_cast<const AVDRMFrameDescriptor*>(f->data[0]);
   if (d->nb_objects != 1 || d->nb_layers < 1 || d->layers[0].nb_planes != 2) return std::nullopt;
@@ -153,8 +153,14 @@ int main(int argc, char** argv) {
     return 2;
   }
   long abort_au = -1;
-  for (int i = 2; i + 1 < argc; ++i)
-    if (!std::strcmp(argv[i], "--abort")) abort_au = std::atol(argv[i + 1]);
+  for (int i = 2; i < argc; ++i) {
+    if (std::strcmp(argv[i], "--abort")) continue;
+    if (i + 1 >= argc) {
+      std::fprintf(stderr, "usage: %s <capture.265> [--abort N]\n", argv[0]);
+      return 2;
+    }
+    abort_au = std::atol(argv[++i]);
+  }
   std::ifstream in(argv[1], std::ios::binary);
   const std::vector<uint8_t> cap((std::istreambuf_iterator<char>(in)), {});
   const auto aus = streamcheck::split_aus(cap.data(), cap.size());
