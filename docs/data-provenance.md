@@ -84,6 +84,12 @@ Chronological; each line names the section below that carries the detail.
   0x01, never logged) (`docs/slices.md`); maburplay submits slice-salvaged
   AUs, so LAT / e2e tails during loss include frames skipped before; AU
   ring v4.
+- 2026-10-11 — the `essential` (four-corner) GS OSD style is removed along
+  with `osd.gs.style`: a burned DVR from before may show either layout
+  (whichever the config picked), one from after shows only the compact bar.
+  The same day the bar's text labels (`ch:`, `rssi:`, …) become icons and
+  `res:1280x720` becomes `720p` — a display change only, at the same type
+  size; the figures themselves are unchanged.
 
 ## 2026-09-23 — `link.pre_fec_loss` scale break, twice
 
@@ -564,8 +570,8 @@ the date will look like data went missing. It did not: the segments are
 in the flight jsonl `lat:` line for both eras, and the sideport
 `link.video.lat` block is unchanged.
 
-This was the `essential` OSD style (the four-corner layout; `compact`,
-today's default, came later and never carried segments). Each pre-break
+This was the `essential` OSD style (the four-corner layout, removed
+2026-10-11; `compact` came later and never carried segments). Each pre-break
 row rendered its own frame's seven segments, never independently-ranked
 percentiles, so a row's segments summed to its headline. Between
 2026-09-02 (link-rtt) and this date the absolute floor was folded into

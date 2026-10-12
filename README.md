@@ -154,9 +154,12 @@ Two deploy-time invariants, neither of which a daemon can check for itself:
 ## GS link-status OSD (player-side)
 
 A second, independent overlay drawn by maburplay from the maburgs stats
-sideport: rung/airtime, per-card RSSI+SNR, the pre/post-FEC loss pair,
-fps/jitter/bitrate and the DVR recording clock, hugging the four corners so
-the centre of frame stays clear. It shares the MSP overlay's plane and
+sideport: two rows of icon-tagged figures along the bottom edge (channel,
+mcs, airtime, per-card RSSI and SNR and drone temperature above; bitrate,
+resolution as `720p`/`1080p`, fps, jitter, latency and the pre/post-FEC
+loss pair below),
+plus the DVR recording clock alone in the top-right corner, so the centre
+of frame stays clear. `docs/observability.md` has the details. It shares the MSP overlay's plane and
 surface (MSP draws first, then the GS fields repaint over any collision, so
 GS pixels always win), and it is burned into the DVR alongside the MSP grid.
 
@@ -174,17 +177,21 @@ ignore it, being current by construction).
   player (`/etc/init.d/S97maburplay stop`) before overwriting either — an
   in-place `scp` over a live mapping is how you get a SIGBUS instead of a
   new font.
-- The asset bakes **30 pixel sizes**, the eight design sizes at ×⅔, ×1,
-  ×4/3 and ×2, so every type role lands on an exact atlas size at 720p,
-  1080p, 1440p and 2160p with no runtime scaling anywhere. That is what
-  makes it ~13 MB — a mask atlas, two bytes per pixel, at every size.
-  Regenerate it (JetBrains Mono is a dev-host dependency only; the asset is
-  committed so a deploy needs no font toolchain) with:
+- The asset bakes **30 pixel sizes** (eight base sizes at ×⅔, ×1, ×4/3 and
+  ×2); the bar takes the largest one whose worst-case rows fit the screen,
+  with no runtime scaling anywhere. That is what makes it ~15 MB — a mask
+  atlas, two bytes per pixel, at every size.
+  Its characters are baked from JetBrains Mono Medium and the bar's item
+  icons from JetBrains Mono **Nerd Font Mono** Medium (Material Design
+  icons in the same cell). Regenerate it (both fonts are dev-host
+  dependencies only; the asset is committed so a deploy needs no font
+  toolchain) with:
 
   ```
-  nix-shell -p jetbrains-mono python3Packages.freetype-py --run \
+  nix-shell -p python3Packages.freetype-py --run \
     "tools/msp/gen_gsfont.py \
        <jetbrains-mono>/share/fonts/truetype/JetBrainsMono-Medium.ttf \
+       <nerd-fonts.jetbrains-mono>/share/fonts/truetype/NerdFonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Medium.ttf \
        gs/player/bundle/gs_osd.gfont --sizes <the 30-value list>"
   ```
 
@@ -204,14 +211,6 @@ own throughout — which is exactly when on-screen link telemetry is worth
 having. The one dead window is between GS power-on and the first decoded
 frame, where the CRTC is not up and an OSD-only commit would have nothing to
 display on.
-
-**Adding verbose/debug/off levels.** Essential is one of four levels in the
-design handoff (essential / verbose / debug / off, operator-cycled), and the
-handoff's constraint on the other three is that **shared anchors keep
-identical pixel positions across levels**: switching level may add or remove
-blocks, but it must not move the four this branch ships. Recorded here
-because it constrains code that does not exist yet, and the handoff itself
-is not in the repository.
 
 ## Benchmarking
 

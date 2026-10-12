@@ -117,10 +117,10 @@ drone's half-duplex TX, so `ms` inflates under saturation (an honest
 congestion signal, not PHY RTT), and the offset's residual error is the
 up/down asymmetry of the best samples, ±1–2 ms class. On the player OSD the
 offset (combined with the player's OWN anchor) folds the floor into the
-latency headline, which carries a `~` prefix in the essential overlay while
-its e2e is still relative (estimator cold, or sync lost at range: the floor
-freezes at last-good and drifts ~1 ms/min of outage). What the absolute
-figure still excludes: sensor exposure/readout before the pts stamp and
+`lat:` figures, which carry no marker while their e2e is still relative
+(estimator cold, or sync lost at range: the floor freezes at last-good and
+drifts ~1 ms/min of outage) — the cell has no room for a qualifier. What
+the absolute figure still excludes: sensor exposure/readout before the pts stamp and
 everything past scanout start (HDMI + display processing) — see
 `docs/findings/2026-08-31-latency-budget.md`.
 
@@ -586,61 +586,77 @@ cannot disagree — if the OSD shows something surprising, the answer is in
 `flight.jsonl`. Config is `[osd.gs]` in `/etc/maburplay.toml` (`enable`,
 code default false, bundle true; `stale_ms` dims every link-derived field
 after silence; fps/jitter/bitrate/REC are player-measured and never dim).
-`osd.gs.style` picks the layout; exactly one renders, and an unrecognised
-value fails the config load.
-
-**`"compact"` (the shipped default)** — two plain-text rows along the
-bottom edge, radio above and picture below, with the REC indicator alone in
-the top-right corner (`gs/player/src/gs_compact.cpp`):
+There is one layout, the compact bar — two rows along the bottom edge,
+radio above and picture below, each item an icon, a space and its figures,
+with the REC indicator alone in the top-right corner
+(`gs/player/src/gs_compact.cpp`). `[name]` below stands for the icon:
 
 ```
                                               ● REC 12:47   <- top right
 ...
-ch:149 mcs:5/40 air:62% rssi:-70/-72 snr:22/20 temp:41
-bitrate:8.1 res:1280x720 fps:60 jit:5.2 lat:45/78 loss:0.3/0.0
+[wifi] 149 [tune-vertical] 5/40 [chart-donut] 62% [signal] -70/-72 [waveform] 22/20 [thermometer] 41
+[speedometer] 8.1 [aspect-ratio] 720p [filmstrip] 60 [pulse] 5.2 [timer-outline] 45/78 [link-variant-off] 0.3/0.0
 ```
 
-No meters or bars, one type size for both rows. `ch` comes from the
-sideport's `link.channel` (what the RECEIVER is tuned to) and carries an
-`(a)` (auto-selected) or `(h)` (hopped) suffix; `mcs` is mcs/width; `temp`
-is `drone.sys.soc_temp_c` (`temp:--` while unavailable); `lat` is
-p50/p99 and reads `--/--` while the latency anchor is cold. Two colour
-exceptions, both single-threshold: the `fps` cell turns caution while
-`drone.low_power` is set, and `temp` turns caution from 70 °C; both tints
-drop while the sideport is stale. The REC indicator matches the essential
-overlay's (red dot, `REC`, mm:ss clock, `REC FAULT` in amber), with a VTX
-leg sized by `dvr.target` (`docs/vtx-recorder.md`); it sits in the corner
-because in a row it would cost the bar type size and shift that row
-whenever the recorder was merely armed.
+| icon | item | source |
+|---|---|---|
+| wifi | channel the RECEIVER is tuned to, `(a)` auto-selected / `(h)` hopped suffix; `KEY?` replaces the item on a link-key mismatch | `link.channel` |
+| tune-vertical | MCS / channel width (MHz) | `link.ctl.rung` (else `link.op`) |
+| chart-donut | airtime % | `link.air_pct` |
+| signal | RSSI per GS card, dBm | `cards[]` |
+| waveform | SNR per GS card, dB | `cards[]` |
+| thermometer | drone SoC temperature, °C | `drone.sys.soc_temp_c` |
+| speedometer | video bitrate, Mb/s | player-measured |
+| aspect-ratio | decoded picture height + `p` (1440×1080 reads `1080p`) | player-measured |
+| filmstrip | fps on screen | player-measured |
+| pulse | frame-interval jitter, ms | player-measured |
+| timer-outline | latency p50/p99, ms | player-measured |
+| link-variant-off | loss before/after FEC, % | `link.pre_fec_loss` / `link.residual_loss` |
 
-Every item sits in a box sized for its WORST-CASE string, so the gaps
-between items are uneven and short values leave trailing space — that is
-what stops a row reflowing every time a figure gains a digit. The type size
-is likewise chosen once, for the four-card worst case, so a card dropping
-out never changes the font. The two rows exist for that type size: all
-eleven items on one line would cap the type too small to read on the GS
-screen. Row 0 (radio) is the wider one, so moving an item between rows
-changes the size the whole bar renders at.
+The icons are Material Design icons baked from JetBrains Mono Nerd Font
+Mono (`gs_icon` in `gs_compact.h`, `BAR_ICONS` in
+`tools/msp/gen_gsfont.py`); each is one cell wide. Only the icons come
+from that font — the figures stay upstream JetBrains Mono, whose hinting
+the Nerd Fonts patcher changes. A missing value reads
+`--`, never zero. `lat` reads `--/--` while the latency anchor is cold —
+each figure is ONE REAL FRAME from the last 1 s window, ranked by e2e, and
+the pair is read together because p99 alone is a tail statistic that gets
+misread as typical (`docs/findings/2026-08-31-dq-spike.md` §20); the
+per-segment breakdown is not on the glass (the `lat:` line, `lat.log` and
+`flightreport.py` carry it). No meters or bars. Two colour exceptions,
+both single-threshold: the fps item turns caution while `drone.low_power`
+is set, and temperature turns caution from 70 °C; both tints drop while
+the sideport is stale. An icon takes its item's colour. The REC indicator
+is a red dot, `REC` and an mm:ss clock (`REC FAULT` in amber), with a VTX
+leg sized by `dvr.target` (`docs/vtx-recorder.md`); armed draws nothing.
+It sits in the corner because in a row it would eat into the bar's width
+and shift that row whenever the recorder was merely armed.
 
-**`"essential"`** — the four-corner layout with the signal bars, the
-airtime meter and the status hues; its latency block is two rows, `LAT P50
-<n> ms` and `LAT P99 <n> ms`, right-flushed under an `RTT <n> ms` row. Each
-is ONE REAL FRAME from the last 1 s window, ranked by e2e, and each carries
-a `~` prefix while its e2e is still relative. Read them together: `P99`
-alone is a tail statistic among averages and gets misread as typical
-(`docs/findings/2026-08-31-dq-spike.md` §20). `RTT` is two-way control time
-(`link.rtt`), never part of the e2e sum. The per-segment breakdown is not
-on the glass: the `lat:` line, `lat.log` and `flightreport.py` carry it.
+The two rows share columns: each item starts at the same x as the item
+above or below it (ch/bitrate, mcs/res, air/fps, rssi/jit, snr/lat,
+temp/loss), each column as wide as the wider of its two items' worst
+cases, and the grid as a whole is centred. Every item sits in a box sized
+for its WORST-CASE string (four cards), so short values leave trailing
+space — that is what stops a row reflowing every time a figure gains a
+digit. Only a card-count change moves the columns. The
+type size is one size for both rows, and it is pinned: the largest baked
+size at which a 76-character, 6-item reference row fits between the insets
+— 25/37/48/75 px at 720p/1080p/1440p/2160p with the shipped asset
+(`tests/test_gs_asset.cpp` pins them). That reference is the widest row
+from when the items carried text labels; the icons made the real rows
+narrower, and the freed width stays slack instead of growing the bar into
+the picture. The worst-case grid (72 cells plus 5 gaps) must fit too, so a
+wider item can never overflow. Two rows because all twelve items on one line would cap the type
+too small to read on the GS screen.
 
 The glyph atlas is `/usr/local/share/mabur/gs_osd.gfont`, committed and
 staged by `tools/build-arm64.sh` — if it is missing, maburplay logs the
 reason and runs with the MSP overlay only. Host-side you can see the actual
 pixels without hardware: `maburplay --gs-render` dumps a rendered frame
-(`--style compact|essential`, plus `--res WxH` and `--lat P50/P99` for the
-bar's player-measured fields; both styles are pixel-gated in
-`tests/integration/run_player_e2e.sh` PARTS D and E),
+(`--res WxH` and `--lat P50/P99` set the bar's player-measured fields; the
+render is pixel-gated in `tests/integration/run_player_e2e.sh` PART D),
 `tests/test_gs_asset.cpp` gates the real asset's layout at
-720p/1080p/1440p/2160p, and `tools/bench/gs_overlay_bench.cpp` measures
+720p/1080p/1440p/2160p, and `tools/bench/gs_osd_bench.cpp` measures
 draw+quantize per update at 1080p and 2160p. Read that bench before
 changing anything on this path: it runs on the 2 ms pump loop, and the rule
 of thumb is that anything projecting past ~1.5 ms on the A55 is a defect. A

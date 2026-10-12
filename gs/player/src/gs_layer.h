@@ -14,7 +14,6 @@ namespace maburplay {
 
 // Design tokens.
 // Opaque 0xRRGGBB: alpha always comes from glyph coverage, never from here.
-// Shared by both styles -- the compact bar uses only the first and third.
 namespace tok {
 constexpr uint32_t kTextPrimary = 0xF2F3F5u;    // values
 constexpr uint32_t kTextSecondary = 0xB0B4B8u;  // SNR, unit-suffixed %
@@ -99,9 +98,9 @@ struct GsPlayerState {
 // glyph it is made of cannot live in either one's header.
 constexpr const char* kDotFilled = "●";
 
-// The most receiving cards either style will render. A snapshot reporting
-// more is truncated to this: the essential overlay has this many card rows
-// laid out, and the compact bar sizes its type from a line this wide.
+// The most receiving cards the OSD will render. A snapshot reporting more
+// is truncated to this: the compact bar sizes its type from a line this
+// wide.
 constexpr int kMaxCards = 4;
 
 // Formatting. Every value is fixed-width by construction so a field box
@@ -109,11 +108,9 @@ constexpr int kMaxCards = 4;
 // here rather than merely tidy.
 std::string fmt_int(double v);         // nearest integer, never negative-zero
 std::string fmt_one_dp(double v);      // always one decimal place
-std::string fmt_signed_int(double v);  // U+2212 for negatives
 std::string fmt_clock(int seconds);    // mm:ss, saturating at 99:59
 
-// The REC field's text for both OSD layouts (gs_overlay kRec, gs_compact
-// kRec): where recording happens (GS, VTX, GS+VTX) and why a selected
+// The REC field's text (gs_compact kRec): where recording happens (GS, VTX, GS+VTX) and why a selected
 // target is not recording. aux = 1 paints the leading dot in kStatusRec.
 struct RecText {
   std::string text;
@@ -124,8 +121,8 @@ RecText rec_text(const RecState& r);
 // Widest string rec_text() can return for ANY target (the GS+VTX combos).
 extern const char* const kRecWorst;
 
-// dvr.target: which recorders the button drives. Both
-// layouts size their kRec box on rec_worst(target) -- the widest string
+// dvr.target: which recorders the button drives. The
+// kRec box is sized on rec_worst(target) -- the widest string
 // rec_text() can return for a player with that target -- rather than on
 // kRecWorst for everyone: the box is cleared whole on every REC redraw and
 // wins repaint_intersecting over MSP cells, so a box wider than anything
@@ -139,18 +136,14 @@ enum class RecTarget {
 bool parse_rec_target(const std::string& s, RecTarget* out);
 const char* rec_worst(RecTarget t);
 
-// What the GS overlay draws. Two implementations, chosen by osd.gs.style:
+// What the GS overlay draws, as OsdComposer sees it. The one implementation
+// is GsCompactBar (gs_compact.h), two plain-text rows along the bottom edge.
 //
-//   GsOverlay    "essential" -- four corner blocks, status colours, meters
-//                and signal bars (gs_overlay.h).
-//   GsCompactBar "compact"   -- two plain-text rows along the bottom edge
-//                (gs_compact.h).
-//
-// The seam exists because OsdComposer owns THREE of whichever one is
-// configured (buffer 0, buffer 1, the burn canvas) and drives them all
-// through exactly these five calls. Everything else either style offers --
-// GsOverlay's field enum and debug hooks, the bar's own -- is its own
-// business and stays off this interface.
+// OsdComposer owns THREE layers (buffer 0, buffer 1, the burn canvas) and
+// drives them all through exactly these five calls. Everything else a
+// layout offers -- the bar's field enum and debug hooks -- is its own
+// business and stays off this interface, so another layout can slot in
+// behind make_gs_layer() without the composer changing.
 class GsLayer {
  public:
   virtual ~GsLayer() = default;
@@ -185,26 +178,15 @@ class GsLayer {
   virtual DirtyRect bounds() const = 0;
 };
 
-enum class GsStyle {
-  kEssential,  // osd.gs.style = "essential"
-  kCompact,    // osd.gs.style = "compact"
-};
-
-// "essential" | "compact" -> style. False on anything else; the caller
-// fails the config load, so a typo never silently picks a layout.
-bool parse_gs_style(const std::string& s, GsStyle* out);
-
 class GsFont;
-std::unique_ptr<GsLayer> make_gs_layer(GsStyle style, GsFont& font,
+std::unique_ptr<GsLayer> make_gs_layer(GsFont& font,
                                        RecTarget rec_target = RecTarget::kGs);
 
 // Every token colour at full alpha plus its shadow blend, for
 // build_palette()'s extra seeds. Without these the burned DVR quantizes
 // GS pixels against an MSP-only palette that has no green or amber in it.
-// Style-independent on purpose: the compact bar uses a subset, and seeding
-// a palette with colours no pixel happens to take costs nothing, whereas
-// swapping seed sets with the style would make the burned DVR's palette
-// depend on a key that has no business reaching it.
+// The compact bar draws only a subset of the tokens; seeding a palette with
+// colours no pixel happens to take costs nothing.
 const uint32_t* gs_palette_seeds(size_t* n);
 
 }  // namespace maburplay
