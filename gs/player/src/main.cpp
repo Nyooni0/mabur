@@ -91,7 +91,7 @@ uint64_t mono_us() {
 void usage() {
   std::fprintf(stderr,
                "usage: maburplay [-c <config.toml>] [--oneshot] "
-               "[--backend null|mpp]\n"
+               "[--backend null|mpp|v4l2req]\n"
                "                 [--decode-only --seconds N] [--fps-log]\n"
                "       maburplay --mux-annexb <in.265> <out.mp4>\n"
                "           (test support: mux a raw Annex-B HEVC elementary\n"
@@ -662,7 +662,11 @@ int main(int argc, char** argv) {
     if (cfg.colortrans.enable && !avail)
       std::fprintf(stderr,
                    "maburplay: colortrans: CRTC has no 729-entry CUBIC_LUT -- display stays "
-                   "flat, OSD not inverted (burned DVR still corrected)\n");
+                   "flat, OSD not inverted"
+#ifdef MABUR_PLAYER_MPP
+                   " (burned DVR still corrected)"
+#endif
+                   "\n");
     ct_display_on = on && installed;
     if (ct_display_on) {
       osd_font.set_inverse(ct);
@@ -1360,8 +1364,10 @@ int main(int argc, char** argv) {
 #ifdef MABUR_PLAYER_V4L2REQ
     if (auto* v4 = dynamic_cast<maburplay::V4l2ReqBackend*>(backend.get())) {
       error_count = v4->errors();
-      std::fprintf(stderr, "maburplay: v4l2req frames=%llu shape_drops=%llu gated=%llu\n",
+      std::fprintf(stderr,
+                   "maburplay: v4l2req frames=%llu bitstream=%llu shape_drops=%llu gated=%llu\n",
                    static_cast<unsigned long long>(v4->frames()),
+                   static_cast<unsigned long long>(v4->bitstream()),
                    static_cast<unsigned long long>(v4->dropped_shape()),
                    static_cast<unsigned long long>(v4->gated()));
     }
@@ -1436,9 +1442,10 @@ int main(int argc, char** argv) {
 #ifdef MABUR_PLAYER_V4L2REQ
     // backend read on the feed thread: safe only because the watchdog re-creates it while the feed is parked.
     if (auto* v4 = dynamic_cast<maburplay::V4l2ReqBackend*>(backend.get()))
-      std::fprintf(stderr, "v4l2req: frames=%llu errors=%llu shape_drops=%llu gated=%llu\n",
+      std::fprintf(stderr, "v4l2req: frames=%llu errors=%llu bitstream=%llu shape_drops=%llu gated=%llu\n",
                    static_cast<unsigned long long>(v4->frames()),
                    static_cast<unsigned long long>(v4->errors()),
+                   static_cast<unsigned long long>(v4->bitstream()),
                    static_cast<unsigned long long>(v4->dropped_shape()),
                    static_cast<unsigned long long>(v4->gated()));
 #endif

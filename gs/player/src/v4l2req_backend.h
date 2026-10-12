@@ -37,8 +37,12 @@ class V4l2ReqBackend : public VideoBackend {
   void poll() override;
 
   // Diagnostics (read by --decode-only and the feed thread's 5 s line).
-  uint64_t frames() const;         // frames handed to the FrameSink
-  uint64_t errors() const;         // send/receive hard failures
+  uint64_t frames() const;  // decoded frames delivered by poll() (to the FrameSink, or dropped if none)
+  // send/receive failures that are not bitstream damage: device/alloc
+  // failure, a rejected packet, a frame in a shape DrmPresenter can't
+  // import. Does NOT include AVERROR_INVALIDDATA -- see bitstream().
+  uint64_t errors() const;
+  uint64_t bitstream() const;      // AVERROR_INVALIDDATA from send/receive: bitstream damage, not a hard failure
   uint64_t dropped_shape() const;  // decoded frames not in DrmPresenter's NV12 shape
   uint64_t gated() const;          // AUs held back waiting for an entry point
 

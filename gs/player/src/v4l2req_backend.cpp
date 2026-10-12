@@ -22,9 +22,11 @@ namespace maburplay {
 
 namespace {
 
-// Frames the display side can hold at once beyond the decoder's own
-// references: on screen + pending flip + mailbox (DrmPresenter), the
-// regulator's held frame, and slack for a frame in the ready queue.
+// Extra buffers av_hwdevice_ctx_create's DRM-PRIME pool preallocates beyond
+// the decoder's own references: on screen + pending flip + mailbox
+// (DrmPresenter), the regulator's held frame, and slack for a frame in the
+// ready queue. Not a ceiling -- the pool is an av_buffer_pool that grows on
+// demand past this if the handoff backs up further.
 constexpr int kExtraHwFrames = 8;
 
 enum AVPixelFormat pick_drm_prime(AVCodecContext*, const enum AVPixelFormat* fmts) {
@@ -59,7 +61,7 @@ struct V4l2ReqBackend::Impl {
   AVPacket* pkt = nullptr;
   FrameHandoff<DmaFrame> handoff;
   EntryGate gate;
-  std::atomic<uint64_t> frames{0}, errors{0}, dropped_shape{0}, gated{0};
+  std::atomic<uint64_t> frames{0}, errors{0}, bitstream{0}, dropped_shape{0}, gated{0};
   bool logged_shape = false;
 
   ~Impl() {
@@ -159,7 +161,12 @@ void V4l2ReqBackend::submit_au(const uint8_t* au, size_t n, uint32_t pts_us) {
   if (!impl_ || !au || n == 0) return;
   Impl& m = *impl_;
   m.free_releases();
-  if (!m.gate.admit(mabur::au_is_entry_point(au, n))) {
+  // Only worth scanning the AU for an entry point while the gate is still
+  // closed -- an open gate admits unconditionally (EntryGate::admit), so
+  // every AU after the first one would otherwise pay for a split_nals scan
+  // (and its vector alloc) whose result is discarded.
+  const bool entry = !m.gate.open() && mabur::au_is_entry_point(au, n);
+  if (!m.gate.admit(entry)) {
     m.gated.store(m.gate.gated(), std::memory_order_relaxed);
     return;
   }
@@ -170,13 +177,21 @@ void V4l2ReqBackend::submit_au(const uint8_t* au, size_t n, uint32_t pts_us) {
   m.pkt->pts = pts_us;
   const int sr = avcodec_send_packet(m.cc, m.pkt);
   av_packet_unref(m.pkt);
-  if (sr < 0 && sr != AVERROR(EAGAIN)) ++m.errors;
+  if (sr < 0) {
+    // AVERROR_INVALIDDATA is bitstream damage from a lossy link, not a
+    // decoder/device fault; AVERROR(EAGAIN) here means the AU was NOT
+    // accepted (the decoder wants receive_frame() drained first), which is
+    // a dropped AU and therefore a hard error, not something to ignore.
+    if (sr == AVERROR_INVALIDDATA) ++m.bitstream;
+    else ++m.errors;
+  }
   for (;;) {
     AVFrame* av = av_frame_alloc();
     const int rr = av ? avcodec_receive_frame(m.cc, av) : AVERROR(ENOMEM);
     if (rr != 0) {
       av_frame_free(&av);
-      if (rr != AVERROR(EAGAIN) && rr != AVERROR_EOF) ++m.errors;
+      if (rr == AVERROR_INVALIDDATA) ++m.bitstream;
+      else if (rr != AVERROR(EAGAIN) && rr != AVERROR_EOF) ++m.errors;
       break;
     }
     m.take(av);
@@ -212,6 +227,7 @@ void V4l2ReqBackend::flush() {
 
 uint64_t V4l2ReqBackend::frames() const { return impl_ ? impl_->frames.load() : 0; }
 uint64_t V4l2ReqBackend::errors() const { return impl_ ? impl_->errors.load() : 0; }
+uint64_t V4l2ReqBackend::bitstream() const { return impl_ ? impl_->bitstream.load() : 0; }
 uint64_t V4l2ReqBackend::dropped_shape() const {
   return impl_ ? impl_->dropped_shape.load() : 0;
 }

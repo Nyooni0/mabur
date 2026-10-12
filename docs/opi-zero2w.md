@@ -28,16 +28,22 @@ DRM-PRIME linear NV12 and are handed to `DrmPresenter` unchanged.
 - **Shape check.** A frame not in single-object linear NV12 is dropped and
   counted (`shape_drops`); the first one logs its descriptor.
 
-Counters: `--decode-only` JSON (`errors`) plus a `maburplay: v4l2req`
-line, and a `v4l2req: frames= errors= shape_drops= gated=` line every 5 s
-in `/tmp/maburplay.log`.
+Counters: `--decode-only` JSON's `errors`/`errors_after_sync_3s` and the
+`maburplay: v4l2req ...` / `v4l2req: frames= errors= bitstream= shape_drops=
+gated=` lines (the latter every 5 s in `/tmp/maburplay.log`) both name
+`errors` and `bitstream` separately. `errors` is hard failures only --
+device/alloc failure, a rejected packet, a decoded frame in a shape
+`DrmPresenter` can't import -- the same meaning `errors_after_sync_3s` has
+for MPP. `bitstream` is `AVERROR_INVALIDDATA` from send/receive: bitstream
+damage from a lossy link, not a decoder fault, and NOT included in
+`errors`.
 
 ## Not available on this board
 
 | Feature | Why | Config |
 |---|---|---|
 | Burned DVR | no hardware encoder in mainline | `dvr.mode = "burned"` exits 2 at startup |
-| colortrans | no CRTC `CUBIC_LUT`, no RGA | `colortrans.enable = false` (true only logs "no LUT") |
+| colortrans | no CRTC `CUBIC_LUT`, no RGA | `colortrans.enable = false` (true only logs that the CRTC has no LUT) |
 | Streamed (slice) decode | MPP-only | `decoder.stream = false` (true falls back to whole pictures) |
 | Record button | the H618's GPIO lines carry no names, so `[input.rec]` cannot resolve | stripped from the image's default |
 
