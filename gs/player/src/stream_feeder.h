@@ -15,18 +15,17 @@ namespace maburplay {
 enum class StreamOff : uint8_t { kNone = 0, kConfig, kNoDecoder, kProbe };
 const char* stream_off_name(StreamOff r);  // "on", "off:config", "off:no_decoder", "off:probe"
 
-// Turns ring v4 events into a streamed decode (spec 2026-10-10-h265-slices
-// §6.3). Relies on ring v4's writer contract: for an AU with nslices >= 2,
-// the valid bytes of a kOpen/kGrow always end on a NAL boundary (maburgs
-// writes the one piece that may not -- the passthrough remainder -- outside
-// valid_len). So a VCL NAL is whole as soon as it lies in the valid bytes:
-// a split AU is started on its first slice the moment that slice is valid,
-// and gets each later slice on the event that makes it valid -- never a
-// partial NAL; never more than n-1 slices before the close; the last slice
-// (with whatever follows it) at a decodable close, with LAST. Whatever this
-// feeder started is finished or ended here and never also submitted whole
-// (owns()). Everything else goes the whole-AU path at kClose, unchanged.
-// One picture open at a time.
+// Turns ring v4 events into a streamed decode. Relies on ring v4's writer
+// contract: for an AU with nslices >= 2, the valid bytes of a kOpen/kGrow
+// always end on a NAL boundary (maburgs writes the one piece that may not --
+// the passthrough remainder -- outside valid_len). So a VCL NAL is whole as
+// soon as it lies in the valid bytes: a split AU is started on its first
+// slice the moment that slice is valid, and gets each later slice on the
+// event that makes it valid -- never a partial NAL; never more than n-1
+// slices before the close; the last slice (with whatever follows it) at a
+// decodable close, with LAST. Whatever this feeder started is finished or
+// ended here and never also submitted whole (owns()). Everything else goes
+// the whole-AU path at kClose, unchanged. One picture open at a time.
 class StreamFeeder {
  public:
   enum class Close : uint8_t {
@@ -53,7 +52,7 @@ class StreamFeeder {
   // The decoder is about to be flushed, reset or re-created: end any
   // streamed picture first (counted stream_aborted).
   void on_flush();
-  // Shutdown (Task 11a): from here on no picture starts streaming; the one
+  // Shutdown: from here on no picture starts streaming; the one
   // already streaming keeps taking its slices and ends at its own close.
   void stop_new() { stop_new_ = true; }
   // A picture is on the decoder: started, neither finished nor ended.
@@ -103,7 +102,7 @@ class StreamFeeder {
   uint64_t streamed_ = 0, streamed_salvaged_ = 0, stream_aborted_ = 0, whole_submits_ = 0;
 };
 
-// Shutdown (Task 11a, design-reader-thread.md): what drain_stream() did with
+// Shutdown: what drain_stream() did with
 // the picture that was streaming when the player was told to stop.
 struct DrainResult {
   enum Kind : uint8_t { kIdle, kFinished, kAborted };
@@ -117,7 +116,7 @@ const char* drain_name(DrainResult::Kind k);  // "stream idle" / "stream finishe
 // pump(1) until its close has gone through the feeder, at most budget_ms; a
 // close that does not come gets the empty LAST (on_flush). MPP teardown would
 // end it with that same empty LAST -- 64 zero bytes in the kernel
-// (rkvdec2_strm_cut), an error IRQ, one rkvdec reset (task-11D-report.md).
+// (rkvdec2_strm_cut), an error IRQ, one rkvdec reset.
 DrainResult drain_stream(StreamFeeder& f, const std::function<void(int)>& pump,
                          const std::function<uint64_t()>& now_ms, uint32_t budget_ms);
 

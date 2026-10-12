@@ -34,7 +34,7 @@ std::vector<uint8_t> au_bytes(size_t n, uint8_t seed) {
   return v;
 }
 
-// Publishes one AU. 2-stream space (spec 2026-08-29-airtime-balance-uep):
+// Publishes one AU. 2-stream space (airtime-balance-uep):
 // sid 0 = base, sid 1 = enhance. sid==1 records rely on
 // maburgs::AuRingWriter's own contract: finish(complete, lat) ORs
 // kRecFlagComplete into flags iff complete.
@@ -366,7 +366,7 @@ TEST(incomplete_sid1_with_discont_flag_still_flushes_next_base) {
   unlink(ring.c_str());
 }
 
-// The GS boot race (2026-09-08): S97maburplay starts within milliseconds of
+// The GS boot race: S97maburplay starts within milliseconds of
 // S96maburgs, so maburplay can reach the ring open before maburgs has created
 // the ring. A waiting open lets the player sit on its splash until the ring
 // shows up instead of exiting.
@@ -428,7 +428,7 @@ TEST(open_with_bounded_wait_times_out_on_missing_ring) {
   CHECK(ms < 3000);
 }
 
-// Slice salvage (spec 2026-10-10-h265-slices §5.5): a salvaged AU (sid 0 or
+// Slice salvage: a salvaged AU (sid 0 or
 // sid 1) is a legal, gap-free picture (kept slices + skip-slice fills) --
 // deliver it like any other AU, just counted separately from a plain
 // truncation.
@@ -460,7 +460,7 @@ TEST(salvaged_sid1_and_sid0_are_delivered_and_counted) {
   unlink(ring.c_str());
 }
 
-// --- Ring v4: open records (spec 2026-10-10-h265-slices §6.2-6.3) ---
+// --- Ring v4: open records ---
 
 using maburplay::AuEventKind;
 

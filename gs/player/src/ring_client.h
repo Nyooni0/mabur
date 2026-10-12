@@ -12,7 +12,7 @@
 
 namespace maburplay {
 
-// Ring v4 (spec 2026-10-10-h265-slices §6.2-6.3): a record can surface while
+// Ring v4: a record can surface while
 // maburgs is still filling it.
 enum class AuEventKind : uint8_t {
   kOpen,   // first sight of the record being filled: meta + bytes so far
@@ -77,7 +77,7 @@ class RingClient {
   uint64_t delivered() const { return delivered_; }
   uint64_t dropped_enhance_incomplete() const { return dropped_enhance_incomplete_; }
   uint64_t truncated_base() const { return truncated_base_; }
-  // Slice salvage (spec 2026-10-10-h265-slices §5.5): counted separately
+  // Slice salvage: counted separately
   // from truncated_base/dropped_enhance_incomplete -- a salvaged AU is
   // delivered (it is decodable), just not a plain complete record.
   uint64_t salvaged_base() const { return salvaged_base_; }
@@ -87,9 +87,9 @@ class RingClient {
   // enhance dropped by policy is counted in dropped_enhance_incomplete).
   uint64_t opened() const { return opened_; }
   uint64_t open_aborted() const { return open_aborted_; }
-  // Ring wake latency (spec §6.2's futex question): for each closed record
-  // delivered since the last call, delivery time - the writer's
-  // t_complete_us stamp, µs.
+  // Ring wake latency (how promptly the futex doorbell wakes us): for each
+  // closed record delivered since the last call, delivery time - the
+  // writer's t_complete_us stamp, µs.
   struct Wake { uint32_t p50 = 0, p99 = 0; uint32_t n = 0; };
   Wake take_wake();
   uint64_t resyncs() const { return reader_.resyncs(); }
@@ -98,14 +98,14 @@ class RingClient {
   std::string debug_line() const;
 
  private:
-  // POLICY (the point of the native player, spec §maburplay):
+  // POLICY (the point of the native player):
   //  - meta.sid == 1 && !maburgs::au_decodable(flags) -> drop whole, count.
-  //    (Slice salvage, spec 2026-10-10-h265-slices §5.5: a salvaged AU is
+  //    (Slice salvage: a salvaged AU is
   //    decodable even though it is not complete, so it is NOT dropped here
   //    -- counted via salvaged_enhance() instead.)
   //  - base AU (sid != 1, i.e. sid == 0) delivered always; truncated base
   //    counted (salvaged base counted via salvaged_base() instead).
-  //    2-stream space (spec 2026-08-29-airtime-balance-uep):
+  //    2-stream space (airtime-balance UEP):
   //    sid 0 = base, sid 1 = enhance — was sid 3 pre-fold, {0,1,2,3}.
   //  - flags & kFlagDiscont, or reader returned kResync -> next delivered
   //    AU carries flush_before = true.

@@ -46,9 +46,9 @@ void AuRouter::on_event(AuEvent&& ev) {
   }
   const uint64_t t_deliver = hooks_.now_us();
   const bool complete = (ev.meta.flags & maburgs::kRecFlagComplete) != 0;
-  // Slice salvage (spec §5.5): a salvaged AU is a legal, gap-free picture.
+  // Slice salvage: a salvaged AU is a legal, gap-free picture.
   const bool decodable = maburgs::au_decodable(ev.meta.flags);
-  // Flush-ordering contract (Task 8 review): every held frame released, a
+  // Flush-ordering contract: every held frame released, a
   // streamed picture ended, the decoder reset -- before this record touches it.
   if (ev.flush_before && !hooks_.flush()) return;
   // A record the feeder started streaming is finished (or already ended) there

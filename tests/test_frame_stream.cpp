@@ -247,7 +247,7 @@ TEST(waybeam_restart_discont_no_phantom_drops) {
 }
 
 TEST(lost_discont_restart_recovers_via_stall_watchdog) {
-  // The 2026-07-25 rig outage: maburd restarts, every frame of its discont
+  // The rig outage: maburd restarts, every frame of its discont
   // window is lost at radio bring-up, and the new epoch's ids unwrap BELOW
   // the surviving emit cursor via the signed-16 delta. Every arriving frame
   // is then evicted as "late" — no emission for up to 18 min. The watchdog
@@ -306,7 +306,7 @@ TEST(whole_frame_gap_waits_for_the_max_sid_timeout) {
   CHECK(fs.frames_clean() == 2);
 }
 
-// --- Task 8: per-AU latency latch (t_first/drone_q_ms/enc_us on end_frame) ---
+// --- per-AU latency latch (t_first/drone_q_ms/enc_us on end_frame) ---
 
 TEST(lat_t_first_is_min_body_time_q_enc_latched_from_idx0) {
   Capture cap;
@@ -410,7 +410,7 @@ TEST(tail_view_reports_count_and_seq_of_highest_fragment) {
 
 TEST(tail_view_hdr_retx_latches_through_end_frame) {
   // Fragment 0 arriving retx-marked latches AuLatMeta::hdr_retx, surfaced to
-  // the ring writer via end_frame -- Task 7's latency-anchor guard consumes
+  // the ring writer via end_frame -- the latency-anchor guard consumes
   // this to refuse an anchor sample built from a NACK-filled header.
   Capture cap;
   FrameStream fs({50, 8}, cap.cbs());
@@ -429,7 +429,7 @@ TEST(tail_view_hdr_retx_latches_through_end_frame) {
   CHECK(cap.evs.back().lat.hdr_retx == true);
 }
 
-// --- Task 9: FrameStream slice-salvage integration ---
+// --- FrameStream slice-salvage integration ---
 
 namespace {
 // FrameHdr + AU, split into fragments of 324-byte payload like production.
@@ -511,7 +511,7 @@ TEST(split_au_without_params_passes_through_counted) {
   CHECK(cap.evs[1].bytes == std::vector<uint8_t>(aus[5].begin(), aus[5].begin() + 20 * 324 - 8));
 }
 
-TEST(split_au_fallback_with_assembler_is_the_raw_prefix) {   // spec 5.7
+TEST(split_au_fallback_with_assembler_is_the_raw_prefix) {
   // Params usable and slice_rows 5: the assembler is engaged and drains
   // fragment by fragment. The picture is the IDR (I slices) with a hole in
   // slice 1 -> kSliceFbISlice. Passthrough must be byte-identical to the

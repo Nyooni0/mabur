@@ -103,7 +103,7 @@ TEST(duplicate_sources_and_repairs_idempotent) {
 }
 
 TEST(late_source_copy_of_recovered_symbol_counted_arrived) {
-  // Repair-vs-arrival race (bench 2026-07-27): a repair processed before a
+  // Repair-vs-arrival race (seen on the bench): a repair processed before a
   // reordered source symbol solves it ("recovered"); the direct copy landing
   // moments later must count syms_recovered_arrived, so the ladder's pre-FEC
   // loss metric can tell a race win from a symbol that truly never arrived.
@@ -385,7 +385,7 @@ TEST(watermark_inactive_decoder_books_all_current) {
   CHECK(d.syms_abandoned_stale() == 0);
 }
 
-// --- ArrivalTracker feed (spec 2026-09-05-arrival-loss-design.md §4.1) ----
+// --- ArrivalTracker feed ---------------------------------------------------
 // Sources only (overhead 0.0) so pkt index == seq and no repairs move the
 // expectation; default guard 32.
 
@@ -590,7 +590,7 @@ TEST(arrival_salvage_only_from_corrupt_body_copies) {
   CHECK(d.syms_abandoned() == 0);
 }
 
-// ---- loss episodes (fec.log gauge, 2026-09-15) ----
+// ---- loss episodes (fec.log gauge) ----
 // 62-byte packets at symbol_size 64: pkt index == seq. The window is 8, the
 // default horizon 4*8 = 32, so an episode whose last seq is L is emitted
 // once eviction passes L + window, i.e. once the newest seq reaches
@@ -774,7 +774,7 @@ TEST(episode_queue_is_bounded_when_never_drained) {
   CHECK(eps.front().first_seq > (1ull << 32) + 5);
 }
 
-// --- fec-nack: retransmit-marked symbols (spec 2026-10-05 option A) ---
+// --- fec-nack: retransmit-marked symbols ---
 namespace {
 // Source envelopes only: repairs (incl. flush()'s tail repair) are filtered
 // out so a held-back source stays a hole. flush() is still needed to seal

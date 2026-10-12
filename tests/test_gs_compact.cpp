@@ -107,7 +107,7 @@ TEST(the_rows_read_exactly_as_specified) {
         "bitrate:8.1 res:1280x720 fps:60 jit:5.2 lat:45/78 loss:0.3/0.0");
 }
 
-// 40 MHz rungs (2026-09-24): with 20/3 and 40/3 both live in the ladder, the
+// 40 MHz rungs: with 20/3 and 40/3 both live in the ladder, the
 // MCS number alone no longer names the rung -- the cell grows a width
 // suffix. Absent bw (older maburgs, or the fallback exhausted) draws dashes
 // instead of a fabricated width.
@@ -142,10 +142,9 @@ TEST(auto_channel_select_marks_the_channel) {
         "ch:--(a) mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41");
 }
 
-// In-flight channel hop (spec 2026-09-14-inflight-channel-hop): the
-// channel carries an "(h)" suffix -- same slot as "(a)", mutually
-// exclusive with it -- so the pilot can tell the link is on a channel the
-// hop feature itself put it on, right now.
+// In-flight channel hop: the channel carries an "(h)" suffix -- same slot as
+// "(a)", mutually exclusive with it -- so the pilot can tell the link is on a
+// channel the hop feature itself put it on, right now.
 TEST(inflight_hop_marks_the_channel) {
   GsFont f;
   std::string err;
@@ -304,12 +303,12 @@ TEST(the_recording_indicator_never_dims_on_a_stale_link) {
         bar.debug_field_text(s, false, ps, GsBarField::kRec));
 }
 
-// Fix round 1 (2026-09-26): kRec's box is sized to kRecWorst, far wider
-// than a GS-only state's own text, so drawing left-aligned from the box's
-// fixed left edge put the indicator ~577 px further left than it used to
-// sit. draw_field_ must right-align instead -- a short state's own ink
-// ends at the SAME column as the widest state's, both flush with the
-// box's right edge (which the anchored-top-right test above already pins).
+// kRec's box is sized to kRecWorst, far wider than a GS-only state's own text,
+// so drawing left-aligned from the box's fixed left edge put the indicator
+// ~577 px further left than it used to sit. draw_field_ must right-align
+// instead -- a short state's own ink ends at the SAME column as the widest
+// state's, both flush with the box's right edge (which the anchored-top-right
+// test above already pins).
 TEST(short_rec_text_ends_flush_with_the_box_right_edge_like_the_widest_state) {
   GsFont f;
   std::string err;
@@ -346,8 +345,8 @@ TEST(short_rec_text_ends_flush_with_the_box_right_edge_like_the_widest_state) {
   CHECK(short_x1 == widest_x1);
 }
 
-// Final-review fix (2026-09-26): the kRec box is sized per dvr.target --
-// same rule and same reasoning as the essential overlay's tests.
+// The kRec box is sized per dvr.target -- same rule and same reasoning as the
+// essential overlay's tests.
 std::vector<RecState> rec_states_for(RecTarget t) {
   std::vector<RecState> out;
   const RecState::Kind kinds[] = {RecState::Kind::kArmed, RecState::Kind::kRecording,
@@ -889,10 +888,10 @@ TEST(make_gs_layer_builds_a_layer_that_lays_out_for_either_style) {
   }
 }
 
-// Low-power (pre-arm) mode, spec 2026-09-20: the drone is deliberately at
-// 15 fps / 1 Mb/s. The fps cell keeps its text and turns caution-coloured
-// so the pilot can tell "throttled on purpose" from a fault; no new item
-// (items that come and go are unsupported on this bar).
+// Low-power (pre-arm) mode: the drone is deliberately at 15 fps / 1 Mb/s. The
+// fps cell keeps its text and turns caution-coloured so the pilot can tell
+// "throttled on purpose" from a fault; no new item (items that come and go are
+// unsupported on this bar).
 TEST(low_power_tints_the_fps_cell) {
   GsFont f;
   std::string err;
@@ -918,11 +917,11 @@ TEST(low_power_tints_the_fps_cell) {
   CHECK(bar.debug_field_text(s, true, ps, GsBarField::kFps) == "fps:15");
 }
 
-// Drone SoC temperature (sideport drone.sys.soc_temp_c), 2026-09-21: a
-// link-sourced cell on the radio row. Caution tint from 70 C -- the
-// fan-off spike climbed to 84 C in 15 min (docs/low-power-spike-findings-
-// 2026-09-19.md) -- and only ONE threshold, because the palette allows no
-// third status colour. Dims like every other link item when stale, and the
+// Drone SoC temperature (sideport drone.sys.soc_temp_c): a link-sourced
+// cell on the radio row. Caution tint from 70 C -- the fan-off spike
+// climbed to 84 C in 15 min (docs/findings/2026-09-19-low-power-spike.md)
+// -- and only ONE threshold, because the palette allows no third status
+// colour. Dims like every other link item when stale, and the
 // tint is gated on !stale for the same reason the fps cell's is.
 TEST(drone_temp_reads_on_the_radio_row_and_tints_caution_from_70) {
   GsFont f;
@@ -953,8 +952,8 @@ TEST(drone_temp_reads_on_the_radio_row_and_tints_caution_from_70) {
   CHECK(bar.debug_field_text(s, false, ps, GsBarField::kTemp) == "temp:0");
 }
 
-// 2026-09-26: the REC indicator draws at half the bar's type size (the
-// nearest baked size to it), so it no longer shouts over the video.
+// The REC indicator draws at half the bar's type size (the nearest baked size
+// to it), so it no longer shouts over the video.
 TEST(rec_indicator_is_half_the_bar_size) {
   GsFont f;
   std::string err;

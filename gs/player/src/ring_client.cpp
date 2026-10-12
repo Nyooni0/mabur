@@ -35,7 +35,7 @@ constexpr size_t kWakeCap = 4096;  // samples kept between take_wake() calls
 
 constexpr uint64_t kDoorReconnectBackoffMs = 1000;
 
-// Ring-wait cadence (GS boot race, 2026-09-08). Nothing is latency-critical
+// Ring-wait cadence (GS boot race). Nothing is latency-critical
 // here -- the doorbell is not up yet and there is no video to be late for --
 // so poll slowly and say so periodically, to tell "waiting" from "hung".
 constexpr uint64_t kRingWaitPollMs = 100;
@@ -49,9 +49,9 @@ RingClient::RingClient(Cfg cfg, Sink sink)
 RingClient::~RingClient() { drop_door_(); }
 
 // maburgs creates the ring; the init scripts start us within milliseconds of
-// it, so at boot we routinely get here first (see the 2026-09-08 GS boot-race
-// finding). Waiting -- rather than exiting, which the respawn wrapper reads as
-// a permanent config error -- keeps the splash up until video can start.
+// it, so at boot we routinely get here first (the GS boot race). Waiting --
+// rather than exiting, which the respawn wrapper reads as a permanent config
+// error -- keeps the splash up until video can start.
 // Note this blocks the whole player: no OSD and no record button until the
 // ring exists. That matches the old behaviour, which did not reach the main
 // loop either, and there is nothing to show or record without a video source.

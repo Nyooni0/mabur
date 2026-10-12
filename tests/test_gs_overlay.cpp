@@ -257,10 +257,10 @@ TEST(layout_fails_with_a_reason_when_a_size_is_missing) {
   CHECK(!err.empty());
 }
 
-// Task 14 will bake the font across several resolutions, not just 1080p
-// (the design doc: "at other resolutions the whole layer scales uniformly
-// by height/1080"). layout() must actually succeed at all of them, not
-// just the design resolution.
+// The font is baked across several resolutions, not just 1080p (the overlay
+// design: "at other resolutions the whole layer scales uniformly by
+// height/1080"). layout() must actually succeed at all of them, not just the
+// design resolution.
 TEST(layout_succeeds_at_every_scaled_resolution) {
   const std::string fp = GSFONT_SCALED;
   GsFont f;
@@ -342,13 +342,13 @@ TEST(pick_tolerance_bridges_a_deliberately_off_by_one_font) {
   CHECK(ov.debug_field_atlas_px(GsFieldId::kLossLabel) == 18);  // label: 19 -> 18
 }
 
-// The handoff's responsive floor: below an 18 px RENDERED label, the top
-// two blocks (rung/airtime/recording) are dropped and only the bottom two
-// render. Previously dead code -- the fixed +-2 px tolerance (round 2's
-// I3) meant no resolution in any plausible test font ever actually
-// resolved label below 18 px. The 15% proportional tolerance makes it
-// reachable: at 720p label wants (int)(19*2/3+0.5)=13 px, which IS baked
-// in kScaledSizes, so drop_top fires for a real, non-contrived reason.
+// The handoff's responsive floor: below an 18 px RENDERED label, the top two
+// blocks (rung/airtime/recording) are dropped and only the bottom two render.
+// Previously dead code -- the fixed +-2 px tolerance meant no resolution in
+// any plausible test font ever actually resolved label below 18 px. The 15%
+// proportional tolerance makes it reachable: at 720p label wants
+// (int)(19*2/3+0.5)=13 px, which IS baked in kScaledSizes, so drop_top fires
+// for a real, non-contrived reason.
 TEST(drop_top_fires_below_the_floor_not_above) {
   const std::string fp = GSFONT_SCALED;
   GsFont f;
@@ -666,11 +666,11 @@ TEST(no_two_active_field_boxes_overlap_at_any_resolution) {
   }
 }
 
-// link-rtt (2026-09-02): the LAT headlines carry a ~ marker while the
-// e2e is still RELATIVE (floor unknown — offset estimator cold or sync
-// lost at range); the marker drops once main folds the absolute floor in
-// (lat_abs). The RTT field renders the sideport's control-path RTT next
-// to the LAT rows and em-dashes when the estimator has never fired.
+// link-rtt: the LAT headlines carry a ~ marker while the e2e is still RELATIVE
+// (floor unknown — offset estimator cold or sync lost at range); the marker
+// drops once main folds the absolute floor in (lat_abs). The RTT field renders
+// the sideport's control-path RTT next to the LAT rows and em-dashes when the
+// estimator has never fired.
 TEST(lat_marks_relative_until_absolute_and_rtt_renders) {
   const std::string fp = GSFONT_DESIGN;
   GsFont f;
@@ -726,12 +726,11 @@ TEST(recording_states_render_distinctly) {
         std::string(kDotFilled) + " REC FAULT");
 }
 
-// Fix round 1 (2026-09-26): kRec's box is sized to kRecWorst, far wider
-// than a GS-only state's own text, so drawing left-aligned from the box's
-// fixed left edge put "REC 12:47" ~370 px further left than it used to
-// sit. draw_field_ must right-align instead -- a short state's own ink
-// ends at the SAME column as the widest state's, both flush with the
-// box's right edge.
+// kRec's box is sized to kRecWorst, far wider than a GS-only state's own text,
+// so drawing left-aligned from the box's fixed left edge put "REC 12:47"
+// ~370 px further left than it used to sit. draw_field_ must right-align
+// instead -- a short state's own ink ends at the SAME column as the widest
+// state's, both flush with the box's right edge.
 TEST(short_rec_text_ends_flush_with_the_box_right_edge_like_the_widest_state) {
   const std::string fp = GSFONT_DESIGN;
   GsFont f;
@@ -769,10 +768,10 @@ TEST(short_rec_text_ends_flush_with_the_box_right_edge_like_the_widest_state) {
   CHECK(short_x1 == widest_x1);
 }
 
-// Final-review fix (2026-09-26): the kRec box is sized per dvr.target.
-// Every RecState a player with this target can hand the overlay: main.cpp
-// sets gs_target = (target != vtx), and the VTX leg is only ever non-kNone
-// when the VTX is a target. elapsed covers the saturated clock too.
+// The kRec box is sized per dvr.target. Every RecState a player with this
+// target can hand the overlay: main.cpp sets gs_target = (target != vtx), and
+// the VTX leg is only ever non-kNone when the VTX is a target. elapsed covers
+// the saturated clock too.
 std::vector<RecState> rec_states_for(RecTarget t) {
   std::vector<RecState> out;
   const RecState::Kind kinds[] = {RecState::Kind::kArmed, RecState::Kind::kRecording,
@@ -1060,20 +1059,20 @@ TEST(null_surface_update_is_safe) {
   CHECK(true);  // survived
 }
 
-// Robustness gap closed in Task 8: gs_snapshot.cpp's JSON accessors reject
-// non-finite/non-numeric values but never bound a well-formed one's
-// magnitude, and the formatters (fmt_int et al.) have no width limit of
-// their own. draw_text clips only to the SURFACE, not to a field's box, and
-// clear_region only ever clears the box -- so an absurd value (a corrupt or
-// hostile datagram's air_pct: 1e300) would draw a ~300-character string
-// straight through neighbouring fields and off the edge of the screen, and
-// nothing would ever erase the overhang on a later frame. The chosen fix is
-// to clamp every value into its sensible display range in state_of_()
-// before formatting (see the comment above that switch), rather than
-// adding a clip rect to draw_text: it keeps the fixed-width invariant the
-// whole box-sizing scheme depends on exactly true instead of papering over
-// one symptom of violating it. This asserts the invariant end to end: every
-// lit pixel must fall inside SOME field's own declared box.
+// Robustness gap: gs_snapshot.cpp's JSON accessors reject
+// non-finite/non-numeric values but never bound a well-formed one's magnitude,
+// and the formatters (fmt_int et al.) have no width limit of their own.
+// draw_text clips only to the SURFACE, not to a field's box, and clear_region
+// only ever clears the box -- so an absurd value (a corrupt or hostile
+// datagram's air_pct: 1e300) would draw a ~300-character string straight
+// through neighbouring fields and off the edge of the screen, and nothing
+// would ever erase the overhang on a later frame. The chosen fix is to clamp
+// every value into its sensible display range in state_of_() before formatting
+// (see the comment above that switch), rather than adding a clip rect to
+// draw_text: it keeps the fixed-width invariant the whole box-sizing scheme
+// depends on exactly true instead of papering over one symptom of violating
+// it. This asserts the invariant end to end: every lit pixel must fall inside
+// SOME field's own declared box.
 TEST(absurd_values_never_draw_outside_their_field_boxes) {
   const std::string fp = GSFONT_DESIGN;
   GsFont f;
@@ -1085,7 +1084,7 @@ TEST(absurd_values_never_draw_outside_their_field_boxes) {
   GsSnapshot s = nominal();
   s.mcs = 1000000000;
   s.fec_pct = 1e300;
-  s.air_pct = 1e300;             // the brief's own example
+  s.air_pct = 1e300;
   s.pre_loss_pct = -1e300;
   s.post_loss_pct = 1e300;
   s.cards[0].id = 999999999;
@@ -1117,7 +1116,7 @@ TEST(absurd_values_never_draw_outside_their_field_boxes) {
   CHECK(stray == 0);
 }
 
-// --- per-card EVM (2026-09-04) ----------------------------------------
+// --- per-card EVM ---------------------------------------------------
 // EVM rides beside the SNR on each card row, tagged "E " so the two dB
 // figures next to each other stay distinguishable.
 TEST(evm_renders_beside_the_snr_with_its_own_tag) {
@@ -1235,7 +1234,7 @@ TEST(the_card_block_stays_clear_of_the_loss_block) {
   }
 }
 
-// 2026-09-26: the REC indicator draws at half the secondary type size (the
+// The REC indicator draws at half the secondary type size (the
 // nearest baked size to it) -- kJit is a secondary-size field.
 TEST(rec_indicator_is_half_the_secondary_size) {
   GsFont f;

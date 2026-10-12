@@ -1,4 +1,4 @@
-// tests/test_frame_e2e.cpp — spec's host loopback: synthetic frames ->
+// tests/test_frame_e2e.cpp — host loopback: synthetic frames ->
 // wire bodies -> decode -> RTP; assert 0 truncations, monotonic ts,
 // markers per frame, exact Annex-B reconstruction (incl. under body loss
 // within FEC overhead).

@@ -23,11 +23,12 @@ void StreamFeeder::set_decoder(StreamDecoder* dec) {
   else if (!dec_) off_ = StreamOff::kNoDecoder;
   else off_ = dec_->probe() ? StreamOff::kNone : StreamOff::kProbe;
   cur_ = Cur{};
-  // ended_ is NOT reset here: Task 9 rebuilds the decoder after a watchdog
-  // fires by calling on_flush() (which aborts any open picture and records
-  // it in ended_) and then set_decoder(new). Clearing ended_ here would
-  // make that picture's later kClose report kWhole instead of kAborted --
-  // a picture that streamed and was aborted must never also go whole.
+  // ended_ is NOT reset here: the player rebuilds the decoder after a
+  // watchdog fires by calling on_flush() (which aborts any open picture and
+  // records it in ended_) and then set_decoder(new). Clearing ended_ here
+  // would make that picture's later kClose report kWhole instead of
+  // kAborted -- a picture that streamed and was aborted must never also go
+  // whole.
 }
 
 // NAL start-code offsets in b, incrementally (VCL ones also in vcl). A

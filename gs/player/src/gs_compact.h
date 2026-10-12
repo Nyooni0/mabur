@@ -68,7 +68,7 @@ struct MaskAtlas;
 // 0 it is free. That also happens to match where the essential layout puts
 // it, in the link block rather than the video one.
 //
-// The third is low-power (pre-arm) mode (spec 2026-09-20): while
+// The third is low-power (pre-arm) mode: while
 // snap.low_power is set, the fps cell -- the one player-measured item
 // this exception touches -- takes tok::kStatusCaution instead of
 // tok::kTextPrimary, so the pilot can tell a deliberately throttled rate
@@ -218,8 +218,8 @@ class GsCompactBar final : public GsLayer {
   RecTarget rec_target_;
   Field fields_[(size_t)GsBarField::kCount];
   const MaskAtlas* atlas_ = nullptr;
-  // The REC corner item's atlas: the nearest baked size to half of atlas_
-  // (2026-09-26). Every other field shares atlas_.
+  // The REC corner item's atlas: the nearest baked size to half of atlas_.
+  // Every other field shares atlas_.
   const MaskAtlas* rec_atlas_ = nullptr;
   const MaskAtlas* atlas_for_(GsBarField id) const {
     return id == GsBarField::kRec && rec_atlas_ ? rec_atlas_ : atlas_;

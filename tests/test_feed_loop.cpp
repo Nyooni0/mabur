@@ -1,5 +1,5 @@
-// FeedLoop (design-reader-thread.md, Task 11c): the decoder-input thread
-// against a real ring + doorbell and a thread-safe fake decoder.
+// FeedLoop: the decoder-input thread against a real ring + doorbell and a
+// thread-safe fake decoder.
 #include <unistd.h>
 
 #include <atomic>

@@ -19,7 +19,7 @@ OSD_SHA_EXPECTED=e202e5d127467752984bda2c135d166661f8c0eb2c8481a77d54b39ed8f76a8
 # hash swap: the geometry floor below cannot see a single-field blanking, a
 # pre/post value transposition, or a pure recolour.
 #
-# Re-blessed 2026-08-04 (was c311690a...): the FPS baseline was derived from
+# Re-blessed (was c311690a...): the FPS baseline was derived from
 # the WRONG atlas's cell height, which left the hero FPS box overlapping the
 # JIT/MBPS box -- by exactly 0 px with the synthetic font, and by 1..3 px
 # with the real one (tests/test_gs_asset.cpp). Diff verified: the FPS value
@@ -27,7 +27,7 @@ OSD_SHA_EXPECTED=e202e5d127467752984bda2c135d166661f8c0eb2c8481a77d54b39ed8f76a8
 # surface changes (0 differing px outside the FPS cell band, 0 lit px left in
 # the vacated rows, lit-pixel total identical at 74690).
 #
-# Re-blessed 2026-08-04 (was 6479dbb1...): the per-card RSSI box was sized for
+# Re-blessed (was 6479dbb1...): the per-card RSSI box was sized for
 # the 11-glyph unheard string instead of the widest numeric, leaving ~160 px of
 # dead space between the value and "dBm" on every heard row (visible on the
 # bench screen). Pixel diff old->new: 14,344 px differ, bbox x 362..640
@@ -35,17 +35,16 @@ OSD_SHA_EXPECTED=e202e5d127467752984bda2c135d166661f8c0eb2c8481a77d54b39ed8f76a8
 # 74,690 -- i.e. a pure 116 px leftward translation of dBm/SNR in both rows,
 # with no glyph added, removed or recoloured.
 #
-# Re-blessed 2026-08-31 (was 908affc9...): Task 12 (spec
-# 2026-08-30-latency-accounting) added the OSD LAT row, a new field this
-# harness's --gs-render invocation has no CLI flag to populate, so it always
-# renders "LAT --" here. Pixel diff old->new: 3,224 px differ, ALL of them
+# Re-blessed (was 908affc9...): latency accounting added the OSD LAT row,
+# a new field this harness's --gs-render invocation has no CLI flag to
+# populate, so it always renders "LAT --" here. Pixel diff old->new: 3,224 px differ, ALL of them
 # NEW ink (lit total 74,690 -> 77,914, delta == diff count exactly, so
 # nothing existing moved, changed colour, or was erased), bbox x 1007..1096
 # y 858..893 -- a small isolated region above the FPS block (LAT stacks
 # above FPS in the video-figures column, see gs_overlay.cpp), matching
 # nothing but the new field's own box. No other block's pixels differ.
 #
-# Re-blessed 2026-09-06 (was 3d926998...): commit 6709053 collapsed the LAT
+# Re-blessed (was 3d926998...): commit 6709053 collapsed the LAT
 # block to three right-flush rows (RTT / P50 / P99) sharing one right edge and
 # dropped the per-segment breakdown column, so the two LAT rows this harness
 # renders as placeholders changed from "P50 --"/"P99 --" left-anchored in the
@@ -61,7 +60,7 @@ OSD_SHA_EXPECTED=e202e5d127467752984bda2c135d166661f8c0eb2c8481a77d54b39ed8f76a8
 # The preceding commit fc44c70 (per-card EVM) is NOT in this delta: rebuilt and
 # rendered, it still hashes 3d926998..., because the fixture's cards carry no
 # EVM and that field blanks.
-# Re-blessed 2026-09-26 (was 77352a37...): the REC indicator draws at half
+# Re-blessed (was 77352a37...): the REC indicator draws at half
 # the secondary size (nearest baked; 19 px in this synthetic font, 24 before).
 # Pixel diff old vs new: 5103 px changed, all inside x 1663..1822 y 178..213
 # (the REC field), 0 outside; REC ink still ends flush at x 1822.
@@ -71,18 +70,18 @@ GS_SHA_EXPECTED=a8f4637f98c88e78cad41f3c67107df355e1bf04059565c22ad87cf82fbb2099
 # alone -- the geometry floor below sees a bar that moved or lost a row, but
 # not a transposed value pair or a blanked field.
 #
-# Re-blessed 2026-09-08 (was 27566469...): the recording indicator moved out
+# Re-blessed (was 27566469...): the recording indicator moved out
 # of row 0 and up to the TOP-RIGHT corner, on its own. Row 0 goes back to
 # exactly the pixels it had before the indicator existed (d4cc28b3's row 0),
 # row 1 is untouched, and the only new ink is the indicator's own band at
 # the top inset -- which is what the third band the gate now asserts is.
 #
-# Re-blessed 2026-09-08 (was d4cc28b3...): the bar gained the recording
+# Re-blessed (was d4cc28b3...): the bar gained the recording
 # indicator, rendered identically to the essential overlay's (dot, REC,
 # mm:ss clock), and this invocation now passes --rec recording so the pixel
 # path covers it.
 #
-# Re-blessed 2026-09-08 (was f5c5b69c...): the bar went from one row to two.
+# Re-blessed (was f5c5b69c...): the bar went from one row to two.
 # A single line capped the type at 22 px on a 1080p panel -- too small to
 # read on the GS screen -- and splitting the eleven items across two rows
 # (radio above, picture below) lets the same "largest baked size that fits"
@@ -91,8 +90,8 @@ GS_SHA_EXPECTED=a8f4637f98c88e78cad41f3c67107df355e1bf04059565c22ad87cf82fbb2099
 # bands, both centred, block hugging the bottom) plus the per-row strings
 # pinned in tests/test_gs_compact.cpp.
 #
-# Re-blessed 2026-09-24 (was 658c9593...): compact bar mcs cell shows width
-# (Task 11, 2026-09-24-bw40-rungs spec -- 40 MHz rungs). GsSnapshot::bw and
+# Re-blessed (was 658c9593...): compact bar mcs cell shows width
+# (40 MHz rungs). GsSnapshot::bw and
 # the "mcs:<mcs>/<bw>" cell format were added in commit 66e52ba; the fixture
 # (tests/fixtures/gs_snapshot_nominal.json) carries no ctl.rung.bw or op.bw,
 # so the cell now reads "mcs:5/--" instead of "mcs:5", widening row 0 and
@@ -106,7 +105,7 @@ GS_SHA_EXPECTED=a8f4637f98c88e78cad41f3c67107df355e1bf04059565c22ad87cf82fbb2099
 # depends on the compact bar: OSD_SHA_EXPECTED is the drone-side MSP OSD,
 # and GS_SHA_EXPECTED renders --style essential, whose kRung field ("MCS 7 /
 # FEC 25%") never reads bw.
-# Re-blessed 2026-09-26 (was c7194602...): the REC corner item draws at half
+# Re-blessed (was c7194602...): the REC corner item draws at half
 # the bar's size (nearest baked; 19 px here). Pixel diff old vs new: 11768 px
 # changed, all inside x 1639..1886 y 42..94 (the REC field), 0 outside; REC
 # ink still ends flush at x 1886 and its top stays on the 40 px inset.
@@ -115,9 +114,8 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 # RCF delivered after frame 1 (same trick as run_gs_au_e2e.sh): the fixture
-# alternates TRAIL_R/TRAIL_N on its 12 P frames (2-stream space, spec
-# 2026-08-29-airtime-balance-uep), so without an RCF the boot MAX_RANGE op
-# point (drone/src/rc_agent.cpp:apply_max_range) would shed the 6 genuine
+# alternates TRAIL_R/TRAIL_N on its 12 P frames (2-stream space), so
+# without an RCF the boot MAX_RANGE op point (drone/src/rc_agent.cpp:apply_max_range) would shed the 6 genuine
 # sid-1 (enh) frames for good and this chain would never exercise ENH
 # through the player/DVR path.
 python3 - "$TMP/rc.bin" <<'EOF'
@@ -500,7 +498,7 @@ if [ "$BAR_SHA" != "$BAR_SHA_EXPECTED" ]; then
   exit 1
 fi
 
-# --- PART F: live run, SIGTERM -> clean shutdown (Task 11a) ------------
+# --- PART F: live run, SIGTERM -> clean shutdown ----------------------
 # The oneshot drain never reaches the run loop. Run it for real on the ring
 # maburgs left behind (null backend, no doorbell, no DVR, no overlays), then
 # stop it the way S97maburplay does: exit 0, promptly, through the shutdown

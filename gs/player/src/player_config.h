@@ -22,7 +22,7 @@ struct DvrCfg {
     int bitrate_kbps = 12000;
     int fps_cap = 30;   // encode is capped independently of display rate
   } burned;
-  // Where the record button records (spec 2026-09-26-vtx-recorder):
+  // Where the record button records:
   // "gs" = this GS's DVR only, "vtx" = the drone's SD card only, "both".
   std::string target = "gs";
 };
@@ -97,19 +97,19 @@ struct DisplayCfg {
   // estimator is cold or stale.
   int regulate_ms = 12;
   // Servo release to next_vblank - vsync_lead_ms instead of the fixed
-  // hold (spec 2026-08-31-vsync-locked-regulator-design.md). lead covers
+  // hold. lead covers
   // the present-path submission cost incl. the ~2 ms main-loop tick.
   bool vsync_lock = true;
-  // Default 6 (bench-measured 2026-08-31): with release-deadline wakeups
+  // Default 6 (bench-measured): with release-deadline wakeups
   // the submit lands ~0.2 ms after schedule, but decode work can still
   // block the drain for a few ms -- 6 keeps misses at ~0.2/s where 4
   // measured ~12/s and 9 wastes 3 ms of glass latency per frame.
   int vsync_lead_ms = 6;
   // Frames a sequential-slot chain may run before the regulator cuts it
   // with one dropped frame (frame_regulator.h chain_cuts). 0 = unbounded,
-  // the pre-2026-09-02 behavior. Default 3 (operator choice after the
-  // bench A/B in docs/observability.md: e2e p50 -3.9 ms for 1.44 drops/s;
-  // 6 was -2.4 ms for 0.56/s; p99 unchanged at any value).
+  // no chain cut at all. Default 3 (operator choice after the bench A/B in
+  // docs/findings/2026-09-02-regulator-chain-budget.md: e2e p50 -3.9 ms for
+  // 1.44 drops/s; 6 was -2.4 ms for 0.56/s; p99 unchanged at any value).
   int chain_budget = 3;
 };
 
@@ -121,9 +121,9 @@ struct ColorTransCfg {
   bool enable = false;
 };
 
-// [decoder] (spec 2026-10-10-h265-slices §6.3). stream = true hands a split
+// [decoder]. stream = true hands a split
 // picture to MPP slice by slice while maburgs still receives it (rkvdec2
-// stream mode); false submits every AU whole, the pre-Part-2 path. A/B and
+// stream mode); false submits every AU whole, the non-streamed path. A/B and
 // kill switch. Needs the stream-mode GS image (docs/slices.md); anywhere
 // else the decoder's probe refuses and maburplay submits whole AUs anyway.
 struct DecoderCfg {

@@ -438,9 +438,9 @@ TEST(asset_lat_row_layout_and_content_at_every_resolution) {
     GsOverlay ov(f);
     REQUIRE(ov.layout(r.w, r.h, &err));
 
-    // Valid: one headline per statistic, no per-segment breakdown (dropped
-    // 2026-09-06 -- segment detail is a post-flight question the flight
-    // jsonl answers, and on the glass it cost a full-width column).
+    // Valid: one headline per statistic, no per-segment breakdown (segment
+    // detail is a post-flight question the flight jsonl answers, and on the
+    // glass it cost a full-width column).
     const std::string head =
         ov.debug_field_text(nominal(), false, player_nominal(), GsFieldId::kLatHead);
     const std::string head50 = ov.debug_field_text(nominal(), false, player_nominal(),

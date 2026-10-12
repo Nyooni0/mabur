@@ -517,7 +517,7 @@ TEST(salvaged_au_carries_the_flag_and_is_decodable) {
   CHECK(!maburgs::au_decodable(0x01));
 }
 
-// --- Ring v4: slots published while they fill (spec 2026-10-10-h265-slices §6.2) ---
+// --- Ring v4: slots published while they fill ---
 
 TEST(open_record_is_readable_while_it_fills) {
   const std::string path = tmp_ring();
@@ -587,7 +587,7 @@ TEST(append_unaligned_grows_len_but_never_valid_len) {
   unlink(path.c_str());
 }
 
-TEST(reused_open_slot_is_reported_aborted_not_grown) {   // Review Focus 1
+TEST(reused_open_slot_is_reported_aborted_not_grown) {
   const std::string path = tmp_ring();
   maburgs::AuRingWriter w;
   REQUIRE(w.open(path, {1024, 4}));
@@ -690,7 +690,7 @@ TEST(reader_open_skips_the_slot_being_filled) {
   unlink(path.c_str());
 }
 
-TEST(hammer_open_reader_never_sees_foreign_bytes) {     // Review Focus 1
+TEST(hammer_open_reader_never_sees_foreign_bytes) {
   // Writer: AUs appended in 200-byte steps with yields between; every 5th
   // overflows the 512-byte slot and is aborted, so the next AU re-begins the
   // same rec_no. Reader: next() + peek_open() as RingClient drives them.

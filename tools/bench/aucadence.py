@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # Base-vs-enh AU completion-offset gate for the maburgs AU ring (metric
-# defined in docs/airtime-balance-spike-findings-2026-08-29.md; the spike's
-# throwaway aucadence.py, mainlined 2026-08-30 after the airtime-balance-uep
-# flag day made this a standing acceptance number).
+# defined in docs/findings/2026-08-29-airtime-balance-spike.md; the spike's
+# throwaway aucadence.py, mainlined after the airtime-balance-uep flag day
+# made this a standing acceptance number).
 #
 # Per-AU completion delay = t_complete_us − pts (SlotHdr v2's writer-stamped
-# finish() time; 2026-08-31, was arrival_mono_us from a ~0.5 ms poll of the
-# ring writer index before that — see docs/data-provenance.md). Only relative
+# finish() time; before SlotHdr v2 it was arrival_mono_us from a ~0.5 ms poll
+# of the ring writer index — see docs/data-provenance.md). Only relative
 # delays are meaningful (drone pts and GS monotonic clocks share no epoch),
 # so the reported OFFSET is p50(base delays) − p50(enh delays): the clock
 # offset cancels in the difference, leaving the systematic, class-dependent

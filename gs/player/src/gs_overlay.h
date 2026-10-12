@@ -61,7 +61,7 @@ enum class GsFieldId {
   // id and unit in kTextLabel, the RSSI by status, the SNR and EVM in
   // kTextSecondary -- and one field can carry only one colour.
   //
-  // EVM (2026-09-04) was INSERTED here rather than appended at the tail, the
+  // EVM was INSERTED here rather than appended at the tail, the
   // one exception to the rule above: card_field() addresses a slot as
   // kCard0Id + slot * 6 + which, so the block has to stay contiguous and
   // uniformly strided. That shifts every id after it, which is safe because
@@ -72,17 +72,17 @@ enum class GsFieldId {
   kCard1Id, kCard1Bars, kCard1Rssi, kCard1Unit, kCard1Snr, kCard1Evm,
   kCard2Id, kCard2Bars, kCard2Rssi, kCard2Unit, kCard2Snr, kCard2Evm,
   kCard3Id, kCard3Bars, kCard3Rssi, kCard3Unit, kCard3Snr, kCard3Evm,
-  // Tail-latency row (Task 12): the p99-by-e2e frame's end-to-end time.
+  // Tail-latency row: the p99-by-e2e frame's end-to-end time.
   // Appended, never inserted -- see the comment atop this enum. (The
-  // per-segment breakdown field that used to follow it was REMOVED
-  // 2026-09-06, as was the median row's; removal from the tail region is
+  // per-segment breakdown field that used to follow it was REMOVED, as was
+  // the median row's; removal from the tail region is
   // safe for the same reason insertion into the card block was -- these
   // values are compile-time only, never stored or transmitted.)
   kLatHead,
-  // Median-latency row (2026-09-01): same shape, p50-by-e2e frame, drawn
+  // Median-latency row: same shape, p50-by-e2e frame, drawn
   // one row above the p99 one. Appended for the same reason.
   kLatP50Head,
-  // Control-path RTT (link-rtt 2026-09-02): sideport link.rtt.ms, drawn
+  // Control-path RTT (link-rtt): sideport link.rtt.ms, drawn
   // atop the LAT rows but never summed into them — it is two-way
   // control-path time, not a video segment.
   kLatRtt,
