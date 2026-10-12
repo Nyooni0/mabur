@@ -476,3 +476,34 @@ TEST(unsupported_on_build_rules) {
   CHECK(maburplay::unsupported_on_build(c, host).empty());
   CHECK(maburplay::unsupported_on_build(c, v4l).empty());
 }
+
+// A Radxa toml (backend "mpp", dvr.mode "burned") started on the OPi image
+// (v4l2req only) fails two independent checks; both must be reported in one
+// string, joined, so the operator does not have to fix one, restart, and
+// only then see the second (S97maburplay does not respawn on exit 2).
+TEST(unsupported_on_build_reports_every_problem) {
+  maburplay::Config c;
+  maburplay::BuildCaps v4l{false, true};
+  c.backend = "mpp"; c.dvr.mode = "burned";
+  CHECK(maburplay::unsupported_on_build(c, v4l) ==
+        "backend \"mpp\" is not in this build (Rockchip MPP decoder); this build has: null, v4l2req; "
+        "dvr.mode \"burned\" needs the MPP encoder; this build has none -- set dvr.mode = \"raw\"");
+}
+
+// The "not in this build" message names the backend(s) this binary DOES
+// carry, so the operator knows what to put in the config instead of
+// guessing from the board.
+TEST(unsupported_on_build_names_available_backends) {
+  maburplay::Config c;
+  maburplay::BuildCaps mpp{true, false}, v4l{false, true}, host{false, false};
+
+  c.backend = "v4l2req"; c.dvr.mode = "raw";
+  CHECK(maburplay::unsupported_on_build(c, mpp) ==
+        "backend \"v4l2req\" is not in this build (V4L2-request decoder); this build has: null, mpp");
+
+  c.backend = "mpp"; c.dvr.mode = "raw";
+  CHECK(maburplay::unsupported_on_build(c, v4l) ==
+        "backend \"mpp\" is not in this build (Rockchip MPP decoder); this build has: null, v4l2req");
+  CHECK(maburplay::unsupported_on_build(c, host) ==
+        "backend \"mpp\" is not in this build (Rockchip MPP decoder); this build has: null");
+}
