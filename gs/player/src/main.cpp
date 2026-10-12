@@ -50,8 +50,13 @@
 #include "gs_draw.h"         // set_colour_inverse() for the GS overlay pre-invert
 #include "lat_tracker.h"    // tail latency segments + 1 Hz lat line
 #include "lat_log.h"        // persist 1 Hz lat line to <dvr>/log/lat-NNNN.log
-#include "mpp_backend.h"    // MppBackend::info_changes()/errors() for --decode-only
 #include "osd_palette.h"    // build_palette() for the encoder-side OSD
+#endif
+#ifdef MABUR_PLAYER_MPP
+#include "mpp_backend.h"    // MppBackend::info_changes()/errors() for --decode-only
+#endif
+#ifdef MABUR_PLAYER_V4L2REQ
+#include "v4l2req_backend.h"  // V4l2ReqBackend counters for --decode-only / the 5 s line
 #endif
 
 namespace {
@@ -493,6 +498,21 @@ int main(int argc, char** argv) {
   }
   if (!backend_override.empty()) cfg.backend = backend_override;
 
+  {
+    maburplay::BuildCaps caps;
+#ifdef MABUR_PLAYER_MPP
+    caps.mpp = true;
+#endif
+#ifdef MABUR_PLAYER_V4L2REQ
+    caps.v4l2req = true;
+#endif
+    const std::string why = maburplay::unsupported_on_build(cfg, caps);
+    if (!why.empty()) {
+      std::fprintf(stderr, "maburplay: %s\n", why.c_str());
+      return 2;
+    }
+  }
+
   // colortrans (docs/colortrans.md). The evaluator is always constructed
   // (cheap); whether it is USED is decided per consumer below: the display
   // stage needs the CRTC's CUBIC_LUT, the OSD inverse follows the display
@@ -539,8 +559,7 @@ int main(int argc, char** argv) {
   std::unique_ptr<maburplay::VideoBackend> backend = maburplay::make_backend(cfg.backend);
   if (!backend) {
     std::fprintf(stderr,
-                 "maburplay: backend \"%s\" not available (cross build without "
-                 "MABUR_PLAYER_HW?)\n",
+                 "maburplay: backend \"%s\" not available (not in this build?)\n",
                  cfg.backend.c_str());
     return 2;
   }
@@ -1062,7 +1081,7 @@ int main(int argc, char** argv) {
 #endif
     backend->release_frame(f);
   };
-#ifdef MABUR_PLAYER_HW
+#ifdef MABUR_PLAYER_MPP
   // [decoder] stream: MppBackend sets its parser up for streaming at init.
   if (auto* mpp = dynamic_cast<maburplay::MppBackend*>(backend.get()))
     mpp->set_stream(cfg.decoder.stream);
@@ -1290,7 +1309,7 @@ int main(int argc, char** argv) {
       if (!sampled_3s && router.synced() &&
           mono_us() >= router.t_sync_us() + 3'000'000) {
         sampled_3s = true;
-#ifdef MABUR_PLAYER_HW
+#ifdef MABUR_PLAYER_MPP
         if (auto* mpp = dynamic_cast<maburplay::MppBackend*>(backend.get())) {
           errors_at_3s = mpp->errors();
         }
@@ -1319,7 +1338,7 @@ int main(int argc, char** argv) {
     uint64_t info_change_count = 0;
     uint64_t error_count = 0;
     uint64_t concealed_count = 0;
-#ifdef MABUR_PLAYER_HW
+#ifdef MABUR_PLAYER_MPP
     if (auto* mpp = dynamic_cast<maburplay::MppBackend*>(backend.get())) {
       info_change_count = mpp->info_changes();
       // Counter semantics under the shipped decoder config (review
@@ -1374,7 +1393,7 @@ int main(int argc, char** argv) {
   router.set_hooks({[&feed](maburplay::FeedNote&& n) { feed.push_note(std::move(n)); },
                     [&feed]() { return feed.park_for_flush(); }, [] { return mono_us(); }});
   feed_ptr = &feed;
-#ifdef MABUR_PLAYER_HW
+#ifdef MABUR_PLAYER_MPP
   if (auto* mpp = dynamic_cast<maburplay::MppBackend*>(backend.get()))
     mpp->set_input_cancel(&feed.cancel_flag());
 #endif
@@ -1383,7 +1402,7 @@ int main(int argc, char** argv) {
   feed.set_periodic([&]() {
     const auto wk = ring.take_wake();
     uint64_t stream_refused = 0;
-#ifdef MABUR_PLAYER_HW
+#ifdef MABUR_PLAYER_MPP
     // backend read on the feed thread: safe only because the watchdog re-creates it while the feed is parked.
     if (auto* mpp = dynamic_cast<maburplay::MppBackend*>(backend.get()))
       stream_refused = mpp->stream_errors();
@@ -1950,7 +1969,7 @@ int main(int argc, char** argv) {
                        "decoder context\n");
           backend.reset();  // destroy the wedged context BEFORE creating anew
           backend = maburplay::make_backend(cfg.backend);
-#ifdef MABUR_PLAYER_HW
+#ifdef MABUR_PLAYER_MPP
           if (auto* mpp = dynamic_cast<maburplay::MppBackend*>(backend.get()))
             mpp->set_stream(cfg.decoder.stream);
 #endif
@@ -1960,7 +1979,7 @@ int main(int argc, char** argv) {
             return 1;
           }
           feeder.set_decoder(dynamic_cast<maburplay::StreamDecoder*>(backend.get()));
-#ifdef MABUR_PLAYER_HW
+#ifdef MABUR_PLAYER_MPP
           if (auto* mpp = dynamic_cast<maburplay::MppBackend*>(backend.get()))
             mpp->set_input_cancel(&feed.cancel_flag());
 #endif
