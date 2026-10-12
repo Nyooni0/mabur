@@ -58,4 +58,4 @@ enable = true
 
 # Video decoder.
 [decoder]
-stream = true              # start decoding a picture slice by slice as it arrives (needs the stream-mode GS image); false = decode whole pictures
+stream = true              # start decoding a picture slice by slice as it arrives (needs a GS image whose decoder streams: the Radxa stream-mode image, or the Orange Pi image's patched libavcodec); false = decode whole pictures

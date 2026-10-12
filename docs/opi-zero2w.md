@@ -9,13 +9,16 @@ through libav's `v4l2request` hwaccel.
 
 `backend = "v4l2req"` selects `V4l2ReqBackend`
 (`gs/player/src/v4l2req_backend.cpp`, built with
-`-DMABUR_PLAYER_DECODER=v4l2req`). Each access unit from the ring goes to
-`avcodec_send_packet` whole (no parser); decoded frames come back as
-DRM-PRIME linear NV12 and are handed to `DrmPresenter` unchanged.
+`-DMABUR_PLAYER_DECODER=v4l2req`). An access unit from the ring either goes
+to `avcodec_send_packet` whole (no parser) or, by default, slice by slice
+("Streamed decode" below); decoded frames come back as DRM-PRIME linear
+NV12 either way and are handed to `DrmPresenter` unchanged.
 
 - **One thread for libav.** Decode and frame frees run on the feed
   thread; `poll()`/`release_frame()` on main only touch a locked handoff
   (`frame_handoff.h`). Released frames are freed before the next decode.
+  `abort()` can also run on main while the feed thread is parked, same as
+  `flush()`.
 - **Entry gate.** After init and every flush, AUs are dropped until the
   first entry point (`mabur::au_is_entry_point`: an IRAP, or an AU carrying
   an SPS), counted as `gated`. The drone's intra-refresh stream sends a
@@ -25,7 +28,11 @@ DRM-PRIME linear NV12 and are handed to `DrmPresenter` unchanged.
   picture would make Cedrus reference never-decoded buffers. Not re-armed
   on decode errors.
 - **Synchronous.** The hwaccel waits for the capture buffer before
-  returning a frame, so `submit_au` blocks the feed thread for the decode.
+  returning a frame. Whole-AU decode (`stream = false`) blocks the feed
+  thread in `submit_au` for the whole decode; when streaming (the
+  default), each slice's `append()`/`start()` returns as soon as libav has
+  queued it to Cedrus, and only the picture's last `append()` — the one
+  that closes it — waits for the decode ("Streamed decode" below).
 - **Shape check.** A frame not in single-object linear NV12 is dropped and
   counted (`shape_drops`); the first one logs its descriptor.
 

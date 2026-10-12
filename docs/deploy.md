@@ -337,9 +337,12 @@ libstdc++. Its config must say `backend = "v4l2req"`, `dvr.mode = "raw"`
     scp -O out/arm64/maburplay-opi $GS:/usr/local/bin/maburplay
     ssh $GS '/etc/init.d/S97maburplay start'
 
-maburplay needs mabur's FFmpeg patch in the board's libavcodec. An image
-built from the image repo carries it; to put a rebuilt one on a board by
-hand, copy it onto the overlay, where it shadows the image's:
+maburplay needs mabur's FFmpeg patch in the board's libavcodec, so put the
+patched libavcodec on before (or together with) a new maburplay: a new
+maburplay against an unpatched libavcodec fails `init()` and the wrapper
+respawns it forever at 2 s. An image built from the image repo carries the
+patch already; to put a rebuilt libavcodec on a board by hand, copy it
+onto the overlay, where it shadows the image's:
 
     scp -O ../sbc-groundstations-gilankpam/output/orangepi_zero2w_defconfig/target/usr/lib/libavcodec.so.61.19.100 $GS:/usr/lib/
 

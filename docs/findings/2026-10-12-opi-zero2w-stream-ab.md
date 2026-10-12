@@ -20,7 +20,7 @@ H618, with pictures bit-identical to whole-AU decode?
 - FFmpeg 7.1 HEVC took one packet as one picture, and the v4l2request
   hwaccel queued slice k only on seeing slice k+1. Hence the patch.
 
-## Bugs found on the board
+## Bugs found on the way
 
 - **Later slices dropped.** The first streamed run decoded 356 of 369
   pictures differently from whole-AU decode; every slice after the first
@@ -35,18 +35,22 @@ H618, with pictures bit-identical to whole-AU decode?
   for 2 s. The patch keeps the frame back while a streamed picture is open
   (found in review before the first board run).
 
-## Results (build `001a31fc`, patched libavcodec, 1080p60 sink)
+## Results (patched libavcodec, 1080p60 sink)
 
-**Bit-exactness** (`v4l2req_streamcheck`, 375-AU live capture): whole vs
-streamed `mismatched 0, missing 0`, 19309 ms streamed vs 19262 ms whole for
-the full run; `--abort 50` (picture ended after 2 slices with an AUD):
-`abort_fired true`, every picture from the next entry point on matches.
+**Bit-exactness** (`v4l2req_streamcheck`, 375-AU live capture; mabur
+`4e761f88`, the FFmpeg patch at its final form — the checker does not
+involve maburplay): whole vs streamed `mismatched 0, missing 0`, 19309 ms
+streamed vs 19262 ms whole for the full run; `--abort 50` (picture ended
+after 2 slices with an AUD): `abort_fired true`, every picture from the
+next entry point on matches.
 
-**Decode-only, 30 s:** stream on `fps_active 60.34`, `errors 0`; stream off
-(same library) `fps_active 60.20`, `errors 0`.
+**Decode-only, 30 s:** stream on `fps_active 60.34`, `errors 0` (maburplay
+`23c855df`); stream off (same library) `fps_active 60.20`, `errors 0`
+(maburplay before streaming support, built from `c110f094`).
 
-**Live A/B**, 2 min per arm, same board/build/drone/rung, medians over the
-121 `lat:` lines of each arm (each line = 1 s p50/p99), ms:
+**Live A/B**, 2 min per arm, maburplay `23c855df` (differs from `001a31fc`
+only in abort()'s error path: always drains), same board/drone/rung,
+medians over the 121 `lat:` lines of each arm (each line = 1 s p50/p99), ms:
 
 | arm | `dec` p50 / p99 | `e2e` p50 / p99 | `reg` p50 / p99 | `fec` p50 / p99 |
 |---|---|---|---|---|
@@ -57,14 +61,39 @@ Stream on: `stream: on streamed=6931 whole=267 aborted=0` (96.3 % of AUs
 stream; the rest are the one-slice AUs) — `v4l2req: errors=0 bitstream=0`
 in both arms.
 
-**ausniff while streaming, 20 s:** 1215 AUs, 0 frame-id gaps, 0
-incomplete, 0 resyncs.
+**Regulator drops**, same A/B as above, final regulator lines (2 min each,
+~7.5k frames held):
+
+| arm | held | replaced | cuts | chained | chains | late | skips | present_jitter |
+|---|---|---|---|---|---|---|---|---|
+| stream on | 7466 | 84 | 81 | 493 | 254 | 0 | 0 | 0.08 ms |
+| stream off | 7487 | 47 | 45 | 396 | 229 | 0 | 0 | 0.92 ms |
+
+Drops **rose** with streaming: `replaced+cuts` 165 vs 92 (~1.1 % vs ~0.6 %
+of held frames). `replaced` is a mailbox frame displaced before display;
+`cuts` is the regulator's `chain_budget` latency trim (drop one after 3
+back-to-back). Both are the regulator's deliberate latency trims, not
+decode losses, and earlier-decoded frames chain more often with streaming
+on (`chained` 493 vs 396) — but the "no rise in drops" criterion is not
+met, plainly, with these numbers. Left open for the operator: whether
+`chain_budget` wants retuning on this board.
+
+**ausniff while streaming, 20 s** (maburplay `001a31fc`): 1215 AUs, 0
+frame-id gaps, 0 incomplete, 0 resyncs. The same build's 20 s decode-only,
+stream on: `fps_active 60.92`, `errors 0`.
 
 ## Conclusions
 
-- Pass: `dec` drops 3 ms at the median and 4 ms at p99; glass-to-glass
-  drops 3 ms at the median. Short of the spike's ~5 ms estimate — per-slice
-  request overhead on Cedrus and the last slice's decode remain.
+- Pass (`dec` criterion): `dec` drops 3 ms at the median and 4 ms at p99;
+  glass-to-glass drops 3 ms at the median. Short of the spike's ~5 ms
+  estimate — per-slice request overhead on Cedrus and the last slice's
+  decode remain.
+- **Not met (no-rise-in-drops criterion):** the regulator's `replaced+cuts`
+  rose from 92 to 165 (~0.6 % to ~1.1 % of held frames) with streaming on.
+  Both counters are the regulator's own latency trims, not decode losses,
+  but the criterion as stated is not met — left open for the operator
+  rather than argued away (e.g. whether `chain_budget` wants retuning on
+  this board).
 - Streamed and whole decode give the same pixels.
 - Known limit, not exercised: a hard (non-bitstream) decoder error in the
   middle of a streamed picture can leave the capture buffer held, costing
