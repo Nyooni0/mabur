@@ -78,6 +78,8 @@ class EntryGate {
     if (!open_) ++gated_;
     return open_;
   }
+  // Whether admit(is_entry) would pass, without changing anything.
+  bool would_admit(bool is_entry) const { return open_ || is_entry; }
   void arm() { open_ = false; }
   bool open() const { return open_; }
   uint64_t gated() const { return gated_; }

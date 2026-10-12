@@ -337,6 +337,15 @@ libstdc++. Its config must say `backend = "v4l2req"`, `dvr.mode = "raw"`
     scp -O out/arm64/maburplay-opi $GS:/usr/local/bin/maburplay
     ssh $GS '/etc/init.d/S97maburplay start'
 
+maburplay needs mabur's FFmpeg patch in the board's libavcodec. An image
+built from the image repo carries it; to put a rebuilt one on a board by
+hand, copy it onto the overlay, where it shadows the image's:
+
+    scp -O ../sbc-groundstations-gilankpam/output/orangepi_zero2w_defconfig/target/usr/lib/libavcodec.so.61.19.100 $GS:/usr/lib/
+
+and check `find /overlay/root/usr/lib -name 'libavcodec*'` after a later
+image flash (a stale copy there shadows the new image's).
+
 **CPE510 relay** (`radio.relays`, `docs/cpe510-relay.md`). The Radxa ZERO 3
 has no Ethernet: the CPE needs a USB-Ethernet adapter on the GS. The CPE
 serves DHCP on its LAN, 10.83.11.100-199, with **no router and no DNS**

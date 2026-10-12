@@ -76,4 +76,17 @@ TEST(entry_gate) {
   CHECK(g.gated() == 3);
 }
 
+// A streamed picture may start only where the gate would admit it: the gate
+// is open, or this AU is itself an entry point. Asking does not change the
+// gate or its count.
+TEST(entry_gate_would_admit) {
+  maburplay::EntryGate g;
+  CHECK(!g.would_admit(false));
+  CHECK(g.would_admit(true));
+  CHECK(!g.open());
+  CHECK(g.gated() == 0);
+  CHECK(g.admit(true));
+  CHECK(g.would_admit(false));
+}
+
 MTEST_MAIN

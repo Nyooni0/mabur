@@ -39,13 +39,39 @@ for MPP. `bitstream` is `AVERROR_INVALIDDATA` from send/receive: bitstream
 damage from a lossy link, not a decoder fault, and NOT included in
 `errors`.
 
+## Streamed decode
+
+`[decoder] stream = true` (the default) streams on this board too.
+`V4l2ReqBackend` is a `StreamDecoder`: `StreamFeeder` hands it the first
+slice (with the NAL units before it), then one slice per call, and libav
+gets one packet per slice — `AV_PKT_FLAG_PARTIAL` on every packet but the
+last. mabur's FFmpeg patch (`gs/player/ffmpeg-patches/`, carried by the
+image's `ffmpeg-v4l2request`) keeps the picture open across packets and
+queues each slice to Cedrus as its packet arrives, holding the capture
+buffer, so only the last slice's decode follows the AU's completion. An
+abort sends one AUD NAL: libav ends the picture with what it has and the
+held capture buffer is released (`V4L2_DEC_CMD_FLUSH`).
+
+The patch is required: `v4l2req_backend.cpp` does not compile without
+`AV_PKT_FLAG_PARTIAL`, and `init()` fails (`libavcodec lacks the mabur
+stream patch`) on a libavcodec without the `stream_slices` option.
+`[decoder] stream = false` decodes whole AUs on the same library.
+
+A hard (non-bitstream) decoder error in the middle of a streamed picture
+can leave Cedrus holding that picture's capture buffer, costing up to one
+2 s capture wait before decode resumes; whole-AU decode on Cedrus has the
+same exposure.
+
+`out/arm64/v4l2req_streamcheck <capture.265> [--abort N]` (stage 7) checks
+on the board that streamed and whole decode give identical pictures; the
+capture comes from `tools/bench/ausniff.py --oneshot --dump-annexb`.
+
 ## Not available on this board
 
 | Feature | Why | Config |
 |---|---|---|
 | Burned DVR | no hardware encoder in mainline | `dvr.mode = "burned"` exits 2 at startup |
 | colortrans | no CRTC `CUBIC_LUT`, no RGA | `colortrans.enable = false` (true only logs that the CRTC has no LUT) |
-| Streamed (slice) decode | MPP-only | `decoder.stream = false` (true falls back to whole pictures) |
 | Record button | the H618's GPIO lines carry no names, so `[input.rec]` cannot resolve | stripped from the image's default |
 
 **Raw DVR is the only DVR here, and it starts on a real IRAP.** `RawDvr`
@@ -81,5 +107,7 @@ Bench record: `docs/findings/2026-10-12-opi-zero2w-bringup.md`.
 `tools/build-arm64.sh` stage 7 builds `out/arm64/maburplay-opi` against
 `../sbc-groundstations-gilankpam/output/orangepi_zero2w_defconfig`
 (override with `MABUR_BR_HOST_OPI=`). NEEDED: `libavcodec.so.61`,
-`libavutil`, `libdrm.so.2`, libstdc++. Deploy: `docs/deploy.md`
+`libavutil`, `libdrm.so.2`, libstdc++. Stage 7 also needs that sysroot's
+libavcodec to carry mabur's FFmpeg patch (`gs/player/ffmpeg-patches/`) and
+builds `v4l2req_streamcheck` against it. Deploy: `docs/deploy.md`
 ("Orange Pi Zero 2W").

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "stream_decoder.h"
 #include "video_backend.h"
 
 namespace maburplay {
@@ -25,7 +26,11 @@ namespace maburplay {
 //
 // No libav include here, as with mpp_backend.h: null_backend.cpp includes
 // this on every v4l2req build.
-class V4l2ReqBackend : public VideoBackend {
+//
+// Streams: the libav it builds against carries mabur's FFmpeg patch
+// (gs/player/ffmpeg-patches); without it this file does not compile and
+// init() fails -- there is no whole-only fallback.
+class V4l2ReqBackend : public VideoBackend, public StreamDecoder {
  public:
   V4l2ReqBackend();
   ~V4l2ReqBackend() override;
@@ -35,6 +40,14 @@ class V4l2ReqBackend : public VideoBackend {
   void flush() override;
   void release_frame(const DmaFrame&) override;
   void poll() override;
+
+  // Streamed decode (StreamDecoder): one slice per packet through the
+  // patched libav (AV_PKT_FLAG_PARTIAL); each slice reaches Cedrus as its
+  // packet arrives and only the last one waits for the picture. Feed thread.
+  bool probe() override;
+  bool start(const uint8_t* p, size_t n, uint8_t nslices, uint32_t pts_us) override;
+  bool append(const uint8_t* p, size_t n, uint32_t pts_us, bool last) override;
+  void abort(uint32_t pts_us) override;
 
   // Diagnostics (read by --decode-only and the feed thread's 5 s line).
   uint64_t frames() const;  // decoded frames delivered by poll() (to the FrameSink, or dropped if none)

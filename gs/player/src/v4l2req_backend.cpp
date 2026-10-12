@@ -8,6 +8,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_drm.h>
+#include <libavutil/opt.h>
 }
 
 #include "frame_handoff.h"
@@ -17,6 +18,10 @@ extern "C" {
 // AV_HWDEVICE_TYPE_V4L2REQUEST is not in upstream FFmpeg: it is an enumerator
 // the v4l2request fork adds to AVHWDeviceType, so this file builds only
 // against the fork's headers (the Orange Pi image's ffmpeg-v4l2request).
+
+#ifndef AV_PKT_FLAG_PARTIAL
+#error "libavcodec lacks the mabur stream patch (gs/player/ffmpeg-patches)"
+#endif
 
 namespace maburplay {
 
@@ -28,6 +33,10 @@ namespace {
 // ready queue. Not a ceiling -- the pool is an av_buffer_pool that grows on
 // demand past this if the handoff backs up further.
 constexpr int kExtraHwFrames = 8;
+
+// One AUD NAL: no slice, so libav ends an open streamed picture with the
+// slices it has and the hwaccel releases the held capture buffer.
+constexpr uint8_t kAud[] = {0x00, 0x00, 0x01, 0x46, 0x01, 0x50};
 
 enum AVPixelFormat pick_drm_prime(AVCodecContext*, const enum AVPixelFormat* fmts) {
   for (; *fmts != AV_PIX_FMT_NONE; ++fmts)
@@ -63,6 +72,9 @@ struct V4l2ReqBackend::Impl {
   EntryGate gate;
   std::atomic<uint64_t> frames{0}, errors{0}, bitstream{0}, dropped_shape{0}, gated{0};
   bool logged_shape = false;
+  bool stream_open = false;
+  bool logged_stream_error = false;
+  bool logged_reopen = false;
 
   ~Impl() {
     free_all();
@@ -96,6 +108,11 @@ struct V4l2ReqBackend::Impl {
     // In-band VPS/SPS/PPS, no B-frames: emit each picture as it completes.
     cc->flags |= AV_CODEC_FLAG_LOW_DELAY;
     cc->thread_count = 1;
+    // Streamed decode needs mabur's FFmpeg patch; there is no fallback.
+    if (av_opt_set_int(cc->priv_data, "stream_slices", 1, 0) < 0) {
+      std::fprintf(stderr, "V4l2ReqBackend: libavcodec lacks the mabur stream patch\n");
+      return false;
+    }
     const int hr = av_hwdevice_ctx_create(&hw, AV_HWDEVICE_TYPE_V4L2REQUEST, nullptr, nullptr, 0);
     if (hr < 0) {
       std::fprintf(stderr, "V4l2ReqBackend: v4l2request device create failed (%d)\n", hr);
@@ -110,6 +127,40 @@ struct V4l2ReqBackend::Impl {
       return false;
     }
     return true;
+  }
+
+  // One packet to the decoder. false = refused; a refused packet also ends
+  // any streamed picture on libav's side, so stream_open follows it.
+  bool send(const uint8_t* p, size_t n, uint32_t pts_us, bool partial) {
+    pkt->data = const_cast<uint8_t*>(p);
+    pkt->size = static_cast<int>(n);
+    pkt->pts = pts_us;
+    pkt->flags = partial ? AV_PKT_FLAG_PARTIAL : 0;
+    const int sr = avcodec_send_packet(cc, pkt);
+    av_packet_unref(pkt);
+    if (sr >= 0) return true;
+    // AVERROR_INVALIDDATA is bitstream damage from a lossy link, not a
+    // decoder/device fault; AVERROR(EAGAIN) here means the packet was NOT
+    // accepted (the decoder wants receive_frame() drained first), which is
+    // a dropped packet and therefore a hard error, not something to ignore.
+    if (sr == AVERROR_INVALIDDATA) ++bitstream; else ++errors;
+    stream_open = false;
+    return false;
+  }
+
+  // Every frame the decoder has ready -> the ready queue (or dropped).
+  void drain() {
+    for (;;) {
+      AVFrame* av = av_frame_alloc();
+      const int rr = av ? avcodec_receive_frame(cc, av) : AVERROR(ENOMEM);
+      if (rr != 0) {
+        av_frame_free(&av);
+        if (rr == AVERROR_INVALIDDATA) ++bitstream;
+        else if (rr != AVERROR(EAGAIN) && rr != AVERROR_EOF) ++errors;
+        break;
+      }
+      take(av);
+    }
   }
 
   // One decoded frame -> the ready queue, or dropped (counted) if it is not
@@ -172,30 +223,71 @@ void V4l2ReqBackend::submit_au(const uint8_t* au, size_t n, uint32_t pts_us) {
   }
   // The decoder copies what it keeps (the packet is not refcounted), so the
   // ring slot may be reused as soon as this returns.
-  m.pkt->data = const_cast<uint8_t*>(au);
-  m.pkt->size = static_cast<int>(n);
-  m.pkt->pts = pts_us;
-  const int sr = avcodec_send_packet(m.cc, m.pkt);
-  av_packet_unref(m.pkt);
-  if (sr < 0) {
-    // AVERROR_INVALIDDATA is bitstream damage from a lossy link, not a
-    // decoder/device fault; AVERROR(EAGAIN) here means the AU was NOT
-    // accepted (the decoder wants receive_frame() drained first), which is
-    // a dropped AU and therefore a hard error, not something to ignore.
-    if (sr == AVERROR_INVALIDDATA) ++m.bitstream;
-    else ++m.errors;
-  }
-  for (;;) {
-    AVFrame* av = av_frame_alloc();
-    const int rr = av ? avcodec_receive_frame(m.cc, av) : AVERROR(ENOMEM);
-    if (rr != 0) {
-      av_frame_free(&av);
-      if (rr == AVERROR_INVALIDDATA) ++m.bitstream;
-      else if (rr != AVERROR(EAGAIN) && rr != AVERROR_EOF) ++m.errors;
-      break;
+  m.send(au, n, pts_us, false);
+  m.drain();
+}
+
+bool V4l2ReqBackend::probe() { return impl_ != nullptr; }
+
+bool V4l2ReqBackend::start(const uint8_t* p, size_t n, uint8_t, uint32_t pts_us) {
+  if (!impl_ || !p || n == 0) return false;
+  Impl& m = *impl_;
+  m.free_releases();
+  // libav has no guard of its own against a new picture's first slice
+  // arriving while a picture is still open (StreamFeeder should always abort
+  // or finish the previous one first, but this is cheap insurance): end the
+  // open picture exactly as abort() does before starting the new one.
+  if (m.stream_open) {
+    m.send(kAud, sizeof kAud, pts_us, false);
+    m.stream_open = false;
+    m.drain();
+    ++m.errors;
+    if (!m.logged_reopen) {
+      m.logged_reopen = true;
+      std::fprintf(stderr,
+                   "V4l2ReqBackend: a new streamed picture started over an open one; ended it\n");
     }
-    m.take(av);
   }
+  // Before the first entry point the picture is not taken here: it goes the
+  // whole-AU path at its close, where the gate drops and counts it.
+  const bool entry = !m.gate.open() && mabur::au_is_entry_point(p, n);
+  if (!m.gate.would_admit(entry)) return false;
+  m.gate.admit(entry);
+  if (!m.send(p, n, pts_us, true)) {
+    if (!m.logged_stream_error) {
+      m.logged_stream_error = true;
+      std::fprintf(stderr, "V4l2ReqBackend: a streamed picture was refused at its first slice\n");
+    }
+    return false;
+  }
+  m.stream_open = true;
+  return true;
+}
+
+bool V4l2ReqBackend::append(const uint8_t* p, size_t n, uint32_t pts_us, bool last) {
+  if (!impl_ || !impl_->stream_open || !p || n == 0) return false;
+  Impl& m = *impl_;
+  m.free_releases();
+  if (!m.send(p, n, pts_us, !last)) {
+    if (!m.logged_stream_error) {
+      m.logged_stream_error = true;
+      std::fprintf(stderr, "V4l2ReqBackend: a streamed slice was refused\n");
+    }
+    return false;
+  }
+  if (last) {
+    m.stream_open = false;
+    m.drain();
+  }
+  return true;
+}
+
+void V4l2ReqBackend::abort(uint32_t pts_us) {
+  if (!impl_ || !impl_->stream_open) return;
+  Impl& m = *impl_;
+  m.send(kAud, sizeof kAud, pts_us, false);
+  m.stream_open = false;
+  m.drain();
 }
 
 void V4l2ReqBackend::poll() {
@@ -221,6 +313,7 @@ void V4l2ReqBackend::flush() {
   // The presenter and regulator have already returned their frames
   // (main.cpp's flush order), so both queues hold everything outstanding.
   impl_->free_all();
+  impl_->stream_open = false;
   avcodec_flush_buffers(impl_->cc);
   impl_->gate.arm();
 }
