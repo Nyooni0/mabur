@@ -69,14 +69,15 @@ in both arms.
 | stream on | 7466 | 84 | 81 | 493 | 254 | 0 | 0 | 0.08 ms |
 | stream off | 7487 | 47 | 45 | 396 | 229 | 0 | 0 | 0.92 ms |
 
-Drops **rose** with streaming: `replaced+cuts` 165 vs 92 (~1.1 % vs ~0.6 %
-of held frames). `replaced` is a mailbox frame displaced before display;
-`cuts` is the regulator's `chain_budget` latency trim (drop one after 3
-back-to-back). Both are the regulator's deliberate latency trims, not
-decode losses, and earlier-decoded frames chain more often with streaming
-on (`chained` 493 vs 396) — but the "no rise in drops" criterion is not
-met, plainly, with these numbers. Left open for the operator: whether
-`chain_budget` wants retuning on this board.
+Drops **rose** with streaming: `replaced+cuts` 165 of 7466 held frames
+(~2.2 %) vs 92 of 7487 (~1.2 %); `cuts` alone 81 (~1.1 %) vs 45 (~0.6 %).
+`replaced` is a mailbox frame displaced before display; `cuts` is the
+regulator's `chain_budget` latency trim (drop one after 3 back-to-back).
+Both are the regulator's deliberate latency trims, not decode losses, and
+earlier-decoded frames chain more often with streaming on (`chained` 493
+vs 396) — but the "no rise in drops" criterion is not met, plainly, with
+these numbers. Left open for the operator: whether `chain_budget` wants
+retuning on this board.
 
 **ausniff while streaming, 20 s** (maburplay `001a31fc`): 1215 AUs, 0
 frame-id gaps, 0 incomplete, 0 resyncs. The same build's 20 s decode-only,
@@ -89,11 +90,11 @@ stream on: `fps_active 60.92`, `errors 0`.
   estimate — per-slice request overhead on Cedrus and the last slice's
   decode remain.
 - **Not met (no-rise-in-drops criterion):** the regulator's `replaced+cuts`
-  rose from 92 to 165 (~0.6 % to ~1.1 % of held frames) with streaming on.
-  Both counters are the regulator's own latency trims, not decode losses,
-  but the criterion as stated is not met — left open for the operator
-  rather than argued away (e.g. whether `chain_budget` wants retuning on
-  this board).
+  rose from 92 of 7487 held frames (~1.2 %) to 165 of 7466 (~2.2 %) with
+  streaming on (`cuts` alone: 45 ≈ 0.6 % vs 81 ≈ 1.1 %). Both counters are
+  the regulator's own latency trims, not decode losses, but the criterion
+  as stated is not met — left open for the operator rather than argued
+  away (e.g. whether `chain_budget` wants retuning on this board).
 - Streamed and whole decode give the same pixels.
 - Known limit, not exercised: a hard (non-bitstream) decoder error in the
   middle of a streamed picture can leave the capture buffer held, costing
