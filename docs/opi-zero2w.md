@@ -54,6 +54,11 @@ buffer, so only the last slice's decode follows the AU's completion. An
 abort sends one AUD NAL: libav ends the picture with what it has and the
 held capture buffer is released (`V4L2_DEC_CMD_FLUSH`).
 
+Against whole-AU decode on the same build, streaming takes the `lat:` `dec`
+segment from 7 to 4 ms at the median (10 to 6 ms p99) on the bench link's
+4-slice pictures; about 96 % of AUs stream, the rest being one-slice AUs
+(`docs/findings/2026-10-12-opi-zero2w-stream-ab.md`).
+
 The patch is required: `v4l2req_backend.cpp` does not compile without
 `AV_PKT_FLAG_PARTIAL`, and `init()` fails (`libavcodec lacks the mabur
 stream patch`) on a libavcodec without the `stream_slices` option.
@@ -100,8 +105,9 @@ regulator's vsync servo locks and runs in paced mode. Page-flip
 timestamps are kernel CLOCK_MONOTONIC (`DRM_CAP_TIMESTAMP_MONOTONIC`, as
 on every DRM driver), so the latency log's `dsp` segment is exact.
 
-Decode keeps up with 1080p60: Cedrus decodes an AU in about 7 ms
-(`lat:` `dec`), and the GS OSD layer costs no measurable frame rate.
+Decode keeps up with 1080p60: Cedrus decodes a whole AU in about 7 ms
+(`lat:` `dec`; 4 ms after completion when streamed, "Streamed decode"),
+and the GS OSD layer costs no measurable frame rate.
 Bench record: `docs/findings/2026-10-12-opi-zero2w-bringup.md`.
 
 ## Build and deploy
