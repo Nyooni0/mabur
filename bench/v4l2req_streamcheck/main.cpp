@@ -9,9 +9,12 @@
 // last). Both start at the first entry point (mabur::au_is_entry_point) and
 // hash every decoded NV12 picture (FNV-1a over the visible rows). Pass: the
 // same number of pictures and identical hashes. With --abort N, run 2 ends AU
-// N after two slices with an AUD packet (maburplay's abort); pass then means
-// every picture from the next entry point on matches run 1, and decoding did
-// not stall. Exit 0 = pass.
+// N after two slices with an AUD packet (maburplay's abort) -- but only if AU
+// N actually has >= 3 stream pieces to cut after two; otherwise the abort
+// never fires and the run would silently degrade into an ordinary pass that
+// never exercised recovery, so that case is a hard error (exit 2) instead.
+// When the abort does fire, pass means every picture from the next entry
+// point on matches run 1, and decoding did not stall. Exit 0 = pass.
 #include <fcntl.h>
 #include <linux/dma-buf.h>
 #include <sys/ioctl.h>
@@ -55,8 +58,14 @@ uint64_t fnv(uint64_t h, const uint8_t* p, size_t n) {
   return h;
 }
 
-// Hash of the visible NV12 picture, read through a dmabuf mmap.
-std::optional<uint64_t> hash_frame(const AVFrame* f) {
+// Hash of the visible NV12 picture, read through a dmabuf mmap. `row` is a
+// scratch buffer the caller keeps across frames: each visible row is
+// memcpy'd into it (wide, cached loads) before FNV hashes it -- byte-wise
+// FNV straight off the dmabuf mmap is a byte-at-a-time uncached-memory read,
+// ~620 ms/frame on the board; copying the row first and hashing the cached
+// copy keeps the same bytes in the same order (so the hash is unchanged)
+// while hashing cached memory instead.
+std::optional<uint64_t> hash_frame(const AVFrame* f, std::vector<uint8_t>* row) {
   const auto* d = reinterpret_cast<const AVDRMFrameDescriptor*>(f->data[0]);
   if (d->nb_objects != 1 || d->nb_layers < 1 || d->layers[0].nb_planes != 2) return std::nullopt;
   const int fd = d->objects[0].fd;
@@ -64,13 +73,23 @@ std::optional<uint64_t> hash_frame(const AVFrame* f) {
   void* m = mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0);
   if (m == MAP_FAILED) return std::nullopt;
   dma_buf_sync s{DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ};
-  ioctl(fd, DMA_BUF_IOCTL_SYNC, &s);
+  if (ioctl(fd, DMA_BUF_IOCTL_SYNC, &s) < 0) {
+    munmap(m, size);
+    return std::nullopt;
+  }
   const auto* base = static_cast<const uint8_t*>(m);
-  uint64_t h = 1469598103934665603ull;
   const auto& y = d->layers[0].planes[0];
   const auto& c = d->layers[0].planes[1];
-  for (int r = 0; r < f->height; ++r) h = fnv(h, base + y.offset + r * y.pitch, f->width);
-  for (int r = 0; r < f->height / 2; ++r) h = fnv(h, base + c.offset + r * c.pitch, f->width);
+  row->resize(static_cast<size_t>(f->width));
+  uint64_t h = 1469598103934665603ull;
+  for (int r = 0; r < f->height; ++r) {
+    std::memcpy(row->data(), base + y.offset + r * y.pitch, row->size());
+    h = fnv(h, row->data(), row->size());
+  }
+  for (int r = 0; r < f->height / 2; ++r) {
+    std::memcpy(row->data(), base + c.offset + r * c.pitch, row->size());
+    h = fnv(h, row->data(), row->size());
+  }
   s.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ;
   ioctl(fd, DMA_BUF_IOCTL_SYNC, &s);
   munmap(m, size);
@@ -82,6 +101,7 @@ struct Decoder {
   AVBufferRef* hw = nullptr;
   AVPacket* pkt = nullptr;
   AVFrame* fr = nullptr;
+  std::vector<uint8_t> hash_row;  // reused across hash_frame() calls
   bool ok() const { return cc != nullptr; }
   Decoder() {
     const AVCodec* dec = avcodec_find_decoder(AV_CODEC_ID_HEVC);
@@ -117,7 +137,7 @@ struct Decoder {
   // Every frame now available, hashed.
   void drain(std::vector<std::optional<uint64_t>>* out) {
     while (avcodec_receive_frame(cc, fr) == 0) {
-      out->push_back(hash_frame(fr));
+      out->push_back(hash_frame(fr, &hash_row));
       av_frame_unref(fr);
     }
   }
@@ -149,6 +169,12 @@ int main(int argc, char** argv) {
 
   // per_au[i] = hashes the decoder returned after AU i (empty = none).
   using Hashes = std::vector<std::vector<std::optional<uint64_t>>>;
+  // Set only by the streamed run, when it reaches AU abort_au: whether the
+  // cut actually happened (>= 3 pieces to cut after two) and, either way,
+  // how many pieces that AU had -- so a never-fired abort can be reported
+  // rather than silently passing on a run that never exercised recovery.
+  bool abort_fired = false;
+  size_t abort_au_pieces = 0;
   auto run = [&](bool streamed, Hashes* per_au, double* ms) -> bool {
     Decoder d;
     if (!d.ok()) {
@@ -164,7 +190,10 @@ int main(int argc, char** argv) {
         d.send(au, n, false);
       } else {
         const auto pieces = streamcheck::stream_pieces(au, n);
-        const bool cut = static_cast<long>(i) == abort_au && pieces.size() >= 3;
+        const bool want_cut = static_cast<long>(i) == abort_au;
+        if (want_cut) abort_au_pieces = pieces.size();
+        const bool cut = want_cut && pieces.size() >= 3;
+        if (cut) abort_fired = true;
         const size_t send_n = cut ? 2 : pieces.size();
         for (size_t k = 0; k < send_n; ++k)
           d.send(au + pieces[k].begin, pieces[k].end - pieces[k].begin, cut || k + 1 < pieces.size());
@@ -179,6 +208,14 @@ int main(int argc, char** argv) {
   Hashes whole, streamed;
   double ms_whole = 0, ms_stream = 0;
   if (!run(false, &whole, &ms_whole) || !run(true, &streamed, &ms_stream)) return 1;
+
+  // An --abort that never cut anything would otherwise compare cleanly
+  // (the exclusion window below is empty) and exit 0 having exercised
+  // nothing -- a pass that proves nothing is worse than no test at all.
+  if (abort_au >= 0 && !abort_fired) {
+    std::fprintf(stderr, "abort AU %ld has %zu piece(s); need >= 3\n", abort_au, abort_au_pieces);
+    return 2;
+  }
 
   size_t next_entry = aus.size();
   if (abort_au >= 0)
@@ -201,9 +238,9 @@ int main(int argc, char** argv) {
     }
   }
   std::printf("{\"aus\":%zu,\"first_entry\":%zu,\"compared\":%zu,\"mismatched\":%zu,"
-              "\"missing\":%zu,\"abort_au\":%ld,\"next_entry\":%zu,"
+              "\"missing\":%zu,\"abort_au\":%ld,\"abort_fired\":%s,\"next_entry\":%zu,"
               "\"ms_whole\":%.1f,\"ms_streamed\":%.1f}\n",
               aus.size(), first, compared, mismatched, missing, abort_au,
-              abort_au >= 0 ? next_entry : 0, ms_whole, ms_stream);
+              abort_fired ? "true" : "false", abort_au >= 0 ? next_entry : 0, ms_whole, ms_stream);
   return (mismatched == 0 && missing == 0 && compared > 0) ? 0 : 1;
 }
