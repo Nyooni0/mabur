@@ -283,10 +283,18 @@ bool V4l2ReqBackend::append(const uint8_t* p, size_t n, uint32_t pts_us, bool la
 }
 
 void V4l2ReqBackend::abort(uint32_t pts_us) {
-  if (!impl_ || !impl_->stream_open) return;
+  if (!impl_) return;
   Impl& m = *impl_;
-  m.send(kAud, sizeof kAud, pts_us, false);
-  m.stream_open = false;
+  // A hard mid-picture send() failure already cleared stream_open on libav's
+  // side (and ours) without draining: the decoded frame it leaves in the
+  // output fifo, and the slice parked unconsumed in buffer_pkt, must still
+  // be drained here or the next start()/append() desyncs from libav's real
+  // state. So drain unconditionally; only a still-open picture needs the
+  // AUD first.
+  if (m.stream_open) {
+    m.send(kAud, sizeof kAud, pts_us, false);
+    m.stream_open = false;
+  }
   m.drain();
 }
 

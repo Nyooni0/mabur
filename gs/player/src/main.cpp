@@ -1098,7 +1098,8 @@ int main(int argc, char** argv) {
   // Streamed decode: split AUs go to the
   // decoder slice by slice as ring v4 publishes them. The VideoBackend seam
   // stays frozen; a backend that can stream also implements StreamDecoder
-  // (MppBackend), reached by dynamic_cast like its other extensions.
+  // (MppBackend, V4l2ReqBackend), reached by dynamic_cast like its other
+  // extensions.
   maburplay::StreamFeeder feeder(cfg.decoder.stream);
   feeder.set_decoder(dynamic_cast<maburplay::StreamDecoder*>(backend.get()));
   std::fprintf(stderr, "maburplay: decoder stream: %s\n",

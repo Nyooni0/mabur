@@ -35,7 +35,9 @@ gated=` lines (the latter every 5 s in `/tmp/maburplay.log`) both name
 `errors` and `bitstream` separately. `errors` is hard failures only --
 device/alloc failure, a rejected packet, a frame that comes back other
 than DRM-PRIME -- the same meaning `errors_after_sync_3s` has
-for MPP. `bitstream` is `AVERROR_INVALIDDATA` from send/receive: bitstream
+for MPP; a streamed picture that `start()` ends over an open one it
+never closed (the new-picture-over-an-open-one guard) also counts there.
+`bitstream` is `AVERROR_INVALIDDATA` from send/receive: bitstream
 damage from a lossy link, not a decoder fault, and NOT included in
 `errors`.
 

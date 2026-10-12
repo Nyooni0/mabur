@@ -16,13 +16,16 @@ namespace maburplay {
 //
 // Threads: libav may only be driven from one thread, so every libav call --
 // decode, and the frees that return buffers to its pool -- runs on the thread
-// that calls submit_au() (the feed thread, or main when there is none).
-// poll() and release_frame() run on main and only touch a locked handoff:
-// decoded frames wait in a ready queue for poll() to hand to the FrameSink;
-// released frames wait in a release queue that the next submit_au() frees,
-// which is exactly when the decoder needs a free buffer again. flush() and
-// the destructor run on main only while the feed is parked (FeedLoop's flush
-// contract) and free both queues before resetting or freeing the decoder.
+// that calls submit_au()/start()/append()/abort() (the feed thread, or main
+// when there is none). poll() and release_frame() run on main and only touch
+// a locked handoff: decoded frames wait in a ready queue for poll() to hand
+// to the FrameSink; released frames wait in a release queue that the next
+// submit_au(), start() or append() frees, which is exactly when the decoder
+// needs a free buffer again. flush() and the destructor run on main only
+// while the feed is parked (FeedLoop's flush contract) and free both queues
+// before resetting or freeing the decoder; abort() runs there too, when
+// main.cpp's do_flush calls StreamFeeder::on_flush to end a streamed
+// picture that never got its own close.
 //
 // No libav include here, as with mpp_backend.h: null_backend.cpp includes
 // this on every v4l2req build.
