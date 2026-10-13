@@ -91,7 +91,8 @@ records a 1080p file.
   CRTC always gets a table.
 - The 3×4 skips `forward()`'s clamp after the camera matrix: same mean
   error as the RK3566's 9×9×9 LUT (4.0 vs 3.7 LSB), worse on strongly
-  saturated colours (max 36 vs 20 LSB).
+  saturated colours (max 36 vs 20 LSB). Record:
+  `docs/findings/2026-10-12-opi-colortrans-probe.md`.
 
 ## Build
 
