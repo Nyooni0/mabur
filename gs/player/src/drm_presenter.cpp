@@ -1535,8 +1535,11 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
                    std::strerror(cerr));
       drmModeDestroyPropertyBlob(fd, video_ctm_blob_id);
       video_ctm_blob_id = 0;
+      ctm_value = 0;
     }
-    ctm_value = 0;
+    // Retry failed too: the CTM is not the cause, so ctm_value keeps the
+    // blob and the OSD retry below commits video WITH it -- clearing it
+    // here would flatten the picture on an OSD-attributed failure.
   }
 
   // The commit failed with the OSD attached. Rebuild WITHOUT the OSD and
