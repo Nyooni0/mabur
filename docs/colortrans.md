@@ -70,14 +70,25 @@ records a 1080p file.
   (10-bit units, subtracted), a 3×3 in S2.17, and a post-constant per
   row. The image kernel's patch `0002` adds a `CTM` blob property to the
   VI planes: 12 × u64, row-major `[A | b]`, S31.32 sign-magnitude, on RGB
-  in [0,1], folded in as `C' = A·C`, `k' = A·k + b`; the pre-offsets are
-  unchanged. Unset = the stock table, bit for bit. The plane's default
-  encoding is BT.709 limited.
+  in [0,1], folded in as `C' = A·C`. The post-constants cannot carry a
+  negative offset (set to −0.345 of full scale the picture saturates to
+  white), so the offset `b` goes into the **luma pre-offset** instead:
+  raising `d_Y` by Δ shifts every output row by `−C'[r][Y]·Δ`. That holds
+  `b` exactly when it is a grey shift, which colortrans's lift is
+  (`kColorTrans3`: `d_Y` 64 → 190, U/V stay 512, post-constants stay 0).
+  Unset = the stock table, bit for bit. The plane's default encoding is
+  BT.709 limited.
 - Coefficients are signed 20-bit: |coefficient| < 4.0, and a larger one
   wraps rather than saturates (black picture, or a colour cast that
   flips). `kColorTrans3` combined with BT.709 limited peaks at 3.41
-  (Cb→B). The output clamps at full scale. A CTM outside the register
-  range fails the commit with `-ERANGE`.
+  (Cb→B). The output clamps at full scale. A CTM that does not fit — a
+  coefficient of 4.0 or more, an offset that is not a grey shift, a `d_Y`
+  outside 0..1023 — fails the commit with `-ERANGE`.
+- Plane state outlives the process that set it: a `CTM` left on the plane
+  by one run stays applied under the next. So `maburplay` states the
+  property on every modeset and splash-handoff commit — the matrix, or 0
+  when colortrans is off or the kernel refused it — the same reason a LUT
+  CRTC always gets a table.
 - The 3×4 skips `forward()`'s clamp after the camera matrix: same mean
   error as the RK3566's 9×9×9 LUT (4.0 vs 3.7 LSB), worse on strongly
   saturated colours (max 36 vs 20 LSB).

@@ -1414,12 +1414,15 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
   // Factored so that a commit the kernel rejects WITH the OSD attached can
   // be rebuilt without it and retried immediately (a drmModeAtomicReq has no
   // "remove property"). See the failure handling after the commit.
-  // The video-plane CTM rides the commits that (re)establish the video
-  // plane, like the CUBIC_LUT rides modesets; plane state keeps it between.
-  bool attach_ctm = video_ctm_blob_id != 0 && prop_video_ctm != 0 &&
-                    (do_modeset || splash_handoff);
+  // A CTM-capable video plane gets the property stated on every commit that
+  // (re)establishes it -- the blob, or 0 when colortrans is off or the
+  // kernel refused the matrix. Plane state keeps it between commits AND
+  // outlives this process: a CTM a previous run left behind would otherwise
+  // stay applied, the same reason a LUT CRTC always gets a table.
+  const bool state_ctm = prop_video_ctm != 0 && (do_modeset || splash_handoff);
+  uint32_t ctm_value = video_ctm_blob_id;
 
-  auto build_req = [&](bool with_osd, bool with_ctm) -> drmModeAtomicReqPtr {
+  auto build_req = [&](bool with_osd, uint32_t ctm) -> drmModeAtomicReqPtr {
     drmModeAtomicReqPtr r = drmModeAtomicAlloc();
     if (!r) return nullptr;
     drmModeAtomicAddProperty(r, plane_id, video_props.fb_id, fb_id);
@@ -1442,7 +1445,7 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
 
     if (do_modeset || splash_handoff) {
       if (zpos_video_prop) drmModeAtomicAddProperty(r, plane_id, zpos_video_prop, zpos_video_val);
-      if (with_ctm) drmModeAtomicAddProperty(r, plane_id, prop_video_ctm, video_ctm_blob_id);
+      if (state_ctm) drmModeAtomicAddProperty(r, plane_id, prop_video_ctm, ctm);
       if (do_modeset) {
         drmModeAtomicAddProperty(r, connector_id, prop_connector_crtc_id, crtc_id);
         drmModeAtomicAddProperty(r, crtc_id, prop_crtc_mode_id, mode_blob_id);
@@ -1472,7 +1475,7 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
     return r;
   };
 
-  drmModeAtomicReqPtr req = build_req(attach_osd, attach_ctm);
+  drmModeAtomicReqPtr req = build_req(attach_osd, ctm_value);
   if (!req) {
     ++commit_errors;
     drmModeRmFB(fd, fb_id);
@@ -1513,16 +1516,17 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
     std::fprintf(stderr, "DrmPresenter: PAGE_FLIP_ASYNC accepted -- async flips active\n");
   }
 
-  // The commit failed carrying the video-plane CTM. Retry at once without
-  // it; if that succeeds, the kernel refused the matrix (outside the CSC's
-  // register range) and it is dropped for this presenter's lifetime --
-  // colortrans must never cost the picture. If the retry fails too, the
-  // CTM was not the cause and is kept for the next modeset. Runs before the
-  // OSD retry so an OSD failure is never charged to the CTM.
-  if (rc != 0 && attach_ctm) {
+  // The commit failed carrying the video-plane CTM. Retry at once with the
+  // property cleared to 0; if that succeeds, the kernel refused the matrix
+  // (outside the CSC's register range) and it is dropped for this
+  // presenter's lifetime -- colortrans must never cost the picture. If the
+  // retry fails too, the CTM was not the cause and is kept for the next
+  // modeset. Runs before the OSD retry so an OSD failure is never charged
+  // to the CTM.
+  if (rc != 0 && state_ctm && ctm_value != 0) {
     const int cerr = rc < 0 ? -rc : errno;
     drmModeAtomicFree(req);
-    req = build_req(attach_osd, false);
+    req = build_req(attach_osd, 0);
     rc = req ? drmModeAtomicCommit(fd, req, flags, this) : -ENOMEM;
     if (rc == 0) {
       std::fprintf(stderr,
@@ -1532,7 +1536,7 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
       drmModeDestroyPropertyBlob(fd, video_ctm_blob_id);
       video_ctm_blob_id = 0;
     }
-    attach_ctm = false;
+    ctm_value = 0;
   }
 
   // The commit failed with the OSD attached. Rebuild WITHOUT the OSD and
@@ -1556,7 +1560,7 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
     if (osd_fail_streak >= kOsdMaxFailStreak) osd_give_up();
     attach_osd = false;
     drmModeAtomicFree(req);
-    req = build_req(false, attach_ctm);
+    req = build_req(false, ctm_value);
     // Same `flags` deliberately: they carry no PAGE_FLIP_ASYNC (attach_osd
     // suppressed it) and probing_async was false, so this retry can neither
     // run nor poison the async probe. One vsync-paced frame is the whole cost.

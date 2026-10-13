@@ -196,7 +196,9 @@ class DrmPresenter {
   // Installs the matrix: 12 S31.32 sign-magnitude words (pack_ctm_3x4).
   // Call ONCE, after init() and before the first splash_show()/present();
   // a second call is refused (logged). The blob rides every modeset and
-  // splash-handoff commit and lives until the presenter is destroyed. If
+  // splash-handoff commit and lives until the presenter is destroyed;
+  // without one, those commits state CTM = 0, so a matrix a previous run
+  // left on the plane never survives a colortrans-off start. If
   // the kernel refuses a commit carrying it (a matrix outside the CSC's
   // register range) and the same commit without it succeeds, present()
   // drops it for this presenter's lifetime: the picture goes flat, never
