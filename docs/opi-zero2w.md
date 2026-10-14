@@ -101,7 +101,14 @@ the topology is:
 
 - video on the overlay NV12 (VI) plane at zpos 1, scaled to the mode
   (the image's DE33 scaler kernel patch,
-  `board/orangepi/zero2w/linux-patches/` in the image repo);
+  `board/orangepi/zero2w/linux-patches/` in the image repo). NV12 goes
+  through the scaler even at 1:1, for chroma upsampling, and its
+  coefficient tables sit in SRAM that drops CPU writes unless the DE
+  top's LUT access bit (`0xe0` bit 0, clock register space) is set; the
+  image kernel sets it around those writes (patch `0004`). A kernel
+  without that patch scans out with wrong colours after about half of all
+  cold boots (grey reads white/green, the luma high-passed), and a soft
+  reboot keeps the bad tables;
 - the OSD on the primary plane (ARGB8888 linear, full mode) at zpos 2,
   its transparent buffer doubling as the backdrop;
 - no `CUBIC_LUT` on the CRTC; colortrans runs in the video plane's CSC
