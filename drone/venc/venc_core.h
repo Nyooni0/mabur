@@ -44,6 +44,8 @@ typedef struct {
   uint32_t ring_fill_pct;   /* 0..100 */
   uint32_t frames_encoded;  /* lifetime */
   int cur_bitrate_kbps;     /* last applied via venc_set_bitrate_kbps, -1 before first */
+  uint32_t sensor_mhz;      /* measured sensor frame rate, milli-Hz; 0 until the
+                             * boot-time trim's first window (sensor_cal.h) */
   /* No encoder QP: MI_VENC_Stream_t h265Info.startQual reads 0 on every
    * frame this firmware emits and there is no GetChnStat QP. */
 } VencStats;

@@ -630,7 +630,11 @@ observability only and does not gate the mode.
     state including RENDEZVOUS. Both are restated by the 5 s re-assert.
 - **The fps verb** (`venc_set_fps`, `drone/venc/venc_core.c`) is three
   steps:
-  1. a VPE→VENC unbind/rebind at `sensor_fps:fps`;
+  1. a VPE→VENC unbind/rebind at `sensor_fps:dst`, where dst is `fps`
+     below the sensor's set rate (the decimation that makes the thin
+     stream) and `sensor_fps` at or above it, so full rate never puts the
+     SDK's frame-rate limiter in the path (`sensor_cal_bind_dst_fps`,
+     `docs/airtime-model.md` §3);
   2. an RC `fpsNum` and GOP rewrite;
   3. a SuperFrame re-derive.
 

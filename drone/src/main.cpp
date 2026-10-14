@@ -2852,11 +2852,19 @@ int run_real_mode(const Config& cfg, uint8_t start_ch, const std::string& cfg_pa
         bool want_stats = g_sigusr1_flag.exchange(false);
         if (want_stats || now - last_stats_ms >= 1000) {
           last_stats_ms = now;
+          unsigned snr_mhz = 0;
+#ifdef MABUR_HAVE_VENC
+          {
+            VencStats vs{};
+            venc_get_stats(&vs);
+            snr_mhz = vs.sensor_mhz;
+          }
+#endif
           std::fprintf(stderr,
                        "stats: state=%d hot_beat=%llu rx_beat=%llu seq=%u sent=%llu drops=%llu "
                        "txq=%zu txq_drop=%llu "
                        "thermal_delta=%d tx_failed=%llu venc_verb_fail=%llu "
-                       "enc_pk100=%uk lp=%d armed=%d\n",
+                       "enc_pk100=%uk lp=%d armed=%d snr_mhz=%u\n",
                        static_cast<int>(agent.state()), static_cast<unsigned long long>(hb),
                        static_cast<unsigned long long>(rb), tx.seq(),
                        static_cast<unsigned long long>(tx.sent()),
@@ -2866,7 +2874,8 @@ int run_real_mode(const Config& cfg, uint8_t start_ch, const std::string& cfg_pa
                        static_cast<unsigned long long>(txstats.failed),
                        static_cast<unsigned long long>(actuator.venc_verb_failures),
                        enc_peak.take_peak_kbps(),
-                       static_cast<int>(agent.low_power()), static_cast<int>(agent.armed_latched()));
+                       static_cast<int>(agent.low_power()), static_cast<int>(agent.armed_latched()),
+                       snr_mhz);
         }
 
         // Telemetry suppression: non-sweep PPDUs in the airtime a calibration
