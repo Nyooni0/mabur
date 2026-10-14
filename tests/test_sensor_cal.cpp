@@ -171,4 +171,30 @@ TEST(cal_lands_on_the_line_nearest_the_target_from_below) {
   CHECK(s.vmax == 3391);
 }
 
+// While the bind decimates (low-power 30 fps) the encoded stream does not
+// carry the sensor's rate, so the runtime holds the controller instead of
+// feeding it. A hold must discard the partial window and cost no round:
+// after resuming, the first action comes only from a fresh full window of
+// full-rate frames and measures the real rate.
+TEST(cal_hold_discards_the_partial_window_and_resumes_clean) {
+  SimSensor s;
+  SensorCal c;
+  sensor_cal_init(&c, 60, 60000);
+  s.request(60000);
+  sensor_cal_arm(&c);
+  for (int i = 0; i < 60 * 3; ++i)  // 3 s: most of a window
+    REQUIRE(sensor_cal_feed(&c, static_cast<uint32_t>(s.next())) == SENSOR_CAL_NONE);
+  sensor_cal_hold(&c);
+  for (int i = 0; i < 30 * 20; ++i) s.next(), s.next();  // 20 s decimated, unfed
+  // resume: nothing may fire inside the first 3 s of new frames
+  for (int i = 0; i < 60 * 3; ++i)
+    CHECK(sensor_cal_feed(&c, static_cast<uint32_t>(s.next())) == SENSOR_CAL_NONE);
+  CHECK(sensor_cal_rounds(&c) == 0);
+  SensorCalAction a = SENSOR_CAL_NONE;
+  for (int i = 0; i < 60 * 3 && a == SENSOR_CAL_NONE; ++i)
+    a = sensor_cal_feed(&c, static_cast<uint32_t>(s.next()));
+  CHECK(a == SENSOR_CAL_REQUEST);
+  CHECK(std::fabs(sensor_cal_measured_hz(&c) - s.hz()) < 0.01);
+}
+
 MTEST_MAIN

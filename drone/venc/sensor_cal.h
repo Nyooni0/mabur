@@ -60,6 +60,11 @@ void sensor_cal_init(SensorCal *c, uint32_t target_fps, uint32_t initial_mfps);
 void sensor_cal_arm(SensorCal *c);
 /* One encoded frame's pts (microseconds, wraps freely). */
 SensorCalAction sensor_cal_feed(SensorCal *c, uint32_t pts_us);
+/* The encoded stream is not carrying the sensor's rate right now (the bind
+ * decimates, e.g. low-power 30 fps): drop the partial window, cost no
+ * round. The caller simply stops feeding while held; the next feed starts
+ * a fresh window with a settle period. No-op unless measuring. */
+void sensor_cal_hold(SensorCal *c);
 /* The sensor refused the last SENSOR_CAL_REQUEST: keep the previous
  * request and stop. */
 void sensor_cal_request_rejected(SensorCal *c);

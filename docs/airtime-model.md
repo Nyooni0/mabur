@@ -209,8 +209,12 @@ their variance into jitter. Knobs, in order of proven usefulness:
      `[fps − 0.030, fps − 0.004]` Hz, just under the configured rate; one
      VMAX line is 0.018 Hz at 60. Locks in 2–3 rounds (`[sensor] cal:`
      lines, `snr_mhz=` on the stats line, `sensor_mhz` on `GET /venc`);
-     after 6 rounds without convergence, or a driver that refuses
-     milli-fps, it restores the integer boot request and stops. Measured
+     after 8 rounds without convergence, or a driver that refuses
+     milli-fps, it restores the integer boot request and stops. It only
+     measures a full-rate stream: while the bind decimates (a drone that
+     boots disarmed into low-power 30 fps) it holds, and resumes with a
+     fresh window once the fps verb returns to full rate, so that drone
+     locks in the first ~13 s after arming. Measured
      on the bench: 60000 → 59720 mfps = VMAX 3391 = 59.990 Hz, zero pts
      holes in 120 s. What remains is the beat between the sensor and the
      GS panel (60.000 Hz nominal): one panel repeat per ~100 s, the floor

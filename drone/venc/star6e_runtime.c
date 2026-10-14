@@ -32,6 +32,7 @@ static SdkQuietState g_sdk_quiet = SDK_QUIET_STATE_INIT;
  * the stats line (0 until the first window closes). */
 static SensorCal g_sensor_cal;
 static uint32_t g_sensor_mhz;
+static int g_sensor_cal_held;
 
 uint32_t star6e_runtime_sensor_mhz(void)
 {
@@ -284,8 +285,31 @@ static int star6e_runtime_process_stream(Star6eRunnerContext *ctx,
 		MI_VENC_ReleaseStream(ps->venc_channel, &stream);
 		return 0;
 	}
-	if (stream.count > 0 && stream.packet) {
-		SensorCalAction act = sensor_cal_feed(&g_sensor_cal,
+	/* The trim only reads the sensor's rate off a full-rate stream: while
+	 * the bind decimates (low-power fps) it holds and resumes, with a
+	 * fresh window, once the fps verb returns to full rate. */
+	if (star6e_controls_delivered_fps() <
+	    star6e_controls_nominal_fps()) {
+		/* Logged once per hold, and only once the trim is armed: frames
+		 * before the arm are held too but say nothing. */
+		if (sensor_cal_state(&g_sensor_cal) == SENSOR_CAL_STATE_MEASURING) {
+			if (!g_sensor_cal_held) {
+				printf("[sensor] cal: held, bind delivers %u < %u fps\n",
+					(unsigned)star6e_controls_delivered_fps(),
+					(unsigned)star6e_controls_nominal_fps());
+				fflush(stdout);
+			}
+			g_sensor_cal_held = 1;
+		}
+		sensor_cal_hold(&g_sensor_cal);
+	} else if (stream.count > 0 && stream.packet) {
+		SensorCalAction act;
+		if (g_sensor_cal_held) {
+			printf("[sensor] cal: resumed at full rate\n");
+			fflush(stdout);
+			g_sensor_cal_held = 0;
+		}
+		act = sensor_cal_feed(&g_sensor_cal,
 			(uint32_t)stream.packet[0].timestamp);
 		if (act != SENSOR_CAL_NONE)
 			sensor_cal_apply(ctx, act);

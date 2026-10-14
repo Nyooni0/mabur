@@ -281,6 +281,16 @@ int star6e_controls_apply_fps(uint32_t fps)
 	return apply_fps(fps);
 }
 
+uint32_t star6e_controls_delivered_fps(void)
+{
+	return g_star6e_control_ctx.delivered_fps;
+}
+
+uint32_t star6e_controls_nominal_fps(void)
+{
+	return g_star6e_control_ctx.nominal_fps;
+}
+
 int star6e_controls_request_idr(void)
 {
 	int chn = g_star6e_control_ctx.venc_chn;

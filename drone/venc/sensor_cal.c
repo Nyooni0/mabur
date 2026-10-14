@@ -131,6 +131,14 @@ SensorCalAction sensor_cal_feed(SensorCal *c, uint32_t pts_us)
 	return SENSOR_CAL_REQUEST;
 }
 
+void sensor_cal_hold(SensorCal *c)
+{
+	if (c->state != SENSOR_CAL_STATE_MEASURING)
+		return;
+	c->have_prev = 0;
+	start_window(c, 0, SETTLE_STEPS);
+}
+
 void sensor_cal_request_rejected(SensorCal *c)
 {
 	c->request_mfps = c->prev_request_mfps;
