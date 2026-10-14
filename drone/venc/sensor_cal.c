@@ -4,9 +4,10 @@
 #include <string.h>
 
 /* A window must span this long and hold this many clean steps before its
- * median is trusted: at 60 fps that is ~240 steps, enough that ISR jitter
- * averages out to well under one line's worth of rate (0.018 Hz). */
-#define WINDOW_US 4000000u
+ * median is trusted: at 60 fps that is ~120 steps, and the median of that
+ * many intervals sits well under one line's worth of rate (0.018 Hz) even
+ * right after a rebind. */
+#define WINDOW_US 2000000u
 #define MIN_STEPS 32
 /* Steps skipped after a request: the driver applies new timing at a frame
  * boundary and the first intervals straddle both. */

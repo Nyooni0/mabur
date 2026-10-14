@@ -203,7 +203,7 @@ their variance into jitter. Knobs, in order of proven usefulness:
      decimates. RC `fpsNum` and GOP stay at the requested fps.
   2. **The boot-time trim** (`SensorCal`, armed on the encoder thread
      right after the cold-boot fps re-kick): measures the real rate from
-     the encoded frames' pts over 4 s windows (median step), and
+     the encoded frames' pts over 2 s windows (median step), and
      re-requests the sensor in milli-fps (the driver accepts
      `[min*1000, max*1000]`) until the real rate sits in
      `[fps − 0.030, fps − 0.004]` Hz, just under the configured rate; one
