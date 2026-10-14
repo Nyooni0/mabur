@@ -792,8 +792,11 @@ is reachable only from the drone, so `ssh root@<drone> 'wget -qO-
 http://127.0.0.1:8301/venc'`:
 
 - `GET /venc` → `{"req_bitrate_kbps", "ring_fill_pct", "full_drops",
-  "frames"}`. `req_bitrate_kbps` is the REQUESTED rate — what RcAgent last
-  successfully commanded — not a readback of what the encoder programmed.
+  "frames", "sensor_mhz"}`. `req_bitrate_kbps` is the REQUESTED rate — what
+  RcAgent last successfully commanded — not a readback of what the encoder
+  programmed. `sensor_mhz` is the sensor's measured frame rate in milli-Hz
+  from the boot-time trim (`docs/airtime-model.md` §3), 0 until its first
+  4 s window closes; healthy is a few tens of mHz under `venc.fps`.
   `frames` advancing is the cheapest "is the camera alive" check, and the
   one that distinguishes a stalled encoder (fps flat, ring empty) from a
   starved link. There is no `qp`: this SDK has no encoder-QP readback
@@ -819,8 +822,10 @@ deploy, no video) and you need to know whether the encoder is running.
 
 maburd's own stderr (`/tmp/mabur.log`): the 1 Hz `stats:` line (incl.
 `enc_pk100=`, the peak 100 ms encoder byte rate in kbit/s inside that
-second, and `lp=`/`armed=` for low-power mode; `rc: low_power ENTER/EXIT`
-lines mark transitions) and the 5 s `frame_ring:` line (below).
+second, `lp=`/`armed=` for low-power mode, and `snr_mhz=`, the trimmed
+sensor rate in milli-Hz (same value as `GET /venc`'s `sensor_mhz`);
+`rc: low_power ENTER/EXIT` lines mark transitions, `[sensor] cal:` lines
+the trim's rounds and lock) and the 5 s `frame_ring:` line (below).
 
 ## Frame loss inside the drone ("wire clean" ≠ no frame loss)
 
