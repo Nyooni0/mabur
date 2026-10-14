@@ -97,7 +97,7 @@ The shipped `usb_pid = 0` scan tries `a81a`, then `c812`/`c82c`, then the
 boots either board; the `opened device 0bda:XXXX` line in `/tmp/mabur.log`
 says which card was found. GS cards stay 8812EU.
 
-The one behavioural difference is **TX power**. Mechanism is identical
+The first behavioural difference is **TX power**. Mechanism is identical
 (same TXAGC block, same per-rate diffs, same offset), so maburcal and
 `power_mode = "offset"` work unchanged (`docs/calibration.md`) — but the
 anchor the relative walls ride on is not:
@@ -113,6 +113,22 @@ anchor the relative walls ride on is not:
   in-flight hop. Calibrate on the channel flown most. Reading the CU's
   efuse per channel is a devourer change, worth it only if a mismatch is
   actually seen.
+
+The second is devourer's **wide-TX IGI floor**
+(`DeviceConfig::Tuning::wide_tx_igi_floor`), a DIG lower bound that is
+switched on by the session's first 40 MHz frame and stays on while the card
+is tuned to 40 MHz. It exists because on a silent channel the receiver can
+settle where the secondary 20 MHz never reads idle, and the MAC then holds
+the first 40 MHz frame forever. The shipped ladder sends every rung at
+40 MHz, so on the drone the floor is on for the whole flight, and it costs
+the RCF uplink idle-channel sensitivity. `maburd` picks the value per image,
+from the one Jaguar3 chip that image compiles in:
+
+- **8812EU**: `0` (no floor). The EU has flown the 40 MHz rungs without a
+  floor and never stalled. An EU unit that does stall loses the downlink
+  at its first 40 MHz frame, with the TX FIFO full; give that unit a floor.
+- **8812CU**: devourer's default, `0x35`. The stall was found on the 8822C,
+  and the default is the lowest value that has cleared every CU unit tested.
 
 The 8812CU is 2T2R, so STBC airs on two real chains; none of the 8822E
 constraints in devourer's 8822E quirks page
