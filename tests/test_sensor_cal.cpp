@@ -182,12 +182,13 @@ TEST(cal_hold_discards_the_partial_window_and_resumes_clean) {
   sensor_cal_init(&c, 60, 60000);
   s.request(60000);
   sensor_cal_arm(&c);
-  for (int i = 0; i < 90; ++i)  // 1.5 s: most of a 2 s window
+  const int most_of_a_window = static_cast<int>(60 * SENSOR_CAL_WINDOW_US / 1e6 * 0.7);
+  for (int i = 0; i < most_of_a_window; ++i)
     REQUIRE(sensor_cal_feed(&c, static_cast<uint32_t>(s.next())) == SENSOR_CAL_NONE);
   sensor_cal_hold(&c);
   for (int i = 0; i < 30 * 20; ++i) s.next(), s.next();  // 20 s decimated, unfed
-  // resume: nothing may fire inside the first 1.5 s of new frames
-  for (int i = 0; i < 90; ++i)
+  // resume: nothing may fire inside most of a fresh window of new frames
+  for (int i = 0; i < most_of_a_window; ++i)
     CHECK(sensor_cal_feed(&c, static_cast<uint32_t>(s.next())) == SENSOR_CAL_NONE);
   CHECK(sensor_cal_rounds(&c) == 0);
   SensorCalAction a = SENSOR_CAL_NONE;
@@ -198,16 +199,16 @@ TEST(cal_hold_discards_the_partial_window_and_resumes_clean) {
 }
 
 // Lock time budget: the dim-scene case (AE stretch hides the first two
-// corrections) is the slowest path and must still lock within 15 s of
-// frames, which only a window of about 2 s allows.
-TEST(cal_locks_the_slow_ae_case_within_15_seconds) {
+// corrections) is the slowest path and must still lock within 8 s of
+// frames, which only a window of about 1 s allows.
+TEST(cal_locks_the_slow_ae_case_within_8_seconds) {
   SimSensor s;
   s.vmax_floor = 3386;
   SensorCal c;
   sensor_cal_init(&c, 60, 60000);
   s.request(60000);
   sensor_cal_arm(&c);
-  CHECK(run(&c, &s, 60 * 15) == SENSOR_CAL_LOCKED);
+  CHECK(run(&c, &s, 60 * 8) == SENSOR_CAL_LOCKED);
   CHECK(s.vmax == 3391);
 }
 

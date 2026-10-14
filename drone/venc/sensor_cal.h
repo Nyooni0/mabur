@@ -21,6 +21,9 @@ extern "C" {
 
 #define SENSOR_CAL_MAX_ROUNDS 8
 #define SENSOR_CAL_MAX_STEPS 1024
+/* One measurement window: at 60 fps ~60 frame intervals, whose median
+ * sits under one sensor line's worth of rate (0.018 Hz). */
+#define SENSOR_CAL_WINDOW_US 1000000u
 
 typedef enum {
 	SENSOR_CAL_NONE = 0,  /* nothing to do */

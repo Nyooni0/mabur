@@ -796,7 +796,7 @@ http://127.0.0.1:8301/venc'`:
   RcAgent last successfully commanded — not a readback of what the encoder
   programmed. `sensor_mhz` is the sensor's measured frame rate in milli-Hz
   from the boot-time trim (`docs/airtime-model.md` §3), 0 until its first
-  2 s window closes; healthy is a few tens of mHz under `venc.fps`.
+  1 s window closes; healthy is a few tens of mHz under `venc.fps`.
   `frames` advancing is the cheapest "is the camera alive" check, and the
   one that distinguishes a stalled encoder (fps flat, ring empty) from a
   starved link. There is no `qp`: this SDK has no encoder-QP readback
