@@ -42,7 +42,7 @@ TEST(values_and_strictness) {
   threw = false;
   try { maburplay::load_config(write_tmp_play("backend = \"vaapi\"\n")); }
   catch (const std::exception&) { threw = true; }
-  CHECK(threw);  // backend must be one of mpp|null
+  CHECK(threw);  // backend must be one of mpp|v4l2req|null
   threw = false;
   try { maburplay::load_config(write_tmp_play("[dvr]\nfragment_ms = 50\n")); }
   catch (const std::exception&) { threw = true; }
@@ -441,4 +441,69 @@ TEST(decoder_stream_key) {
   try { maburplay::load_config(write_tmp_play("[decoder]\nstream = 1\n")); }
   catch (const std::exception& e) { msg = e.what(); }
   CHECK(msg.find("decoder.stream") != std::string::npos);
+}
+
+// backend "v4l2req" is a known name (the Cedrus/V4L2-request decoder).
+TEST(backend_v4l2req_accepted) {
+  auto c = maburplay::load_config(write_tmp_play("backend = \"v4l2req\"\n"));
+  CHECK(c.backend == "v4l2req");
+  std::string msg;
+  try { maburplay::load_config(write_tmp_play("backend = \"cedrus\"\n")); }
+  catch (const std::exception& e) { msg = e.what(); }
+  CHECK(msg.find("v4l2req") != std::string::npos);  // the error lists the valid names
+}
+
+// A config is checked against what this binary was built with.
+TEST(unsupported_on_build_rules) {
+  maburplay::Config c;
+  maburplay::BuildCaps mpp{true, false}, v4l{false, true}, host{false, false};
+
+  c.backend = "mpp"; c.dvr.mode = "burned";
+  CHECK(maburplay::unsupported_on_build(c, mpp).empty());
+  CHECK(!maburplay::unsupported_on_build(c, v4l).empty());   // no mpp backend here
+
+  c.backend = "v4l2req"; c.dvr.mode = "raw";
+  CHECK(maburplay::unsupported_on_build(c, v4l).empty());
+  CHECK(!maburplay::unsupported_on_build(c, mpp).empty());   // no v4l2req backend there
+
+  c.backend = "v4l2req"; c.dvr.mode = "burned";
+  CHECK(maburplay::unsupported_on_build(c, v4l) ==
+        "dvr.mode \"burned\" needs the MPP encoder; this build has none -- set dvr.mode = \"raw\"");
+
+  // The null backend decodes nothing, so burned mode is merely inert there
+  // (host e2e runs the shipped bundle's burned default under --backend null).
+  c.backend = "null"; c.dvr.mode = "burned";
+  CHECK(maburplay::unsupported_on_build(c, host).empty());
+  CHECK(maburplay::unsupported_on_build(c, v4l).empty());
+}
+
+// A Radxa toml (backend "mpp", dvr.mode "burned") started on the OPi image
+// (v4l2req only) fails two independent checks; both must be reported in one
+// string, joined, so the operator does not have to fix one, restart, and
+// only then see the second (S97maburplay does not respawn on exit 2).
+TEST(unsupported_on_build_reports_every_problem) {
+  maburplay::Config c;
+  maburplay::BuildCaps v4l{false, true};
+  c.backend = "mpp"; c.dvr.mode = "burned";
+  CHECK(maburplay::unsupported_on_build(c, v4l) ==
+        "backend \"mpp\" is not in this build (Rockchip MPP decoder); this build has: null, v4l2req; "
+        "dvr.mode \"burned\" needs the MPP encoder; this build has none -- set dvr.mode = \"raw\"");
+}
+
+// The "not in this build" message names the backend(s) this binary DOES
+// carry, so the operator knows what to put in the config instead of
+// guessing from the board.
+TEST(unsupported_on_build_names_available_backends) {
+  maburplay::Config c;
+  maburplay::BuildCaps mpp{true, false}, v4l{false, true}, host{false, false};
+
+  c.backend = "v4l2req"; c.dvr.mode = "raw";
+  CHECK(maburplay::unsupported_on_build(c, mpp) ==
+        "backend \"v4l2req\" is not in this build (V4L2-request decoder); this build has: null, mpp");
+
+  c.backend = "mpp"; c.dvr.mode = "raw";
+  CHECK(maburplay::unsupported_on_build(c, v4l) ==
+        "backend \"mpp\" is not in this build (Rockchip MPP decoder); this build has: null, v4l2req");
+  CHECK(maburplay::unsupported_on_build(c, host) ==
+        "backend \"mpp\" is not in this build (Rockchip MPP decoder); this build has: null");
 }

@@ -107,8 +107,8 @@ Config load_config(const std::string& path, std::vector<std::string>* defaulted)
   c.socket = get_str(j, "socket", "/run/mabur-au.sock", "");
   c.backend = get_str(j, "backend", "mpp", "");
 
-  if (c.backend != "mpp" && c.backend != "null") {
-    fail("backend", "must be \"mpp\" or \"null\"");
+  if (c.backend != "mpp" && c.backend != "v4l2req" && c.backend != "null") {
+    fail("backend", "must be \"mpp\", \"v4l2req\" or \"null\"");
   }
 
   c.screen_mode = get_str(j, "screen_mode", "1920x1080@60", "");
@@ -222,6 +222,41 @@ Config load_config(const std::string& path, std::vector<std::string>* defaulted)
   }
 
   return c;
+}
+
+namespace {
+
+// "null" is always built in; name the hardware decoder(s) alongside it so
+// the operator knows what to put in the config instead of guessing from
+// the board.
+std::string available_backends(const BuildCaps& caps) {
+  std::string s = "null";
+  if (caps.mpp) s += ", mpp";
+  if (caps.v4l2req) s += ", v4l2req";
+  return s;
+}
+
+}  // namespace
+
+std::string unsupported_on_build(const Config& c, const BuildCaps& caps) {
+  std::vector<std::string> problems;
+  if (c.backend == "mpp" && !caps.mpp)
+    problems.push_back("backend \"mpp\" is not in this build (Rockchip MPP decoder); "
+                       "this build has: " + available_backends(caps));
+  if (c.backend == "v4l2req" && !caps.v4l2req)
+    problems.push_back("backend \"v4l2req\" is not in this build (V4L2-request decoder); "
+                       "this build has: " + available_backends(caps));
+  // Burned recording re-encodes on the MPP encoder. The null backend
+  // never produces a frame, so there it is inert rather than wrong.
+  if (c.dvr.mode == "burned" && c.backend != "null" && !caps.mpp)
+    problems.push_back("dvr.mode \"burned\" needs the MPP encoder; this build has none -- "
+                       "set dvr.mode = \"raw\"");
+  std::string out;
+  for (size_t i = 0; i < problems.size(); ++i) {
+    if (i) out += "; ";
+    out += problems[i];
+  }
+  return out;
 }
 
 }  // namespace maburplay

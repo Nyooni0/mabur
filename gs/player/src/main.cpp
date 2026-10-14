@@ -50,8 +50,13 @@
 #include "gs_draw.h"         // set_colour_inverse() for the GS overlay pre-invert
 #include "lat_tracker.h"    // tail latency segments + 1 Hz lat line
 #include "lat_log.h"        // persist 1 Hz lat line to <dvr>/log/lat-NNNN.log
-#include "mpp_backend.h"    // MppBackend::info_changes()/errors() for --decode-only
 #include "osd_palette.h"    // build_palette() for the encoder-side OSD
+#endif
+#ifdef MABUR_PLAYER_MPP
+#include "mpp_backend.h"    // MppBackend::info_changes()/errors() for --decode-only
+#endif
+#ifdef MABUR_PLAYER_V4L2REQ
+#include "v4l2req_backend.h"  // V4l2ReqBackend counters for --decode-only / the 5 s line
 #endif
 
 namespace {
@@ -86,7 +91,7 @@ uint64_t mono_us() {
 void usage() {
   std::fprintf(stderr,
                "usage: maburplay [-c <config.toml>] [--oneshot] "
-               "[--backend null|mpp]\n"
+               "[--backend null|mpp|v4l2req]\n"
                "                 [--decode-only --seconds N] [--fps-log]\n"
                "       maburplay --mux-annexb <in.265> <out.mp4>\n"
                "           (test support: mux a raw Annex-B HEVC elementary\n"
@@ -493,13 +498,29 @@ int main(int argc, char** argv) {
   }
   if (!backend_override.empty()) cfg.backend = backend_override;
 
+  {
+    maburplay::BuildCaps caps;
+#ifdef MABUR_PLAYER_MPP
+    caps.mpp = true;
+#endif
+#ifdef MABUR_PLAYER_V4L2REQ
+    caps.v4l2req = true;
+#endif
+    const std::string why = maburplay::unsupported_on_build(cfg, caps);
+    if (!why.empty()) {
+      std::fprintf(stderr, "maburplay: %s\n", why.c_str());
+      return 2;
+    }
+  }
+
   // colortrans (docs/colortrans.md). The evaluator is always constructed
   // (cheap); whether it is USED is decided per consumer below: the display
-  // stage needs the CRTC's CUBIC_LUT, the OSD inverse follows the display
-  // stage (an inverted OSD over an un-LUT'd picture is worse than nothing),
-  // and the burned DVR follows the config alone.
+  // stage needs the CRTC's CUBIC_LUT or the video plane's CTM
+  // (pick_display_colortrans), the OSD inverse follows the LUT only (an
+  // inverted OSD over an un-LUT'd picture is worse than nothing; the CTM
+  // never touches the OSD plane), and the burned DVR follows the config
+  // alone.
   const maburplay::ColorTrans ct;
-  bool ct_display_on = false;  // set once a presenter with a usable LUT exists
   maburplay::LutAxis lut_axis = maburplay::LutAxis::kRedFastest;
   if (const char* ax = std::getenv("MABUR_COLORTRANS_AXIS")) {
     // Bench-only override for the axis probe (docs/colortrans.md).
@@ -507,12 +528,8 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "maburplay: colortrans: MABUR_COLORTRANS_AXIS=%s\n", ax);
   }
 #ifndef MABUR_PLAYER_HW
-  // ct_display_on and lut_axis are consumed only under MABUR_PLAYER_HW
-  // (install_colortrans, the burn-palette forward map) below, so a host
-  // build would otherwise warn that they are unused. Silence that rather
-  // than restructuring the declarations -- ct itself must stay at this
-  // scope, and these two are declared alongside it.
-  (void)ct_display_on;
+  // lut_axis is consumed only under MABUR_PLAYER_HW (install_colortrans)
+  // below, so a host build would otherwise warn that it is unused.
   (void)lut_axis;
 #endif
 
@@ -539,8 +556,7 @@ int main(int argc, char** argv) {
   std::unique_ptr<maburplay::VideoBackend> backend = maburplay::make_backend(cfg.backend);
   if (!backend) {
     std::fprintf(stderr,
-                 "maburplay: backend \"%s\" not available (cross build without "
-                 "MABUR_PLAYER_HW?)\n",
+                 "maburplay: backend \"%s\" not available (not in this build?)\n",
                  cfg.backend.c_str());
     return 2;
   }
@@ -629,27 +645,51 @@ int main(int argc, char** argv) {
                                       cfg.display.vsync_lead_ms,
                                       cfg.display.chain_budget);
   maburplay::LatLog lat_log;
-  // Installs the 3D LUT (identity when off) and, when the display stage is
-  // live, pre-inverts both overlays. Runs once per presenter acquire, BEFORE
+  // Installs the display stage: the CUBIC_LUT (always a table on a LUT
+  // CRTC, identity when off) or the video-plane CTM, and pre-inverts both
+  // overlays only for the LUT. Runs once per presenter acquire, BEFORE
   // splash_show() and before any OSD composition. Idempotent for the OSD
   // half (set_inverse and set_colour_inverse both replace).
   auto install_colortrans = [&](maburplay::DrmPresenter* p) {
-    const bool avail = p->color_lut_available();
-    const bool on = cfg.colortrans.enable && avail;
-    const bool installed =
-        p->set_color_lut(maburplay::build_cubic_lut(on ? &ct : nullptr, lut_axis));
-    if (!installed && avail)
-      std::fprintf(stderr, "maburplay: colortrans: CUBIC_LUT install failed -- display stays flat\n");
-    if (cfg.colortrans.enable && !avail)
+    const bool lut_avail = p->color_lut_available();
+    const bool ctm_avail = p->plane_ctm_available();
+    float m[12] = {};
+    const bool affine_ok = maburplay::affine_3x4(ct, m);
+    const maburplay::DisplayCtChoice pick =
+        maburplay::pick_display_colortrans(cfg.colortrans.enable, lut_avail, ctm_avail, affine_ok);
+    bool installed = false;
+    if (lut_avail) {
+      installed = p->set_color_lut(maburplay::build_cubic_lut(
+          pick.how == maburplay::DisplayCt::kLut ? &ct : nullptr, lut_axis));
+      if (!installed)
+        std::fprintf(stderr,
+                     "maburplay: colortrans: CUBIC_LUT install failed -- display stays flat\n");
+    } else if (pick.how == maburplay::DisplayCt::kPlaneCtm) {
+      uint64_t words[12];
+      maburplay::pack_ctm_3x4(m, words);
+      installed = p->set_plane_ctm(words);
+      if (!installed)
+        std::fprintf(stderr,
+                     "maburplay: colortrans: video-plane CTM install failed -- display stays "
+                     "flat\n");
+    }
+    if (cfg.colortrans.enable && pick.how == maburplay::DisplayCt::kFlat)
       std::fprintf(stderr,
-                   "maburplay: colortrans: CRTC has no 729-entry CUBIC_LUT -- display stays "
-                   "flat, OSD not inverted (burned DVR still corrected)\n");
-    ct_display_on = on && installed;
-    if (ct_display_on) {
+                   "maburplay: colortrans: %s -- display stays flat, OSD not inverted"
+#ifdef MABUR_PLAYER_MPP
+                   " (burned DVR still corrected)"
+#endif
+                   "\n",
+                   !ctm_avail ? "CRTC has no 729-entry CUBIC_LUT and the video plane has no CTM"
+                              : "gamma != 1 is not affine, the video-plane CTM cannot carry it");
+    if (!installed) return;
+    if (pick.invert_osd) {
       osd_font.set_inverse(ct);
       maburplay::set_colour_inverse(&ct);
       std::fprintf(stderr, "maburplay: colortrans: display LUT on (axis=%s), OSD pre-inverted\n",
                    lut_axis == maburplay::LutAxis::kRedFastest ? "rgb" : "bgr");
+    } else if (pick.how == maburplay::DisplayCt::kPlaneCtm) {
+      std::fprintf(stderr, "maburplay: colortrans: video-plane CTM on, OSD untouched\n");
     }
   };
   std::unique_ptr<maburplay::DrmPresenter> presenter;
@@ -900,8 +940,9 @@ int main(int argc, char** argv) {
       const maburplay::GlyphAtlas empty{};
       // Forward map follows the surface's actual inversion state (the
       // process-wide colour_inverse() pointer set_colour_inverse installed
-      // for the OSD plane), not ct_display_on -- the two agree today but
-      // the palette's invariant is with the former.
+      // for the OSD plane), not whether the display is corrected: on the
+      // video-plane CTM path the picture is corrected while the OSD is not
+      // inverted, and the palette's invariant is with the inversion.
       m.pal = maburplay::build_palette(raster ? osd_font.native() : empty, seeds, n_seeds, fwd);
       m.valid = true;
       m.raster = raster;
@@ -1062,7 +1103,7 @@ int main(int argc, char** argv) {
 #endif
     backend->release_frame(f);
   };
-#ifdef MABUR_PLAYER_HW
+#ifdef MABUR_PLAYER_MPP
   // [decoder] stream: MppBackend sets its parser up for streaming at init.
   if (auto* mpp = dynamic_cast<maburplay::MppBackend*>(backend.get()))
     mpp->set_stream(cfg.decoder.stream);
@@ -1075,7 +1116,8 @@ int main(int argc, char** argv) {
   // Streamed decode: split AUs go to the
   // decoder slice by slice as ring v4 publishes them. The VideoBackend seam
   // stays frozen; a backend that can stream also implements StreamDecoder
-  // (MppBackend), reached by dynamic_cast like its other extensions.
+  // (MppBackend, V4l2ReqBackend), reached by dynamic_cast like its other
+  // extensions.
   maburplay::StreamFeeder feeder(cfg.decoder.stream);
   feeder.set_decoder(dynamic_cast<maburplay::StreamDecoder*>(backend.get()));
   std::fprintf(stderr, "maburplay: decoder stream: %s\n",
@@ -1290,9 +1332,14 @@ int main(int argc, char** argv) {
       if (!sampled_3s && router.synced() &&
           mono_us() >= router.t_sync_us() + 3'000'000) {
         sampled_3s = true;
-#ifdef MABUR_PLAYER_HW
+#ifdef MABUR_PLAYER_MPP
         if (auto* mpp = dynamic_cast<maburplay::MppBackend*>(backend.get())) {
           errors_at_3s = mpp->errors();
+        }
+#endif
+#ifdef MABUR_PLAYER_V4L2REQ
+        if (auto* v4 = dynamic_cast<maburplay::V4l2ReqBackend*>(backend.get())) {
+          errors_at_3s = v4->errors();
         }
 #endif
       }
@@ -1319,7 +1366,7 @@ int main(int argc, char** argv) {
     uint64_t info_change_count = 0;
     uint64_t error_count = 0;
     uint64_t concealed_count = 0;
-#ifdef MABUR_PLAYER_HW
+#ifdef MABUR_PLAYER_MPP
     if (auto* mpp = dynamic_cast<maburplay::MppBackend*>(backend.get())) {
       info_change_count = mpp->info_changes();
       // Counter semantics under the shipped decoder config (review
@@ -1331,6 +1378,17 @@ int main(int argc, char** argv) {
       // pipeline integrity, not bitstream cleanliness.
       error_count = mpp->errors();
       concealed_count = mpp->concealed();
+    }
+#endif
+#ifdef MABUR_PLAYER_V4L2REQ
+    if (auto* v4 = dynamic_cast<maburplay::V4l2ReqBackend*>(backend.get())) {
+      error_count = v4->errors();
+      std::fprintf(stderr,
+                   "maburplay: v4l2req frames=%llu bitstream=%llu shape_drops=%llu gated=%llu\n",
+                   static_cast<unsigned long long>(v4->frames()),
+                   static_cast<unsigned long long>(v4->bitstream()),
+                   static_cast<unsigned long long>(v4->dropped_shape()),
+                   static_cast<unsigned long long>(v4->gated()));
     }
 #endif
     // If the 3s-post-sync mark was never reached (run ended too soon, or
@@ -1374,7 +1432,7 @@ int main(int argc, char** argv) {
   router.set_hooks({[&feed](maburplay::FeedNote&& n) { feed.push_note(std::move(n)); },
                     [&feed]() { return feed.park_for_flush(); }, [] { return mono_us(); }});
   feed_ptr = &feed;
-#ifdef MABUR_PLAYER_HW
+#ifdef MABUR_PLAYER_MPP
   if (auto* mpp = dynamic_cast<maburplay::MppBackend*>(backend.get()))
     mpp->set_input_cancel(&feed.cancel_flag());
 #endif
@@ -1383,7 +1441,7 @@ int main(int argc, char** argv) {
   feed.set_periodic([&]() {
     const auto wk = ring.take_wake();
     uint64_t stream_refused = 0;
-#ifdef MABUR_PLAYER_HW
+#ifdef MABUR_PLAYER_MPP
     // backend read on the feed thread: safe only because the watchdog re-creates it while the feed is parked.
     if (auto* mpp = dynamic_cast<maburplay::MppBackend*>(backend.get()))
       stream_refused = mpp->stream_errors();
@@ -1400,6 +1458,16 @@ int main(int argc, char** argv) {
                  static_cast<unsigned long long>(ring.open_aborted()), wk.p50, wk.p99, wk.n,
                  static_cast<unsigned long long>(stream_refused),
                  static_cast<unsigned long long>(feed.parks()));
+#ifdef MABUR_PLAYER_V4L2REQ
+    // backend read on the feed thread: safe only because the watchdog re-creates it while the feed is parked.
+    if (auto* v4 = dynamic_cast<maburplay::V4l2ReqBackend*>(backend.get()))
+      std::fprintf(stderr, "v4l2req: frames=%llu errors=%llu bitstream=%llu shape_drops=%llu gated=%llu\n",
+                   static_cast<unsigned long long>(v4->frames()),
+                   static_cast<unsigned long long>(v4->errors()),
+                   static_cast<unsigned long long>(v4->bitstream()),
+                   static_cast<unsigned long long>(v4->dropped_shape()),
+                   static_cast<unsigned long long>(v4->gated()));
+#endif
   }, 5000);
   feed.start();
   std::fprintf(stderr, "maburplay: feed thread on (ring reader + decoder input off the render loop)\n");
@@ -1950,7 +2018,7 @@ int main(int argc, char** argv) {
                        "decoder context\n");
           backend.reset();  // destroy the wedged context BEFORE creating anew
           backend = maburplay::make_backend(cfg.backend);
-#ifdef MABUR_PLAYER_HW
+#ifdef MABUR_PLAYER_MPP
           if (auto* mpp = dynamic_cast<maburplay::MppBackend*>(backend.get()))
             mpp->set_stream(cfg.decoder.stream);
 #endif
@@ -1960,7 +2028,7 @@ int main(int argc, char** argv) {
             return 1;
           }
           feeder.set_decoder(dynamic_cast<maburplay::StreamDecoder*>(backend.get()));
-#ifdef MABUR_PLAYER_HW
+#ifdef MABUR_PLAYER_MPP
           if (auto* mpp = dynamic_cast<maburplay::MppBackend*>(backend.get()))
             mpp->set_input_cancel(&feed.cancel_flag());
 #endif

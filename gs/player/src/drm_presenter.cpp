@@ -327,6 +327,10 @@ struct DrmPresenter::Impl {
   uint64_t cubic_lut_size = 0;
   uint32_t cubic_lut_blob_id = 0;
 
+  // colortrans video-plane CTM (DE33). 0 = property absent / no blob.
+  uint32_t prop_video_ctm = 0;
+  uint32_t video_ctm_blob_id = 0;
+
   // zpos stacking (the black-screen fix): vop2's default z-order put the
   // Smart0 backdrop ABOVE the Esmart0 video plane -- commits all succeeded
   // while the video rendered underneath a black rectangle. Set explicitly,
@@ -849,6 +853,10 @@ bool DrmPresenter::Impl::init(const std::string& screen_mode, bool want_osd, Rel
     std::fprintf(stderr, "DrmPresenter: plane %u has no IN_FENCE_FD property; implicit fencing\n",
                  plane_id);
   }
+  prop_video_ctm = find_property(fd, plane_id, DRM_MODE_OBJECT_PLANE, "CTM");
+  if (log_init_failures)
+    std::fprintf(stderr, "DrmPresenter: video plane %u CTM %s\n", plane_id,
+                 prop_video_ctm ? "present" : "absent");
 
   // This CRTC's primary plane. It has exactly one of two roles below:
   //   - it carries the OSD, when the OSD can scan out of it. Then there is
@@ -1406,7 +1414,15 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
   // Factored so that a commit the kernel rejects WITH the OSD attached can
   // be rebuilt without it and retried immediately (a drmModeAtomicReq has no
   // "remove property"). See the failure handling after the commit.
-  auto build_req = [&](bool with_osd) -> drmModeAtomicReqPtr {
+  // A CTM-capable video plane gets the property stated on every commit that
+  // (re)establishes it -- the blob, or 0 when colortrans is off or the
+  // kernel refused the matrix. Plane state keeps it between commits AND
+  // outlives this process: a CTM a previous run left behind would otherwise
+  // stay applied, the same reason a LUT CRTC always gets a table.
+  const bool state_ctm = prop_video_ctm != 0 && (do_modeset || splash_handoff);
+  uint32_t ctm_value = video_ctm_blob_id;
+
+  auto build_req = [&](bool with_osd, uint32_t ctm) -> drmModeAtomicReqPtr {
     drmModeAtomicReqPtr r = drmModeAtomicAlloc();
     if (!r) return nullptr;
     drmModeAtomicAddProperty(r, plane_id, video_props.fb_id, fb_id);
@@ -1429,6 +1445,7 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
 
     if (do_modeset || splash_handoff) {
       if (zpos_video_prop) drmModeAtomicAddProperty(r, plane_id, zpos_video_prop, zpos_video_val);
+      if (state_ctm) drmModeAtomicAddProperty(r, plane_id, prop_video_ctm, ctm);
       if (do_modeset) {
         drmModeAtomicAddProperty(r, connector_id, prop_connector_crtc_id, crtc_id);
         drmModeAtomicAddProperty(r, crtc_id, prop_crtc_mode_id, mode_blob_id);
@@ -1458,7 +1475,7 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
     return r;
   };
 
-  drmModeAtomicReqPtr req = build_req(attach_osd);
+  drmModeAtomicReqPtr req = build_req(attach_osd, ctm_value);
   if (!req) {
     ++commit_errors;
     drmModeRmFB(fd, fb_id);
@@ -1499,6 +1516,32 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
     std::fprintf(stderr, "DrmPresenter: PAGE_FLIP_ASYNC accepted -- async flips active\n");
   }
 
+  // The commit failed carrying the video-plane CTM. Retry at once with the
+  // property cleared to 0; if that succeeds, the kernel refused the matrix
+  // (outside the CSC's register range) and it is dropped for this
+  // presenter's lifetime -- colortrans must never cost the picture. If the
+  // retry fails too, the CTM was not the cause and is kept for the next
+  // modeset. Runs before the OSD retry so an OSD failure is never charged
+  // to the CTM.
+  if (rc != 0 && state_ctm && ctm_value != 0) {
+    const int cerr = rc < 0 ? -rc : errno;
+    drmModeAtomicFree(req);
+    req = build_req(attach_osd, 0);
+    rc = req ? drmModeAtomicCommit(fd, req, flags, this) : -ENOMEM;
+    if (rc == 0) {
+      std::fprintf(stderr,
+                   "DrmPresenter: kernel refused the video-plane CTM (%s) -- dropped, display "
+                   "flat\n",
+                   std::strerror(cerr));
+      drmModeDestroyPropertyBlob(fd, video_ctm_blob_id);
+      video_ctm_blob_id = 0;
+      ctm_value = 0;
+    }
+    // Retry failed too: the CTM is not the cause, so ctm_value keeps the
+    // blob and the OSD retry below commits video WITH it -- clearing it
+    // here would flatten the picture on an OSD-attributed failure.
+  }
+
   // The commit failed with the OSD attached. Rebuild WITHOUT the OSD and
   // retry right now, so a driver that will not take the two-plane request
   // costs video nothing -- not even this frame. `osd_dirty` is cleared
@@ -1520,7 +1563,7 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
     if (osd_fail_streak >= kOsdMaxFailStreak) osd_give_up();
     attach_osd = false;
     drmModeAtomicFree(req);
-    req = build_req(false);
+    req = build_req(false, ctm_value);
     // Same `flags` deliberately: they carry no PAGE_FLIP_ASYNC (attach_osd
     // suppressed it) and probing_async was false, so this retry can neither
     // run nor poison the async probe. One vsync-paced frame is the whole cost.
@@ -1711,6 +1754,7 @@ DrmPresenter::Impl::~Impl() {
     if (primary_gem_handle) drmModeDestroyDumbBuffer(fd, primary_gem_handle);
     free_splash();
     if (cubic_lut_blob_id) drmModeDestroyPropertyBlob(fd, cubic_lut_blob_id);
+    if (video_ctm_blob_id) drmModeDestroyPropertyBlob(fd, video_ctm_blob_id);
     if (mode_blob_id) drmModeDestroyPropertyBlob(fd, mode_blob_id);
     close(fd);
   }
@@ -1814,6 +1858,25 @@ bool DrmPresenter::set_color_lut(const CubicLut& lut) {
                                 &im.cubic_lut_blob_id) != 0) {
     std::fprintf(stderr, "DrmPresenter: CUBIC_LUT blob create failed: %s\n", std::strerror(errno));
     im.cubic_lut_blob_id = 0;
+    return false;
+  }
+  return true;
+}
+
+bool DrmPresenter::plane_ctm_available() const {
+  return impl_->inited && impl_->prop_video_ctm != 0;
+}
+
+bool DrmPresenter::set_plane_ctm(const uint64_t ctm[12]) {
+  Impl& im = *impl_;
+  if (!plane_ctm_available()) return false;
+  if (im.video_ctm_blob_id) {
+    std::fprintf(stderr, "DrmPresenter: set_plane_ctm called twice, ignored\n");
+    return false;
+  }
+  if (drmModeCreatePropertyBlob(im.fd, ctm, 12 * sizeof(uint64_t), &im.video_ctm_blob_id) != 0) {
+    std::fprintf(stderr, "DrmPresenter: CTM blob create failed: %s\n", std::strerror(errno));
+    im.video_ctm_blob_id = 0;
     return false;
   }
   return true;

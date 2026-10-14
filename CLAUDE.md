@@ -83,6 +83,7 @@ Two kinds of doc, two rules:
 | 40 MHz (HT40): which rungs fly 40, per-width tables, pair candidates, the boot scan's pair pick, no_agg, scanlog 6 / ctllog 12 | `docs/bw40.md` (as built: per-rung width, pairs, scan, no_agg) + `docs/findings/2026-09-23-bw40-sweep.md` ("Start here") |
 | the VTX onboard SD recorder ([record], dvr.target, the RCF rec byte, OSD REC field), VENC bind-peer order, the MI /proc/mi_modules/mi_venc per-stage delay instrument, the startup vanish-counter ratchet | docs/vtx-recorder.md (as built) + docs/findings/2026-09-26-sd-record.md (spike) |
 | the browser GS / spotter (web/), WebUSB+WASM build, LinkHealthAssembler sharing, channel set form, CHANNEL line, spotter follower | docs/web-gs.md |
+| the Orange Pi Zero 2W GS (H618): the v4l2req decoder (V4l2ReqBackend, libav v4l2request → Cedrus), MABUR_PLAYER_DECODER, build stage 7, what the board cannot do | docs/opi-zero2w.md |
 | the CPE510 relay card (mabur-relay protocol v4, maburgs RemoteCard + radio.relays, web GS relay mode, relay TX, interference sweep/hop on a relay) | docs/cpe510-relay.md |
 | pairing / the link key file, SipHash tag, session nonces, KEY MISMATCH, auth_reject | docs/link-pairing.md |
 | the software NACK (base-layer selective repeat): T_NACK, the retx ring, the air bucket, the retx accounting class, feclog 3 | docs/fec-nack.md (as built) + docs/findings/2026-10-05-fec-nack-spike.md (spike) |

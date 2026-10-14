@@ -188,6 +188,23 @@ class DrmPresenter {
   // refused (logged) so that rule cannot be broken by accident.
   bool set_color_lut(const CubicLut& lut);
 
+  // --- colortrans: video-plane CTM (docs/colortrans.md) ----------------
+  // True when init() found a "CTM" blob property on the video plane: the
+  // Orange Pi image kernel's DE33 VI planes, a 3x4 applied after the
+  // plane's YUV->RGB conversion, so the OSD planes never see it.
+  bool plane_ctm_available() const;
+  // Installs the matrix: 12 S31.32 sign-magnitude words (pack_ctm_3x4).
+  // Call ONCE, after init() and before the first splash_show()/present();
+  // a second call is refused (logged). The blob rides every modeset and
+  // splash-handoff commit and lives until the presenter is destroyed;
+  // without one, those commits state CTM = 0, so a matrix a previous run
+  // left on the plane never survives a colortrans-off start. If
+  // the kernel refuses a commit carrying it (a matrix outside the CSC's
+  // register range) and the same commit without it succeeds, present()
+  // drops it for this presenter's lifetime: the picture goes flat, never
+  // dark.
+  bool set_plane_ctm(const uint64_t ctm[12]);
+
  private:
   struct Impl;
   std::unique_ptr<Impl> impl_;

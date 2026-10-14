@@ -195,6 +195,13 @@ Bench record: `docs/findings/2026-10-10-slice-salvage.md`.
   per discont record, e.g. during maburd's 1 s sticky-discont window after
   a drone restart) and a watchdog park both land in the same counter.
   Oneshot JSON `streamed`, `stream_aborted`, `stream`. ausniff `nslices`.
+- **Orange Pi Zero 2W (H618).** The same `StreamFeeder` drives
+  `V4l2ReqBackend` through a patched libav (`AV_PKT_FLAG_PARTIAL`, one
+  slice per packet) onto Cedrus, which only decodes slice by slice anyway;
+  see `docs/opi-zero2w.md` "Streamed decode". The `stream:` line's
+  `refused` stays 0 here -- it reads `MppBackend::stream_errors()`, which
+  this board has none of -- so a refused slice shows instead in the
+  `v4l2req:` line's `errors=`/`bitstream=`.
 
 ### Known limits (Part 2)
 

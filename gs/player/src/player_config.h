@@ -124,7 +124,7 @@ struct DecoderCfg {
 struct Config {
   std::string ring_path = "/dev/shm/mabur-au";
   std::string socket = "/run/mabur-au.sock";
-  std::string backend = "mpp";            // "mpp" | "null"
+  std::string backend = "mpp";            // "mpp" | "v4l2req" | "null"
   std::string screen_mode = "1920x1080@60";
   DvrCfg dvr;
   OsdCfg osd;
@@ -136,6 +136,17 @@ struct Config {
 
 Config load_config(const std::string& path,
                    std::vector<std::string>* defaulted = nullptr);  // strict; throws like maburgs
+
+// Which decoders this binary carries (main.cpp fills it from the build's
+// MABUR_PLAYER_MPP / MABUR_PLAYER_V4L2REQ). A host build has neither.
+struct BuildCaps {
+  bool mpp = false;
+  bool v4l2req = false;
+};
+
+// "" when `c` can run on a build with `caps`; otherwise a one-line reason
+// for the operator. A config error, like an unknown key: main exits 2.
+std::string unsupported_on_build(const Config& c, const BuildCaps& caps);
 
 }  // namespace maburplay
 
