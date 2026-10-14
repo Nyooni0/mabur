@@ -69,7 +69,10 @@ size. The SigmaStar encoder cannot scale, so the sizes decide the port:
 - **`record.size` = `venc.size`** (the bundle's 1920x1080 for both): ch1
   shares the link's VPE port 0.
 - **Any other size** enables the same VPE channel's second scaler, port 1,
-  at `record.size` and binds ch1 there (`venc_record_attach`). Both ports
+  at `record.size` and binds ch1 there (`venc_record_attach`; at the
+  link's full rate the bind is src:src like the link's own, so the SDK's
+  frame-rate limiter never drops a recorder frame — `docs/airtime-model.md`
+  §3). Both ports
   scale the one capture window, so the loader requires `venc.size`'s aspect
   ratio, even dimensions, 320x180..3840x2160. `SetPortMode` + `EnablePort`
   succeed for sizes the scaler never drives, so the drain logs

@@ -184,6 +184,42 @@ their variance into jitter. Knobs, in order of proven usefulness:
   every promote fail probation (TxQueue pinned, fabricated 13–41% "loss"
   on a clean channel). Keep `venc.gop_s` ≤ ~2 s while the ladder
   re-commands bitrate per rung (bundle 0.5).
+- **The sensor does not run at `venc.fps`, and the VPE→VENC bind must not
+  try to make it.** The IMX415's frame period is a whole number of sensor
+  lines: the driver answers `SetFps(60)` with VMAX 3375 at HMAX 365, which
+  is 60.27 Hz, and in dim light the auto-exposure pins the shutter at the
+  frame period and stretches VMAX to 3386 (60.08 Hz). A bind whose dst is
+  60 engages the SDK's frame-rate control, which passes "at most dst per
+  second" by its own clock (effective ceiling ~59.95) and drops one frame
+  per beat period — every 3.6 s at 60.27 Hz, every 10 s at 60.08 — booked
+  as VPE chn `DropCnt` / out-port `FailCnt`. The wire closes seamlessly
+  over the hole (no `frame_id` gap, no FEC counter); only the pts step
+  shows it, and the player repeats a frame. Two things fix it, both in
+  `drone/venc/sensor_cal.[ch]`:
+  1. **Full rate binds src:src** (`sensor_cal_bind_dst_fps`): a request at
+     or above the sensor's set rate binds VPE→VENC (and VPE→recorder) at
+     the mode's rate on both sides, so no limiter sits in the path. Only a
+     request below it — the low-power 30 fps — keeps dst = request and
+     decimates. RC `fpsNum` and GOP stay at the requested fps.
+  2. **The boot-time trim** (`SensorCal`, armed on the encoder thread
+     right after the cold-boot fps re-kick): measures the real rate from
+     the encoded frames' pts over 1 s windows (median step), and
+     re-requests the sensor in milli-fps (the driver accepts
+     `[min*1000, max*1000]`) until the real rate sits in
+     `[fps − 0.030, fps − 0.004]` Hz, just under the configured rate; one
+     VMAX line is 0.018 Hz at 60. Locks in 2–3 rounds (`[sensor] cal:`
+     lines, `snr_mhz=` on the stats line, `sensor_mhz` on `GET /venc`);
+     after 8 rounds without convergence, or a driver that refuses
+     milli-fps, it restores the integer boot request and stops. It only
+     measures a full-rate stream: while the bind decimates (a drone that
+     boots disarmed into low-power 30 fps) it holds, and resumes with a
+     fresh window once the fps verb returns to full rate, so that drone
+     locks in the first ~13 s after arming. Measured
+     on the bench: 60000 → 59720 mfps = VMAX 3391 = 59.990 Hz, zero pts
+     holes in 120 s. What remains is the beat between the sensor and the
+     GS panel (60.000 Hz nominal): one panel repeat per ~100 s, the floor
+     without genlock. Bench record:
+     `docs/findings/2026-10-14-sensor-rate-trim.md`.
 
 ## 4. Measuring it — rigs and gotchas
 

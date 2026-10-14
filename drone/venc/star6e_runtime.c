@@ -8,6 +8,7 @@
 #include "star6e_cus3a.h"
 #include "star6e_ipu.h"
 #include "star6e_pipeline.h"
+#include "sensor_cal.h"
 
 #include "h26x_util.h"
 
@@ -23,6 +24,60 @@
 #include <unistd.h>
 
 static SdkQuietState g_sdk_quiet = SDK_QUIET_STATE_INIT;
+
+/* Sensor frame-rate trim (sensor_cal.h). Armed once the cold-boot fps
+ * re-kick has landed, fed every encoded frame's pts on this thread, and
+ * every request it makes goes to MI_SNR_SetFps from this same thread, so
+ * the sensor sees one writer. g_sensor_mhz is the last measured rate for
+ * the stats line (0 until the first window closes). */
+static SensorCal g_sensor_cal;
+static uint32_t g_sensor_mhz;
+static int g_sensor_cal_held;
+
+uint32_t star6e_runtime_sensor_mhz(void)
+{
+	return __atomic_load_n(&g_sensor_mhz, __ATOMIC_RELAXED);
+}
+
+static void sensor_cal_apply(Star6eRunnerContext *ctx, SensorCalAction act)
+{
+	const uint32_t mfps = sensor_cal_request_mfps(&g_sensor_cal);
+	const double hz = sensor_cal_measured_hz(&g_sensor_cal);
+	MI_S32 ret;
+
+	__atomic_store_n(&g_sensor_mhz, (uint32_t)(hz * 1000.0 + 0.5),
+		__ATOMIC_RELAXED);
+	switch (act) {
+	case SENSOR_CAL_LOCKED:
+		printf("[sensor] cal: locked, request %u mfps measured %.3f Hz "
+			"after %d round(s)\n", (unsigned)mfps, hz,
+			sensor_cal_rounds(&g_sensor_cal));
+		break;
+	case SENSOR_CAL_REQUEST:
+	case SENSOR_CAL_GAVE_UP:
+		ret = MI_SNR_SetFps(ctx->ps.sensor.pad_id, mfps);
+		if (ret != 0) {
+			sensor_cal_request_rejected(&g_sensor_cal);
+			printf("[sensor] cal: MI_SNR_SetFps(%u mfps) refused %d, "
+				"keeping %u mfps (measured %.3f Hz)\n",
+				(unsigned)mfps, (int)ret,
+				(unsigned)sensor_cal_request_mfps(&g_sensor_cal), hz);
+			break;
+		}
+		if (act == SENSOR_CAL_GAVE_UP)
+			printf("[sensor] cal: no convergence in %d rounds "
+				"(measured %.3f Hz), back to %u mfps\n",
+				sensor_cal_rounds(&g_sensor_cal), hz, (unsigned)mfps);
+		else
+			printf("[sensor] cal: round %d measured %.3f Hz -> request "
+				"%u mfps\n", sensor_cal_rounds(&g_sensor_cal), hz,
+				(unsigned)mfps);
+		break;
+	default:
+		break;
+	}
+	fflush(stdout);
+}
 static volatile sig_atomic_t g_running = 1;
 
 /* mabur addition: the encoder loop's exit reason.
@@ -230,6 +285,35 @@ static int star6e_runtime_process_stream(Star6eRunnerContext *ctx,
 		MI_VENC_ReleaseStream(ps->venc_channel, &stream);
 		return 0;
 	}
+	/* The trim only reads the sensor's rate off a full-rate stream: while
+	 * the bind decimates (low-power fps) it holds and resumes, with a
+	 * fresh window, once the fps verb returns to full rate. */
+	if (star6e_controls_delivered_fps() <
+	    star6e_controls_nominal_fps()) {
+		/* Logged once per hold, and only once the trim is armed: frames
+		 * before the arm are held too but say nothing. */
+		if (sensor_cal_state(&g_sensor_cal) == SENSOR_CAL_STATE_MEASURING) {
+			if (!g_sensor_cal_held) {
+				printf("[sensor] cal: held, bind delivers %u < %u fps\n",
+					(unsigned)star6e_controls_delivered_fps(),
+					(unsigned)star6e_controls_nominal_fps());
+				fflush(stdout);
+			}
+			g_sensor_cal_held = 1;
+		}
+		sensor_cal_hold(&g_sensor_cal);
+	} else if (stream.count > 0 && stream.packet) {
+		SensorCalAction act;
+		if (g_sensor_cal_held) {
+			printf("[sensor] cal: resumed at full rate\n");
+			fflush(stdout);
+			g_sensor_cal_held = 0;
+		}
+		act = sensor_cal_feed(&g_sensor_cal,
+			(uint32_t)stream.packet[0].timestamp);
+		if (act != SENSOR_CAL_NONE)
+			sensor_cal_apply(ctx, act);
+	}
 
 	/* refPred error-resilience marking — rewrite TRAIL_R → TRAIL_N for
 	 * frames the SDK marked as ENHANCE_P_NOTFORREF.  The encoder's own
@@ -351,6 +435,18 @@ void *star6e_runtime_encoder_loop(void *opaque)
 			    (now.tv_nsec - run_start.tv_nsec) / 1e9 >= 1.5) {
 				star6e_pipeline_cold_boot_fps_rekick(&ctx->ps);
 				cold_boot_fps_kick_done = 1;
+				/* The re-kick just set the integer rate; trim
+				 * from there. A sensor rate of 0 means nothing
+				 * was set, so there is nothing to trim. */
+				if (ctx->ps.sensor.fps) {
+					sensor_cal_init(&g_sensor_cal,
+						ctx->ps.sensor.fps,
+						ctx->ps.sensor.fps * 1000);
+					sensor_cal_arm(&g_sensor_cal);
+					printf("[sensor] cal: armed, target %u fps\n",
+						(unsigned)ctx->ps.sensor.fps);
+					fflush(stdout);
+				}
 			}
 		}
 	}

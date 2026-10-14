@@ -44,6 +44,10 @@ void *star6e_runtime_encoder_loop(void *opaque);
  *  handler. */
 void star6e_runtime_request_stop(void);
 
+/** Last measured sensor frame rate in milli-Hz from the boot-time trim
+ *  (sensor_cal.h); 0 until its first measurement window closes. */
+uint32_t star6e_runtime_sensor_mhz(void);
+
 /** Tear the pipeline and the MI libraries down. Idempotent per field. */
 void star6e_runtime_teardown(Star6eRunnerContext *ctx);
 

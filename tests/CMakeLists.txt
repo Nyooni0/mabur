@@ -162,6 +162,8 @@ if(MABUR_BUILD_DRONE)
     ${MABUR_VENC_DIR}/h26x_param_sets.c)
   target_include_directories(test_venc_h26x_param_sets PRIVATE ${MABUR_VENC_DIR})
   add_mtest(test_venc_cfg test_venc_cfg.cpp LIBS mabur_drone_core)
+  add_mtest(test_sensor_cal test_sensor_cal.cpp ${MABUR_VENC_DIR}/sensor_cal.c)
+  target_include_directories(test_sensor_cal PRIVATE ${MABUR_VENC_DIR})
 
   add_test(NAME host_e2e COMMAND bash ${CMAKE_SOURCE_DIR}/tests/integration/run_host_e2e.sh)
   set_tests_properties(host_e2e PROPERTIES

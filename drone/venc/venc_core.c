@@ -488,6 +488,7 @@ void venc_get_stats(VencStats *out)
 
 	if (!venc_core_running())
 		return;
+	out->sensor_mhz = star6e_runtime_sensor_mhz();
 
 	/* Producer-side counter, bumped on the encoder thread
 	 * (star6e_video_send_frame). It counts encoded AUs INCLUDING ones
