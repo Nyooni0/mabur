@@ -90,6 +90,8 @@ Chronological; each line names the section below that carries the detail.
   The same day the bar's text labels (`ch:`, `rssi:`, …) become icons and
   `res:1280x720` becomes `720p` — a display change only, at the same type
   size; the figures themselves are unchanged.
+- 2026-10-15 — `# aulog 6`: a 17th `au.log` column, `t_last` (the AU's
+  last body arrival); aulog ≤ 5 rows have no such column.
 
 ## 2026-09-23 — `link.pre_fec_loss` scale break, twice
 
@@ -1204,3 +1206,14 @@ closed records only. No recording format changes: `au.log` stays `aulog 5`
 (it is written from the writer's own record meta, not the ring bytes), and
 the ring itself is never recorded — an old ausniff against a new ring
 refuses on the version.
+
+## 2026-10-15 — `# aulog 6`: per-AU last-body arrival
+
+`au.log` gains a 17th column, `t_last`: mono µs of the AU's last body
+arrival, the same stamp the `maburgs au_tail:` gauge already averaged. It
+splits each frame's `t_complete − t_first` into the arrival span
+(`t_last − t_first`) and the GS publish tail (`t_complete − t_last`).
+Recordings up to `aulog 5` carry only the combined figure, so a per-frame
+span/tail split is possible from this date only. Every in-repo reader
+indexes the first columns positionally and ignores the extra one.
+

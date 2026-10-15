@@ -467,6 +467,7 @@ TEST(last_record_matches_the_published_slot) {
   lat.drone_q_ms = 3;
   lat.enc_us = 7000;
   lat.drone_air_ms = 21;
+  lat.t_last_arr_us = 1800;
   const uint64_t rec = w.finish(true, lat);
   REQUIRE(rec != UINT64_MAX);
   const maburgs::AuRecordMeta& m = w.last_record();
@@ -481,6 +482,7 @@ TEST(last_record_matches_the_published_slot) {
   CHECK(m.enc_us == 7000);
   CHECK(m.drone_q_ms == 3);
   CHECK(m.drone_air_ms == 21);
+  CHECK(m.t_last_arr_us == 1800);  // au.log's t_last column
   CHECK(w.last_record().nslices == 4);
 }
 

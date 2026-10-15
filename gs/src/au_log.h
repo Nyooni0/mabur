@@ -14,11 +14,13 @@ namespace maburgs {
 // so it has every field at hand: no mmap, no seqlock retry, no epoch resync,
 // and no rows lost to a reader overrun.
 //
-// Format (`# aulog 5`), 16 columns -- the aulog 4 twelve plus 4 trailing
-// slice-salvage columns, all 0 for an
-// unsplit/complete-unsplit AU:
+// Format (`# aulog 6`), 17 columns -- the aulog 4 twelve, 4 slice-salvage
+// columns (all 0 for an unsplit/complete-unsplit AU), and t_last:
 //   t_us pts sid fid len flags nal0 t_first t_complete enc dq air
-//   slices kept filled after_hole
+//   slices kept filled after_hole t_last
+// t_last is the mono µs of the AU's LAST body arrival (0 = unknown), so
+// t_last - t_first is the arrival span (drone hand-off + air) and
+// t_complete - t_last the GS publish tail (repair, assembly, ring write).
 // t_us is CLOCK_MONOTONIC µs. In aulog <= 3 it was WALL-clock µs and the log
 // carried `# sync` anchors to bridge to the jsonl; one process writing both
 // files on one clock makes the bridge unnecessary (docs/data-provenance.md).

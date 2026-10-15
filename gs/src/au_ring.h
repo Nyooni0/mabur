@@ -117,8 +117,9 @@ struct AuRecordMeta {
   uint16_t drone_q_ms = 0;
   uint16_t enc_us = 0;
   uint16_t drone_air_ms = 0;
-  // Writer side only: last_record() copies it from AuLatMeta; readers leave
-  // it default.
+  // Writer side only: last_record() copies these from AuLatMeta; readers
+  // leave them default (neither is in the SlotHdr).
+  uint64_t t_last_arr_us = 0;
   SliceSalvage slice;
 };
 
@@ -130,10 +131,10 @@ struct AuLatMeta {
   uint64_t t_first_us = 0;    // mono µs, first body of the AU (0 = unknown)
   uint64_t t_complete_us = 0; // mono µs at finish (writer stamps if 0)
   // mono µs, LAST body arrival of the AU (max over fragments' body_mono_us;
-  // same latch site as t_first_us). au_tail gauge only (usb-feed probe):
-  // splits fec into arrival span (t_last - t_first) vs publish tail
-  // (finish - t_last: repair/decode/assembly/ring write).
-  // Not written to the SlotHdr — internal to the writer's gauge.
+  // same latch site as t_first_us). Splits fec into arrival span
+  // (t_last - t_first: drone hand-off + air) vs publish tail
+  // (finish - t_last: repair/decode/assembly/ring write). Feeds the
+  // au_tail gauge and au.log's t_last column; not written to the SlotHdr.
   uint64_t t_last_arr_us = 0;
   uint16_t drone_q_ms = 0;    // from SBI q_ms via the AU's first fragment
   uint16_t enc_us = 0;        // from SBI enc_us, same latch

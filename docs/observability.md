@@ -370,22 +370,27 @@ print the completion→probe offset percentiles. `tools/bench/probesend.py`
 adds the GS send stamps from a `MABUR_GAPLOG=1` run to place every send
 against the probe (`docs/findings/2026-09-05-probe-blanking-fix.md`).
 
-### `au.log` (`# aulog 5`)
+### `au.log` (`# aulog 6`)
 
 Per-AU meta rows, fed in-process from `AuRingWriter::last_record()`
 (`gs/src/main.cpp`'s FrameStream finish callback; `gs/src/au_log.h`) —
 maburgs is the ring WRITER, so the log cannot miss an AU to a ring overrun.
-Sixteen columns:
+Seventeen columns:
 
-    t_us pts sid fid len flags nal0 t_first t_complete enc dq air slices kept filled after_hole
+    t_us pts sid fid len flags nal0 t_first t_complete enc dq air slices kept filled after_hole t_last
 
 `t_us` is CLOCK_MONOTONIC µs. `t_first`/`t_complete` are the AU's mono-µs
 latency stamps (first body / finish()). `enc`/`dq` are the drone's
 SBI-latched `enc_us`/`drone_q_ms` (venc encode time, true TxQueue wait —
 ~0 when healthy) carried on the AU's first fragment. `air` is the drone's
 modelled air backlog at that frame (`AirClock`, `docs/link-adaptation.md`
-"Drone air clock"). The last four are slice salvage (`docs/slices.md`), all
-0 on an AU that was neither split nor salvaged.
+"Drone air clock"). `slices kept filled after_hole` are slice salvage
+(`docs/slices.md`), all 0 on an AU that was neither split nor salvaged.
+`t_last` is the mono-µs arrival of the AU's LAST body (0 = unknown), which
+splits the fec segment per frame: `t_last − t_first` is the arrival span
+(drone hand-off plus air), `t_complete − t_last` the GS publish tail
+(repair, assembly, ring write). The `maburgs au_tail:` stderr line is the
+same split averaged over 5 s windows.
 
 ### `fec.log` (`feclog 3`)
 
