@@ -585,8 +585,8 @@ chain_max= chains= cuts= alw= lslot=`.
   frame that would extend a run past the budget takes its natural slot and
   the held occupant is displaced — one dropped frame, counted in
   `replaced=` too). The extra period lands in the `lat:` line's `reg`
-  segment, so read `chained/held` per second next to `reg` p50. The bundle
-  ships budget 0 (never cut): a chain then ends only on an arrival gap, so
+  segment, so read `chained/held` per second next to `reg` p50. Code and
+  bundle default to budget 0 (never cut): a chain then ends only on an arrival gap, so
   through the part of the sensor/panel beat where arrivals sit just past
   the release point the whole stream runs one period late (the `lat:` p50
   sawtooth) but nothing is dropped, and the refresh-start frame's ~10 ms

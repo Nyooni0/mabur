@@ -378,13 +378,16 @@ MTEST_MAIN
 
 TEST(display_chain_budget_key) {
   // display.chain_budget: frames a sequential-slot chain may run before
-  // the regulator cuts it with one drop. Default 3 (bench A/B,
-  // operator choice); 0 = unbounded; range [0, 60].
+  // the regulator cuts it with one drop. Default 0 = unbounded, the
+  // bundle's value too, so a config that omits the key gets what ships;
+  // range [0, 60].
   const auto bare = maburplay::load_config(write_tmp_play(""));
-  CHECK(bare.display.chain_budget == 3);
+  CHECK(bare.display.chain_budget == 0);
+  const auto empty_display = maburplay::load_config(write_tmp_play("[display]\n"));
+  CHECK(empty_display.display.chain_budget == 0);
   const auto cfg = maburplay::load_config(
-      write_tmp_play("[display]\nchain_budget = 0\n"));
-  CHECK(cfg.display.chain_budget == 0);
+      write_tmp_play("[display]\nchain_budget = 3\n"));
+  CHECK(cfg.display.chain_budget == 3);
   bool threw = false;
   try { maburplay::load_config(write_tmp_play("[display]\nchain_budget = 61\n")); }
   catch (const std::exception&) { threw = true; }

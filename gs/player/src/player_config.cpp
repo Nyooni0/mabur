@@ -207,7 +207,7 @@ Config load_config(const std::string& path, std::vector<std::string>* defaulted)
     c.display.vsync_lead_ms =
         static_cast<int>(get_int(d, "vsync_lead_ms", 6, 1, 10, "display"));
     c.display.chain_budget =
-        static_cast<int>(get_int(d, "chain_budget", 3, 0, 60, "display"));
+        static_cast<int>(get_int(d, "chain_budget", 0, 0, 60, "display"));
     c.display.sched_cap_ms =
         static_cast<int>(get_int(d, "sched_cap_ms", 0, 0, 50, "display"));
   }
