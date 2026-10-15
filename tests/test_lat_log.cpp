@@ -105,6 +105,27 @@ TEST(reopening_the_same_session_appends) {
   CHECK(s.find("# latlog 2") != s.rfind("# latlog 2"));  // header twice
 }
 
+TEST(a_second_instance_owns_its_own_file_and_marker_line) {
+  // frame.log is the same follow-the-session writer under another name:
+  // same marker, its own file and format marker, the two never mix.
+  const std::string dir = make_dir("frame");
+  const std::string mk = marker_for("frame");
+  set_marker(mk, dir);
+  maburplay::LatLog lat(mk.c_str());
+  maburplay::LatLog frame(mk.c_str(), "frame.log", "# framelog 1");
+  lat.write(1'000'000, "lat: n=1");
+  frame.write(1'000'500, "1000 7 0 61234 129 4");
+  CHECK(lat.path() == dir + "/lat.log");
+  CHECK(frame.path() == dir + "/frame.log");
+  const std::string f = slurp(frame.path());
+  CHECK(f.rfind("# framelog 1\n", 0) == 0);
+  CHECK(f.find("1000500 1000 7 0 61234 129 4\n") != std::string::npos);
+  CHECK(f.find("lat:") == std::string::npos);
+  const std::string l = slurp(lat.path());
+  CHECK(l.find("framelog") == std::string::npos);
+  CHECK(l.find("1000000 lat: n=1\n") != std::string::npos);
+}
+
 TEST(unwritable_session_dir_is_nonfatal) {
   const std::string mk = marker_for("unwritable");
   set_marker(mk, "/nonexistent-dir-xyz");

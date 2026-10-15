@@ -36,14 +36,14 @@ void LatLog::reopen_(uint64_t mono_us) {
     }
     return;
   }
-  const std::string p = dir + "/lat.log";
+  const std::string p = dir + "/" + file_name_;
   std::FILE* f = std::fopen(p.c_str(), "a");
   // A new session that can't be opened leaves any still-open previous
   // session's handle alone (deliberate: keep logging into the old
   // directory rather than go dark over a bad new target).
   if (!f) return;
   setvbuf(f, nullptr, _IOLBF, 0);
-  std::fprintf(f, "# latlog 2\n");
+  std::fprintf(f, "%s\n", header_);
   if (f_) std::fclose(f_);
   f_ = f;
   path_ = p;

@@ -275,8 +275,9 @@ fields once per `drone.tlm_seq` (`flightreport.py` does).
 maburgs writes a per-session directory when `debug_log.enable` is set
 (shipped default `false` — the bench GS turns it on): `<debug_log.dir>/NNNN/`
 holding `flight.jsonl`, `ctl.log`, `probe.log`, `au.log`, `fec.log` and
-`scan.log` (`au.log` only while `[au_ring] enable`); maburplay writes `lat.log` into the same directory by following
-the `/tmp/mabur-session` marker and holds no logging config of its own
+`scan.log` (`au.log` only while `[au_ring] enable`); maburplay writes
+`lat.log` and `frame.log` into the same directory by following the
+`/tmp/mabur-session` marker and holds no logging config of its own
 (`gs/src/debug_session.h`). Nothing is written until the knob is set, and
 `enable = false` removes the marker, which stops maburplay too.
 
@@ -290,7 +291,7 @@ the `/tmp/mabur-session` marker and holds no logging config of its own
   re-rendezvous keeps it climbing; `gs/src/drone_restart.h`) maburgs rotates
   in place — next NNNN, marker rewritten, all six files reopened under it
   with their format marker at the top — with no process restart and no video
-  blink; maburplay's `lat.log` follows the marker within 5 s. Cumulative
+  blink; maburplay's `lat.log` and `frame.log` follow the marker within 5 s. Cumulative
   sideport counters do NOT reset at a rotation (same maburgs process), so the
   new `flight.jsonl` starts at nonzero values; `flightreport.py` differences
   within the file. A maburd crash-restart mid-flight therefore splits that
@@ -464,6 +465,30 @@ prints the vsync A/B verdict (four log-derived gates: `e2e` p50 B≤A−8,
 `dsp` p50 B≤6 (level), `dsp` p99 B≤A−8, `dsp` p50 4 s-bucket sweep ≤3
 (flatness) — `anchor=warm` windows are excluded from all four, with a
 printed count).
+
+### `frame.log` (`# framelog 1`)
+
+The per-frame rows behind the `lat:` line, from the same `LatTracker`
+window (`gs/player/src/lat_tracker.h` `FrameRow`): one row per frame that
+completed the whole chain and joined the window — a displaced frame or one
+submitted on a cold anchor gets no row, exactly as it is absent from the
+`lat:` percentiles. Written by the same follow-the-marker writer as
+`lat.log`, in the same idle-gated 1 Hz burst (never on the flip or decode
+path). Twenty columns:
+
+    t_flip pts fid sid len flags slices t_submit t_complete t_decoded t_release enc dq air fec dec reg dsp e2e exact
+
+`t_flip` is the frame's scanout-start stamp (mono µs); `t_submit` is when
+the player handed the AU (or its first slice) to the decoder, `t_complete`
+the ring's finish stamp (as `au.log`), `t_decoded` when the decoded picture
+came back, `t_release` when the regulator released it. `enc dq air fec dec
+reg dsp e2e` are the frame's own segments (µs, `dec = t_decoded −
+t_complete`, `e2e` the sum); `exact` is 1 when `t_flip` came from a real
+vblank event. `pts` joins the row to `au.log` (same value), which carries
+`nal0`, `t_first` and the GS stamps; `fid`, `sid`, `len`, `flags` and
+`slices` are copied from the AU record so a row reads on its own. A
+streamed frame has `t_submit < t_complete`, so `t_decoded − t_submit` is
+not decode time for it; split `dec` with `t_complete` instead.
 
 ### `cal.log` (`callog 3`)
 

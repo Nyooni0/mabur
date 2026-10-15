@@ -49,7 +49,7 @@
 #include "frame_regulator.h"  // phase-aware pts+D display release
 #include "gs_draw.h"         // set_colour_inverse() for the GS overlay pre-invert
 #include "lat_tracker.h"    // tail latency segments + 1 Hz lat line
-#include "lat_log.h"        // persist 1 Hz lat line to <dvr>/log/lat-NNNN.log
+#include "lat_log.h"        // lat.log (1 Hz lat: line) and frame.log (per frame) in the session dir
 #include "osd_palette.h"    // build_palette() for the encoder-side OSD
 #endif
 #ifdef MABUR_PLAYER_MPP
@@ -646,6 +646,11 @@ int main(int argc, char** argv) {
                                       cfg.display.chain_budget,
                                       cfg.display.sched_cap_ms);
   maburplay::LatLog lat_log;
+  // Per-frame rows of the same window as the lat: line (docs/observability.md
+  // "frame.log"), written in the same idle-gated 1 Hz burst so a stalled
+  // DVR write can never sit on the flip or decode path.
+  maburplay::LatLog frame_log(maburplay::kSessionMarker, "frame.log",
+                              "# framelog 1");
   // Installs the display stage: the CUBIC_LUT (always a table on a LUT
   // CRTC, identity when off) or the video-plane CTM, and pre-inverts both
   // overlays only for the LUT. Runs once per presenter acquire, BEFORE
@@ -1917,6 +1922,22 @@ int main(int argc, char** argv) {
             L.anchor_ok ? "ok" : "warm");
         std::fprintf(stderr, "%s\n", lat_buf);
         lat_log.write(mono_us(), lat_buf);
+        // t_flip is the row's own time column; the rest is the chain in
+        // the order docs/observability.md lists.
+        for (const auto& r : L.rows) {
+          char row[256];
+          std::snprintf(row, sizeof(row),
+              "%u %llu %u %u %u %u %llu %llu %llu %llu %u %u %u %u %u %u %u %u %u",
+              r.pts_us, static_cast<unsigned long long>(r.frame_id64),
+              r.sid, r.len, r.flags, r.nslices,
+              static_cast<unsigned long long>(r.t_submit_us),
+              static_cast<unsigned long long>(r.t_complete_us),
+              static_cast<unsigned long long>(r.t_decoded_us),
+              static_cast<unsigned long long>(r.t_release_us),
+              r.seg[0], r.seg[1], r.seg[2], r.seg[3], r.seg[4], r.seg[5],
+              r.seg[6], r.seg[7], r.exact ? 1u : 0u);
+          frame_log.write(r.t_flip_us, row);
+        }
       }
       // Same 1 Hz tick as the lat: line above, so the bench fallback-drill
       // gate ("fallback= climbs then stops after re-warm") has a periodic

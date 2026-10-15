@@ -407,4 +407,91 @@ TEST(zero_t_first_us_does_not_warm_anchor_or_join_window) {
   CHECK(!L.anchor_ok);      // the anchor never warmed up on bogus stamps
 }
 
+TEST(flush_line_hands_out_one_row_per_completed_frame) {
+  // The per-frame record behind frame.log: the window's frames leave
+  // flush_line() as rows carrying the AU meta copied at submit, every
+  // absolute stamp of the chain and the segment tuple the percentiles
+  // were ranked on -- so a late frame can be joined to au.log by pts and
+  // attributed without re-deriving anything.
+  LatTracker lat;
+  warm(lat);
+
+  AuRecordMeta m;
+  m.pts_us = 1000;
+  m.frame_id64 = 777;
+  m.sid = 1;
+  m.len = 61'234;
+  m.flags = 0x80 | 0x01;
+  m.nslices = 4;
+  m.t_first_us = 106'000;
+  m.t_complete_us = 109'000;
+  m.drone_q_ms = 2;
+  m.enc_us = 1500;
+
+  lat.on_submit(m, /*mono_us=*/108'000);
+  lat.on_decoded(1000, 111'000);
+  lat.on_present(1000, 112'000);
+  lat.on_flip(1000, 116'000, /*exact=*/false);
+
+  const auto L = lat.flush_line();
+  CHECK(L.n == 1);
+  CHECK(L.rows.size() == 1);
+  const auto& r = L.rows[0];
+  CHECK(r.pts_us == 1000);
+  CHECK(r.frame_id64 == 777);
+  CHECK(r.sid == 1);
+  CHECK(r.len == 61'234);
+  CHECK(r.flags == (0x80 | 0x01));
+  CHECK(r.nslices == 4);
+  CHECK(r.t_submit_us == 108'000);
+  CHECK(r.t_complete_us == 109'000);
+  CHECK(r.t_decoded_us == 111'000);
+  CHECK(r.t_release_us == 112'000);
+  CHECK(r.t_flip_us == 116'000);
+  CHECK(!r.exact);
+  CHECK(r.seg[0] == 1500);   // enc
+  CHECK(r.seg[1] == 2000);   // dq
+  CHECK(r.seg[2] == 1500);   // air
+  CHECK(r.seg[3] == 3000);   // fec
+  CHECK(r.seg[4] == 2000);   // dec
+  CHECK(r.seg[5] == 1000);   // reg
+  CHECK(r.seg[6] == 4000);   // dsp
+  CHECK(r.seg[7] == 15'000); // e2e
+
+  // The rows leave with the window: the next flush starts empty.
+  const auto L2 = lat.flush_line();
+  CHECK(L2.n == 0);
+  CHECK(L2.rows.empty());
+}
+
+TEST(rows_follow_the_window_gate) {
+  // A frame outside the window (displaced before present, or submitted
+  // on a cold anchor) gets no row either: frame.log and the lat: line
+  // describe the same set of frames.
+  LatTracker lat;
+  warm(lat);
+
+  AuRecordMeta d;
+  d.pts_us = 1000;
+  d.t_first_us = 106'000;
+  d.t_complete_us = 109'000;
+  lat.on_submit(d, 108'000);
+  lat.on_decoded(1000, 111'000);
+  lat.on_drop(1000);
+  lat.on_flip(1000, 116'000, true);
+
+  AuRecordMeta c;  // unknown t_first: never computes head segments
+  c.pts_us = 2000;
+  c.t_first_us = 0;
+  c.t_complete_us = 110'000;
+  lat.on_submit(c, 109'000);
+  lat.on_decoded(2000, 112'000);
+  lat.on_present(2000, 113'000);
+  lat.on_flip(2000, 117'000, true);
+
+  const auto L = lat.flush_line();
+  CHECK(L.n == 0);
+  CHECK(L.rows.empty());
+}
+
 MTEST_MAIN
