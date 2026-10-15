@@ -1210,8 +1210,8 @@ refuses on the version.
 ## 2026-10-15 — `# aulog 6`: per-AU GS stamps
 
 `au.log` gains columns 17–19, `t_last t_drain t_push` (mono µs). `t_last`
-is the AU's last body arrival, the same stamp the `maburgs au_tail:` gauge
-already averaged; `t_drain`/`t_push` are core-thread stamps of the AU's
+is the AU's last body arrival, the stamp the `maburgs au_tail:` stderr gauge
+averaged over 5 s windows (the gauge is removed the same day); `t_drain`/`t_push` are core-thread stamps of the AU's
 last-pushed fragment. Together they split each frame's
 `t_complete − t_first` into the arrival span and the GS tail's queue wait,
 batch + FEC work, and emit (`docs/observability.md`). Recordings up to

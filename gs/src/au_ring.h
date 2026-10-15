@@ -135,8 +135,8 @@ struct AuLatMeta {
   // mono µs, LAST body arrival of the AU (max over fragments' body_mono_us;
   // same latch site as t_first_us). Splits fec into arrival span
   // (t_last - t_first: drone hand-off + air) vs publish tail
-  // (finish - t_last: repair/decode/assembly/ring write). Feeds the
-  // au_tail gauge and au.log's t_last column; not written to the SlotHdr.
+  // (finish - t_last: repair/decode/assembly/ring write). Feeds au.log's
+  // t_last column; not written to the SlotHdr.
   uint64_t t_last_arr_us = 0;
   // Core-thread stamps of the AU's last-pushed fragment (mono µs, 0 =
   // unknown): t_drain_us when its body's batch left the RX queue,

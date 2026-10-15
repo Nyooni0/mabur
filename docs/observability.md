@@ -394,8 +394,6 @@ the AU's last-pushed fragment and split that tail further: `t_drain −
 t_last` is the wait in the RX queue before the core thread drained the
 body's batch, `t_push − t_drain` the work on earlier bodies of that batch
 plus FEC decode, `t_complete − t_push` FrameStream emit and the ring write.
-The `maburgs au_tail:` stderr line is the span/tail split averaged over 5 s
-windows.
 
 ### `fec.log` (`feclog 3`)
 
