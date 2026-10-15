@@ -48,6 +48,12 @@ void FrameStream::push_fragment(uint8_t sid, const uint8_t* pkt, size_t len,
     s.lat.t_first_us = arr.body_mono_us;
   if (arr.body_mono_us > s.lat.t_last_arr_us)
     s.lat.t_last_arr_us = arr.body_mono_us;
+  // The AU completes on its last-pushed fragment: latch that fragment's
+  // drain and push stamps together, so both describe the same body.
+  if (arr.push_mono_us && arr.push_mono_us >= s.lat.t_push_us) {
+    s.lat.t_push_us = arr.push_mono_us;
+    s.lat.t_drain_us = arr.drain_mono_us;
+  }
   if (idx == 0 && !s.have_hdr) {
     auto h = mabur::framewire::parse_frame_hdr(s.chunks[0].data(), s.chunks[0].size());
     if (!h) { ++bad_frags_; slots_.erase(key); return; }

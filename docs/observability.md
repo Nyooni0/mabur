@@ -375,9 +375,9 @@ against the probe (`docs/findings/2026-09-05-probe-blanking-fix.md`).
 Per-AU meta rows, fed in-process from `AuRingWriter::last_record()`
 (`gs/src/main.cpp`'s FrameStream finish callback; `gs/src/au_log.h`) —
 maburgs is the ring WRITER, so the log cannot miss an AU to a ring overrun.
-Seventeen columns:
+Nineteen columns:
 
-    t_us pts sid fid len flags nal0 t_first t_complete enc dq air slices kept filled after_hole t_last
+    t_us pts sid fid len flags nal0 t_first t_complete enc dq air slices kept filled after_hole t_last t_drain t_push
 
 `t_us` is CLOCK_MONOTONIC µs. `t_first`/`t_complete` are the AU's mono-µs
 latency stamps (first body / finish()). `enc`/`dq` are the drone's
@@ -386,11 +386,16 @@ SBI-latched `enc_us`/`drone_q_ms` (venc encode time, true TxQueue wait —
 modelled air backlog at that frame (`AirClock`, `docs/link-adaptation.md`
 "Drone air clock"). `slices kept filled after_hole` are slice salvage
 (`docs/slices.md`), all 0 on an AU that was neither split nor salvaged.
-`t_last` is the mono-µs arrival of the AU's LAST body (0 = unknown), which
-splits the fec segment per frame: `t_last − t_first` is the arrival span
-(drone hand-off plus air), `t_complete − t_last` the GS publish tail
-(repair, assembly, ring write). The `maburgs au_tail:` stderr line is the
-same split averaged over 5 s windows.
+The last three are GS stamps (mono µs, 0 = unknown) that split the fec
+segment per frame. `t_last` is the arrival of the AU's LAST body:
+`t_last − t_first` is the arrival span (drone hand-off plus air),
+`t_complete − t_last` the GS publish tail. `t_drain` and `t_push` belong to
+the AU's last-pushed fragment and split that tail further: `t_drain −
+t_last` is the wait in the RX queue before the core thread drained the
+body's batch, `t_push − t_drain` the work on earlier bodies of that batch
+plus FEC decode, `t_complete − t_push` FrameStream emit and the ring write.
+The `maburgs au_tail:` stderr line is the span/tail split averaged over 5 s
+windows.
 
 ### `fec.log` (`feclog 3`)
 

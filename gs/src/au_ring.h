@@ -118,8 +118,10 @@ struct AuRecordMeta {
   uint16_t enc_us = 0;
   uint16_t drone_air_ms = 0;
   // Writer side only: last_record() copies these from AuLatMeta; readers
-  // leave them default (neither is in the SlotHdr).
+  // leave them default (none is in the SlotHdr).
   uint64_t t_last_arr_us = 0;
+  uint64_t t_drain_us = 0;
+  uint64_t t_push_us = 0;
   SliceSalvage slice;
 };
 
@@ -136,6 +138,13 @@ struct AuLatMeta {
   // (finish - t_last: repair/decode/assembly/ring write). Feeds the
   // au_tail gauge and au.log's t_last column; not written to the SlotHdr.
   uint64_t t_last_arr_us = 0;
+  // Core-thread stamps of the AU's last-pushed fragment (mono µs, 0 =
+  // unknown): t_drain_us when its body's batch left the RX queue,
+  // t_push_us when FEC handed the fragment to FrameStream. With
+  // t_last_arr_us and t_complete_us they split the publish tail into queue
+  // wait, batch + FEC work, and emit. au.log columns only.
+  uint64_t t_drain_us = 0;
+  uint64_t t_push_us = 0;
   uint16_t drone_q_ms = 0;    // from SBI q_ms via the AU's first fragment
   uint16_t enc_us = 0;        // from SBI enc_us, same latch
   uint16_t drone_air_ms = 0;  // from SBI air_ms, same latch as drone_q_ms

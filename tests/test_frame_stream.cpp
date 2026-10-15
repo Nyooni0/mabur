@@ -331,6 +331,41 @@ TEST(lat_t_first_is_min_body_time_q_enc_latched_from_idx0) {
   CHECK(cap.evs[1].lat.t_complete_us == 0);  // ring writer stamps this, not us
 }
 
+TEST(lat_drain_and_push_latch_from_the_last_pushed_fragment) {
+  // The AU's GS tail is split by the stamps of the fragment that completes
+  // it. idx1 is pushed LAST but carries the SMALLER drain stamp (its batch
+  // left the queue earlier and waited behind other bodies): a per-field max
+  // would pair idx1's push with idx0's drain. Both must come from idx1.
+  Capture cap;
+  FrameStream fs({50, 8}, cap.cbs());
+  mabur::Fragmenter frag;
+  std::vector<uint8_t> pay(200, 0x55);
+  auto frags = frag_frame(frag, 0, pay);
+  REQUIRE(frags.size() == 2);
+  FragArrival a0; a0.body_mono_us = 1000; a0.drain_mono_us = 1600; a0.push_mono_us = 1700;
+  FragArrival a1; a1.body_mono_us = 1100; a1.drain_mono_us = 1500; a1.push_mono_us = 1900;
+  fs.push_fragment(1, frags[0].data(), frags[0].size(), 10, a0);
+  fs.push_fragment(1, frags[1].data(), frags[1].size(), 11, a1);
+  REQUIRE(cap.evs.size() == 2);
+  CHECK(cap.evs[1].lat.t_push_us == 1900);
+  CHECK(cap.evs[1].lat.t_drain_us == 1500);   // idx1's, not max(1600, 1500)
+  CHECK(cap.evs[1].lat.t_last_arr_us == 1100);
+}
+
+TEST(lat_unknown_push_stamp_never_latches) {
+  // Callers without core-thread stamps (tests, the dry-run replay) leave
+  // both 0; the AU must report 0, not a stray drain value.
+  Capture cap;
+  FrameStream fs({50, 8}, cap.cbs());
+  mabur::Fragmenter frag;
+  auto frags = frag_frame(frag, 0, std::vector<uint8_t>(200, 0x55));
+  FragArrival a; a.body_mono_us = 1000; a.drain_mono_us = 1500;  // push unknown
+  for (auto& p : frags) fs.push_fragment(1, p.data(), p.size(), 10, a);
+  REQUIRE(cap.evs.size() == 2);
+  CHECK(cap.evs[1].lat.t_push_us == 0);
+  CHECK(cap.evs[1].lat.t_drain_us == 0);
+}
+
 TEST(lat_truncated_finish_still_carries_latched_values) {
   // Same shape as gap_timeout_truncates_prefix: fragment 2 of a 4+-fragment
   // frame never arrives, so the gap timeout force-finishes it truncated —

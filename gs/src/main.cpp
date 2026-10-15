@@ -833,11 +833,14 @@ static int run_radio(const maburgs::Config& cfg) {
   // obvious failure. Core-thread-owned, like everything else in this loop.
   bool frame_wire = false;
   bool refused_peer = false;  // one loud line per run, not per tick
+  // When the batch being processed left the RX queue (au.log t_drain).
+  uint64_t batch_drain_us = 0;
 
   agg.set_frag_sink([&](const mabur::DecodedFrag& f) {
     if (frame_wire)
       fstream.push_fragment(f.stream_id, f.frag.data(), f.frag.size(), mono_ms(),
-                            {f.body_mono_us, f.q_ms, f.enc_us, f.air_ms, f.sw_seq, true, f.retx});
+                            {f.body_mono_us, f.q_ms, f.enc_us, f.air_ms, f.sw_seq, true, f.retx,
+                             batch_drain_us, mono_us()});
   });
 
   // Dedicated adaptive-link log: maburgs' own compact S/E/P/N record of
@@ -1092,6 +1095,7 @@ static int run_radio(const maburgs::Config& cfg) {
     // Drain (blocks <=10 ms: this IS the control tick cadence).
     batch.clear();
     queue.drain(batch, 10);
+    batch_drain_us = mono_us();
     for (const auto& m : batch) {
       // Calibration sweep frames (cal_wire.h) are a distinct body type, not
       // video, and must be recognized BEFORE agg.on_rx_body() routes the
