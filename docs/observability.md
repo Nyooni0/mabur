@@ -474,7 +474,7 @@ completed the whole chain and joined the window — a displaced frame or one
 submitted on a cold anchor gets no row, exactly as it is absent from the
 `lat:` percentiles. Written by the same follow-the-marker writer as
 `lat.log`, in the same idle-gated 1 Hz burst (never on the flip or decode
-path). Twenty columns:
+path), buffered so each burst reaches the file in one write. Twenty columns:
 
     t_flip pts fid sid len flags slices t_submit t_complete t_decoded t_release enc dq air fec dec reg dsp e2e exact
 

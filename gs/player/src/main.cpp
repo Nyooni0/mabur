@@ -649,9 +649,10 @@ int main(int argc, char** argv) {
   maburplay::LatLog lat_log;
   // Per-frame rows of the same window as the lat: line (docs/observability.md
   // "frame.log"), written in the same idle-gated 1 Hz burst so a stalled
-  // DVR write can never sit on the flip or decode path.
+  // DVR write can never sit on the flip or decode path. Batched: the
+  // burst's rows leave in one write at flush(), not one syscall per row.
   maburplay::LatLog frame_log(maburplay::kSessionMarker, "frame.log",
-                              "# framelog 1");
+                              "# framelog 1", /*batched=*/true);
   // Installs the display stage: the CUBIC_LUT (always a table on a LUT
   // CRTC, identity when off) or the video-plane CTM, and pre-inverts both
   // overlays only for the LUT. Runs once per presenter acquire, BEFORE
@@ -1948,6 +1949,7 @@ int main(int argc, char** argv) {
               r.seg[6], r.seg[7], r.exact ? 1u : 0u);
           frame_log.write(r.t_flip_us, row);
         }
+        frame_log.flush();
       }
       // Same 1 Hz tick as the lat: line above, so the bench fallback-drill
       // gate ("fallback= climbs then stops after re-warm") has a periodic
