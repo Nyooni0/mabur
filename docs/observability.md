@@ -585,9 +585,19 @@ chain_max= chains= cuts= alw= lslot=`.
   frame that would extend a run past the budget takes its natural slot and
   the held occupant is displaced — one dropped frame, counted in
   `replaced=` too). The extra period lands in the `lat:` line's `reg`
-  segment, so read `chained/held` per second next to `reg` p50. Shipped
-  budget 3; 0 = unbounded. Bench A/B behind that default:
-  `docs/findings/2026-09-02-regulator-chain-budget.md`.
+  segment, so read `chained/held` per second next to `reg` p50. The bundle
+  ships budget 0 (never cut): a chain then ends only on an arrival gap, so
+  through the part of the sensor/panel beat where arrivals sit just past
+  the release point the whole stream runs one period late (the `lat:` p50
+  sawtooth) but nothing is dropped, and the refresh-start frame's ~10 ms
+  of extra encode, air and decode fits inside that slack. A budget N
+  instead keeps the lower latency and pays one dropped frame per cut; on a
+  clean link the refresh-start frame misses its release in about half of
+  each beat cycle and every miss then costs a repeat plus a cut (bench:
+  budget 3 = 59–73 % of seconds with a visible event and 1.6–2.5 drops/s,
+  budget 0 = 14 % and 0.16 drops/s, at +12.5 ms median). Records:
+  `docs/findings/2026-09-02-regulator-chain-budget.md` (budget 3 chosen),
+  `docs/findings/2026-10-15-regulator-chain-cuts.md` (budget 0 chosen).
 - `alw=`/`lslot=` — capture-time scheduling (`display.sched_cap_ms`, 0 = off
   in code and bundle; bench result and cost:
   `docs/findings/2026-10-15-capture-sched.md`). In servo mode a frame's vblank follows its
