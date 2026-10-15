@@ -108,7 +108,8 @@ struct DisplayCfg {
   // many ms, instead of following its arrival. Late-tail frames within the
   // allowance keep their slot, so the clean-link repeat/skip judder in the
   // phases where frames arrive near the latch goes away, at up to one extra
-  // refresh of latency in those phases. 0 = off (arrival-based servo).
+  // refresh of latency in those phases. 0 = off (arrival-based servo),
+  // also the bundle's choice: at 16 it cost ~+10 ms median on the bench.
   int sched_cap_ms = 0;
 };
 

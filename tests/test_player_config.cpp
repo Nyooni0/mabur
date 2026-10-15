@@ -392,9 +392,8 @@ TEST(display_chain_budget_key) {
 }
 
 TEST(display_sched_cap_ms_key) {
-  // display.sched_cap_ms: capture-time scheduling's allowance cap. Code
-  // default 0 = off (arrival-based servo); the bundle turns it on at 16;
-  // range [0, 50].
+  // display.sched_cap_ms: capture-time scheduling's allowance cap. 0 = off
+  // (arrival-based servo) in code and bundle; range [0, 50].
   const auto bare = maburplay::load_config(write_tmp_play(""));
   CHECK(bare.display.sched_cap_ms == 0);
   const auto cfg = maburplay::load_config(

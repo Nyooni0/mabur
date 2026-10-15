@@ -563,8 +563,9 @@ chain_max= chains= cuts= alw= lslot=`.
   segment, so read `chained/held` per second next to `reg` p50. Shipped
   budget 3; 0 = unbounded. Bench A/B behind that default:
   `docs/findings/2026-09-02-regulator-chain-budget.md`.
-- `alw=`/`lslot=` — capture-time scheduling (`display.sched_cap_ms`, bundle
-  16, code default 0 = off). In servo mode a frame's vblank follows its
+- `alw=`/`lslot=` — capture-time scheduling (`display.sched_cap_ms`, 0 = off
+  in code and bundle; bench result and cost:
+  `docs/findings/2026-10-15-capture-sched.md`). In servo mode a frame's vblank follows its
   capture time, not its arrival: the first vblank whose release is at or
   after capture + delivery floor + `alw`. Lateness is a frame's arrival
   past the fastest delivery seen, measured before the regulator's own hold
