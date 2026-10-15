@@ -1590,7 +1590,11 @@ static int run_radio(const maburgs::Config& cfg) {
       std::fprintf(stderr, "\n");
     }
 
-    if (stats) {
+    // The sideport snapshot is built only when the exporter will emit: the
+    // loop wakes on every RX batch (~300/s at video rates) and the build is
+    // ~200 us of reads on the core thread, which delays the next drain --
+    // and so every packet still in the queue -- for a datagram sent at 5 Hz.
+    if (stats && stats->due(drained_ms)) {
       maburgs::StatsInput sin;
       // Live channel of the TX card, not the configured home: with a pick
       // committed they differ. Straight off the
@@ -1707,9 +1711,9 @@ static int run_radio(const maburgs::Config& cfg) {
       sin.rcf_slot = {rcf_slot.released_au(), rcf_slot.released_timeout(),
                       rcf_slot.passthru(), rcf_slot.released_probe(),
                       rcf_slot.tail_ub_ms()};
-      // link.nack: take_window() is destructive, so only on a poll that
-      // will emit (same reasoning as lat_win.flush() below).
-      if (cfg.link.nack.enable && stats->due(drained_ms)) {
+      // link.nack: take_window() is destructive; safe here because the
+      // block runs only on a poll that will emit.
+      if (cfg.link.nack.enable) {
         sin.nack.enabled = true;
         sin.nack.cum = nack.stats();
         sin.nack.win = nack.take_window();
@@ -1734,14 +1738,10 @@ static int run_radio(const maburgs::Config& cfg) {
         }
         sin.rtt = ri;
       }
-      // lat_win.flush() is destructive (reads AND clears): only pay for it
-      // on a poll that stats->due() says will actually emit. This loop
-      // iterates roughly every 10ms (the drain() cadence above) while
-      // interval_ms is >= 100ms, so an unconditional flush() here would
-      // clear the window ~10x more often than it is ever read, reporting
-      // only the last loop tick's handful of samples instead of a real
-      // rolling window.
-      if (lat_anchor.usable() && stats->due(drained_ms))
+      // lat_win.flush() is destructive (reads AND clears); safe here because
+      // the block runs only on a poll that will emit, so the window spans
+      // the whole interval rather than the last loop tick.
+      if (lat_anchor.usable())
         sin.video_lat = lat_win.flush();
       // Ladder controller snapshot: absent in static-pin mode, where the
       // controller exists but is never ticked (see VrxController::ctl()).
