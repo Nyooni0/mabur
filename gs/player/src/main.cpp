@@ -47,6 +47,7 @@
 #include "burn_recorder.h"  // dvr.mode "burned": re-encode with the OSD burnt in
 #include "drm_presenter.h"  // KMS atomic NV12 presenter, the default display path
 #include "frame_regulator.h"  // phase-aware pts+D display release
+#include "release_wait.h"  // the pre-release wait that keeps collecting decoded frames
 #include "gs_draw.h"         // set_colour_inverse() for the GS overlay pre-invert
 #include "lat_tracker.h"    // tail latency segments + 1 Hz lat line
 #include "lat_log.h"        // lat.log (1 Hz lat: line) and frame.log (per frame) in the session dir
@@ -1573,8 +1574,17 @@ int main(int argc, char** argv) {
       const uint64_t nr1 = regulator.next_release_us();
       if (nr1 != 0) {
         const uint64_t now1 = mono_us();
+        // Not a plain sleep: the decoder's output is collected only by
+        // backend->poll(), so the wait keeps polling (release_wait.h) --
+        // a picture finishing here is offered to the regulator within one
+        // step instead of after the release and the commit.
         if (nr1 > now1 && nr1 - now1 <= 2'500)
-          std::this_thread::sleep_for(std::chrono::microseconds(nr1 - now1));
+          maburplay::wait_until_polling(
+              nr1, 500, mono_us,
+              [](uint64_t us) {
+                std::this_thread::sleep_for(std::chrono::microseconds(us));
+              },
+              [&] { backend->poll(); });
         presenter->poll_events();
         maburplay::DmaFrame due;
         while (regulator.release_due(mono_us(), &due)) present_now(due);
