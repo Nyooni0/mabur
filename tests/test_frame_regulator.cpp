@@ -188,6 +188,13 @@ constexpr uint64_t kLead = 3'000;   // vsync_lead_ms 3
 void warm(FrameRegulator& reg) {
   for (int i = 0; i < 8; ++i) reg.on_flip(kT0 + i * kVb, true);
 }
+
+// Keeps a warmed regulator's servo live: every flip on the kT0 grid up to
+// t (the estimator goes stale after a few missed periods, and a stale one
+// never reaches capture-time placement). *next is the next flip's index.
+void flips_until(FrameRegulator& reg, uint64_t* next, uint64_t t) {
+  while (kT0 + *next * kVb <= t) reg.on_flip(kT0 + (*next)++ * kVb, true);
+}
 }  // namespace
 
 TEST(servo_releases_at_vblank_minus_lead) {
@@ -974,11 +981,36 @@ TEST(capture_sched_salvaged_frames_do_not_widen_allowance) {
   warm(reg);
   FrameRegulator::Displaced disp;
   DmaFrame out;
+  uint64_t next_flip = 8;
   for (uint64_t i = 0; i < 300; ++i) {
     const uint32_t pts = static_cast<uint32_t>(i * kFrame);
     const bool salvaged = i % 50 == 0;
     if (salvaged) reg.note_incomplete(pts);
     const uint64_t t = kT0 + 8 * kVb + i * kFrame + (salvaged ? 30'000 : 0);
+    flips_until(reg, &next_flip, t);
+    reg.offer(frame(pts), t, &disp);
+    while (reg.release_due(t, &out)) {}
+  }
+  CHECK(reg.allowance_ms() < 3.0);
+}
+
+TEST(capture_sched_one_fast_frame_does_not_widen_allowance) {
+  // A single frame delivered 5 ms faster than any before it is one sample
+  // of the window -- below p1, so it moves nothing. It must not shift the
+  // frames after it either: lateness measured against the pts anchor
+  // jumps by 5 ms for every later frame (the anchor's floor snaps down to
+  // the fast one), and the window, still full of samples taken against
+  // the old floor, would read that as 5 ms of spread.
+  FrameRegulator reg(12, true, 3, 3, 16);
+  warm(reg);
+  FrameRegulator::Displaced disp;
+  DmaFrame out;
+  uint64_t next_flip = 8;
+  for (uint64_t i = 0; i < 400; ++i) {
+    const uint32_t pts = static_cast<uint32_t>(i * kFrame);
+    const uint64_t noise = (i * 7919) % 1000;
+    const uint64_t t = kT0 + 8 * kVb + 5'000 + i * kFrame + noise - (i == 300 ? 5'000 : 0);
+    flips_until(reg, &next_flip, t);
     reg.offer(frame(pts), t, &disp);
     while (reg.release_due(t, &out)) {}
   }

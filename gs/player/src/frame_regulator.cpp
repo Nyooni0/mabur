@@ -159,28 +159,30 @@ void FrameRegulator::heal_slip() {
 }
 
 // Capture-time placement: the frame's slot follows the drone's capture
-// cadence, not its arrival. Lateness = arrival - mapped capture time (the
-// anchor's floor is the fastest delivery seen, so 0 is a perfect frame;
-// it excludes this regulator's own hold, which would otherwise feed back
-// into the allowance). The window gives the delivery floor (p1) and the
-// clean-link spread (p99 - p1); the slot is the first vblank whose release
-// is at or after capture + floor + allowance, allowance = spread + 1 ms
-// capped at sched_cap_us_. A frame later than that slot loses it and goes
-// down the arrival path; the next on-time frame claims the same vblank and
-// wins it (freshest wins), so one late frame costs one hitch and no chain.
+// cadence, not its arrival. The window holds each frame's raw transit,
+// arrival - pts64 (the two clocks' offset plus the delivery time; it
+// excludes this regulator's own hold, which would otherwise feed back into
+// the allowance). Raw, not lateness against the pts anchor: the anchor's
+// floor snaps down on one fast frame, which would shift every later sample
+// against the ones already in the window and read as spread. The window
+// gives the delivery floor (p1) and the clean-link spread (p99 - p1); the
+// slot is the first vblank whose release is at or after pts64 + floor +
+// allowance, allowance = spread + 1 ms capped at sched_cap_us_. A frame
+// later than that slot loses it and goes down the arrival path; the next
+// on-time frame claims the same vblank and wins it (freshest wins), so one
+// late frame costs one hitch and no chain.
 bool FrameRegulator::place_by_capture(uint64_t pts64, uint32_t pts32,
                                       uint64_t mono_us, uint64_t* release,
                                       uint64_t* target_v, Displaced* out) {
-  const uint64_t cap_t = anchor_.map_us(pts64);
-  const int64_t late = static_cast<int64_t>(mono_us) - static_cast<int64_t>(cap_t);
-  if (!was_incomplete(pts32)) win_.add(late);
+  const int64_t transit = static_cast<int64_t>(mono_us) - static_cast<int64_t>(pts64);
+  if (!was_incomplete(pts32)) win_.add(transit);
   if (win_.empty()) return false;
   const int64_t floor_us = win_.lo();
   int64_t allow = win_.hi() - floor_us + 1000;
   if (allow > sched_cap_us_) allow = sched_cap_us_;
   if (allow < 0) allow = 0;
   allowance_us_ = allow;
-  const int64_t want = static_cast<int64_t>(cap_t) + floor_us + allow;
+  const int64_t want = static_cast<int64_t>(pts64) + floor_us + allow;
   const auto r = est_.release_at_or_after(want > 0 ? static_cast<uint64_t>(want) : 0, lead_us_);
   if (r.release_us < mono_us) {
     ++late_slot_;

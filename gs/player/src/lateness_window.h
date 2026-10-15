@@ -7,8 +7,9 @@
 
 namespace maburplay {
 
-// Rolling p1 / p99 of frame lateness (µs past the fastest observed
-// delivery) over the last kSize frames -- ~10 s at 60 fps. The capture-time
+// Rolling p1 / p99 of frame transit (arrival - capture pts, µs, so it
+// carries the two clocks' offset; p99 - p1 cancels it) over the last
+// kSize frames -- ~10 s at 60 fps. The capture-time
 // scheduler takes p1 as the delivery floor and p99 - p1 as the clean-link
 // spread its allowance must cover. Both are exact order statistics of the
 // window, recomputed per sample with nth_element on a scratch copy: 600

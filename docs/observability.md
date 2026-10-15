@@ -603,9 +603,11 @@ chain_max= chains= cuts= alw= lslot=`.
   in code and bundle; bench result and cost:
   `docs/findings/2026-10-15-capture-sched.md`). In servo mode a frame's vblank follows its
   capture time, not its arrival: the first vblank whose release is at or
-  after capture + delivery floor + `alw`. Lateness is a frame's arrival
-  past the fastest delivery seen, measured before the regulator's own hold
-  (enc+dq+air+fec+dec, not `reg`/`dsp`). The floor is its p1 over the last
+  after capture + delivery floor + `alw`. The window holds each frame's
+  transit, arrival − capture pts on the raw clocks, measured before the
+  regulator's own hold (enc+dq+air+fec+dec, not `reg`/`dsp`); raw rather
+  than against the pts anchor, whose floor snaps down on one fast frame
+  and would shift every later sample. The floor is its p1 over the last
   600 frames (~10 s), `alw` is p99 − p1 + 1 ms capped at `sched_cap_ms`,
   and salvaged AUs stay out of the window. A late-tail frame within `alw`
   keeps its slot, so in the phases where frames arrive near the latch the
