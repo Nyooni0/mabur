@@ -56,9 +56,13 @@ typedef struct {
                                 * venc_cfg_intra_rows(). Shorter = faster
                                 * self-heal, more bitrate per P and more
                                 * frame-size swing. */
-  uint8_t intra_refresh_qp;    /* venc.intra_refresh_qp: u32ReqIQp, the QP
-                                * of the stripe. 1..51. Lower = cleaner
-                                * recovery anchor, more bits. Unused while
+  uint8_t intra_refresh_qp;    /* venc.intra_refresh_qp: u32ReqIQp, the
+                                * requested QP of the stripe, 1..51. Star6E
+                                * CBR ignores it: 36..51 give the same
+                                * stripe size, PSNR and encode time, the
+                                * stripe is coded at the rate control's
+                                * QP (docs/findings/2026-10-15-gdr-slices.md).
+                                * Passed through as asked; unused while
                                 * intra_refresh_frames is 0. */
   /* MI_VENC_ParamRef_t {u32Base, u32Enhance, bEnablePred} — SVC-T temporal
    * hierarchy, applied once between CreateChn and StartRecvPic: */

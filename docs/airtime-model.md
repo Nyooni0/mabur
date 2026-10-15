@@ -123,7 +123,11 @@ their variance into jitter. Knobs, in order of proven usefulness:
   payloads equal. A 2-back reference structure is structurally 1.8:1
   (windowed CBR won't equalize it) — don't run it if jitter matters.
   Intra cost is spread by the rolling refresh (`venc.intra_refresh_frames`
-  / `intra_refresh_qp`, `MI_VENC_IntraRefresh_t`; bundle 1 frame, QP 36)
+  / `intra_refresh_qp`, `MI_VENC_IntraRefresh_t`; bundle 1 frame — the
+  QP is a no-op on star6e CBR, the stripe is coded at the RC's P QP and
+  the I-frame knobs below do not catch it; only the `superframe_p_pct`
+  re-encode cap does, at +4 ms encode:
+  `docs/findings/2026-10-15-gdr-slices.md`)
   so the picture heals without IDRs; `drone/venc/venc_cfg.h` documents
   each field.
 - **`venc.max_ipprop`** (config, 0=off; also volatile via

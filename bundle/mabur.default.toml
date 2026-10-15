@@ -51,7 +51,7 @@ max_ipprop = 2             # keyframe may be at most this many times a P-frame's
 min_iqp    = 34            # keyframe quality floor: higher = smaller keyframes
 intra_refresh_frames = 1   # frames to refresh the whole picture, so a lost frame heals without
                            # a keyframe (1 = fastest; larger = steadier bitrate, slower recovery; 0 = off)
-intra_refresh_qp   = 36    # quality of the refreshed areas: lower = sharper, more bits
+intra_refresh_qp   = 36    # requested QP of the refreshed areas; star6e CBR ignores it (coded at the RC's QP)
 ref_base    = 1            # temporal layering: a base layer every frame can decode from...
 ref_enhance = 1            # ...plus droppable enhance frames between them
 ref_pred    = true         # enhance frames may also predict from the base layer
