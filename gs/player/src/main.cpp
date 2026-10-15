@@ -652,7 +652,7 @@ int main(int argc, char** argv) {
   // DVR write can never sit on the flip or decode path. Batched: the
   // burst's rows leave in one write at flush(), not one syscall per row.
   maburplay::LatLog frame_log(maburplay::kSessionMarker, "frame.log",
-                              "# framelog 1", /*batched=*/true);
+                              maburplay::kFrameLogHeader, /*batched=*/true);
   // Installs the display stage: the CUBIC_LUT (always a table on a LUT
   // CRTC, identity when off) or the video-plane CTM, and pre-inverts both
   // overlays only for the LUT. Runs once per presenter acquire, BEFORE
@@ -1933,20 +1933,10 @@ int main(int argc, char** argv) {
             L.anchor_ok ? "ok" : "warm");
         std::fprintf(stderr, "%s\n", lat_buf);
         lat_log.write(mono_us(), lat_buf);
-        // t_flip is the row's own time column; the rest is the chain in
-        // the order docs/observability.md lists.
+        // t_flip is the row's own time column; the rest is the chain.
         for (const auto& r : L.rows) {
           char row[256];
-          std::snprintf(row, sizeof(row),
-              "%u %llu %u %u %u %u %llu %llu %llu %llu %u %u %u %u %u %u %u %u %u",
-              r.pts_us, static_cast<unsigned long long>(r.frame_id64),
-              r.sid, r.len, r.flags, r.nslices,
-              static_cast<unsigned long long>(r.t_submit_us),
-              static_cast<unsigned long long>(r.t_complete_us),
-              static_cast<unsigned long long>(r.t_decoded_us),
-              static_cast<unsigned long long>(r.t_release_us),
-              r.seg[0], r.seg[1], r.seg[2], r.seg[3], r.seg[4], r.seg[5],
-              r.seg[6], r.seg[7], r.exact ? 1u : 0u);
+          maburplay::format_frame_row(r, row, sizeof(row));
           frame_log.write(r.t_flip_us, row);
         }
         frame_log.flush();

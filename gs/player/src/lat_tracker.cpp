@@ -1,6 +1,7 @@
 #include "lat_tracker.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <utility>
 
@@ -235,5 +236,19 @@ LatTracker::Line LatTracker::flush_line() {
 
 LatTracker::Breakdown LatTracker::p99_frame() const { return p99_frame_; }
 LatTracker::Breakdown LatTracker::p50_frame() const { return p50_frame_; }
+
+int format_frame_row(const LatTracker::FrameRow& r, char* buf, size_t n) {
+  return std::snprintf(buf, n,
+      "%u %llu %u %u 0x%02x %u %llu %llu %llu %llu %u %u %u %u %u %u %u %u %u",
+      r.pts_us, static_cast<unsigned long long>(r.frame_id64),
+      static_cast<unsigned>(r.sid), r.len, static_cast<unsigned>(r.flags),
+      static_cast<unsigned>(r.nslices),
+      static_cast<unsigned long long>(r.t_submit_us),
+      static_cast<unsigned long long>(r.t_complete_us),
+      static_cast<unsigned long long>(r.t_decoded_us),
+      static_cast<unsigned long long>(r.t_release_us),
+      r.seg[0], r.seg[1], r.seg[2], r.seg[3], r.seg[4], r.seg[5],
+      r.seg[6], r.seg[7], r.exact ? 1u : 0u);
+}
 
 }  // namespace maburplay

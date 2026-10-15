@@ -92,6 +92,10 @@ Chronological; each line names the section below that carries the detail.
   size; the figures themselves are unchanged.
 - 2026-10-15 — `# aulog 6`: three GS stamp columns, `t_last t_drain
   t_push` (19 columns); aulog ≤ 5 rows have none of them.
+- 2026-10-15 — `frame.log` appears as `# framelog 1`; the same day
+  `# framelog 2` prints its `flags` column in hex (`0x80`) as `au.log`
+  does. A `framelog 1` file carries the same byte in decimal (`128`); the
+  columns are otherwise identical. `int(x, 0)` reads both.
 
 ## 2026-09-23 — `link.pre_fec_loss` scale break, twice
 

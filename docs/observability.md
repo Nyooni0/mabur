@@ -466,7 +466,7 @@ prints the vsync A/B verdict (four log-derived gates: `e2e` p50 B≤A−8,
 (flatness) — `anchor=warm` windows are excluded from all four, with a
 printed count).
 
-### `frame.log` (`# framelog 1`)
+### `frame.log` (`# framelog 2`)
 
 The per-frame rows behind the `lat:` line, from the same `LatTracker`
 window (`gs/player/src/lat_tracker.h` `FrameRow`): one row per frame that
@@ -486,7 +486,8 @@ reg dsp e2e` are the frame's own segments (µs, `dec = t_decoded −
 t_complete`, `e2e` the sum); `exact` is 1 when `t_flip` came from a real
 vblank event. `pts` joins the row to `au.log` (same value), which carries
 `nal0`, `t_first` and the GS stamps; `fid`, `sid`, `len`, `flags` and
-`slices` are copied from the AU record so a row reads on its own. A
+`slices` are copied from the AU record so a row reads on its own, `flags`
+in hex as `au.log` prints it (`framelog 1` printed it in decimal). A
 streamed frame has `t_submit < t_complete`, so `t_decoded − t_submit` is
 not decode time for it; split `dec` with `t_complete` instead.
 

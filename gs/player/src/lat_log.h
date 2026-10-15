@@ -16,7 +16,7 @@ inline constexpr const char* kSessionMarker = "/tmp/mabur-session";
 // Persists a player record into the CURRENT debug session, so it survives
 // power-off (/tmp is tmpfs; the flight-0035 tail was lost exactly that
 // way). Two instances exist: the 1 Hz `lat:` line (lat.log, "# latlog 2")
-// and the per-frame rows behind it (frame.log, "# framelog 1", batched:
+// and the per-frame rows behind it (frame.log, "# framelog 2", batched:
 // each second's rows are written together at flush()).
 //
 // maburplay holds no logging config: it follows the marker maburgs writes.

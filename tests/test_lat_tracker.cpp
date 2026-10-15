@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <string>
 
 #include "au_ring.h"
 #include "lat_tracker.h"
@@ -492,6 +493,32 @@ TEST(rows_follow_the_window_gate) {
   const auto L = lat.flush_line();
   CHECK(L.n == 0);
   CHECK(L.rows.empty());
+}
+
+TEST(frame_row_formats_in_the_documented_column_order) {
+  // frame.log's row after its t_flip column (docs/observability.md):
+  // pts fid sid len flags slices t_submit t_complete t_decoded t_release
+  // enc dq air fec dec reg dsp e2e exact. flags print as au.log prints
+  // them (0x%02x), so a joined pair reads the same byte the same way.
+  LatTracker::FrameRow r;
+  r.pts_us = 1000;
+  r.frame_id64 = 7;
+  r.sid = 1;
+  r.len = 61234;
+  r.flags = 0x80;
+  r.nslices = 4;
+  r.t_submit_us = 100;
+  r.t_complete_us = 200;
+  r.t_decoded_us = 300;
+  r.t_release_us = 400;
+  for (int i = 0; i < 8; ++i) r.seg[i] = static_cast<uint32_t>(10 + i);
+  r.exact = true;
+  char buf[256];
+  const int n = maburplay::format_frame_row(r, buf, sizeof(buf));
+  const std::string want =
+      "1000 7 1 61234 0x80 4 100 200 300 400 10 11 12 13 14 15 16 17 1";
+  CHECK(n == static_cast<int>(want.size()));
+  CHECK(std::string(buf) == want);
 }
 
 MTEST_MAIN

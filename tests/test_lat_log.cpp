@@ -112,13 +112,13 @@ TEST(a_second_instance_owns_its_own_file_and_marker_line) {
   const std::string mk = marker_for("frame");
   set_marker(mk, dir);
   maburplay::LatLog lat(mk.c_str());
-  maburplay::LatLog frame(mk.c_str(), "frame.log", "# framelog 1");
+  maburplay::LatLog frame(mk.c_str(), "frame.log", "# framelog 2");
   lat.write(1'000'000, "lat: n=1");
   frame.write(1'000'500, "1000 7 0 61234 129 4");
   CHECK(lat.path() == dir + "/lat.log");
   CHECK(frame.path() == dir + "/frame.log");
   const std::string f = slurp(frame.path());
-  CHECK(f.rfind("# framelog 1\n", 0) == 0);
+  CHECK(f.rfind("# framelog 2\n", 0) == 0);
   CHECK(f.find("1000500 1000 7 0 61234 129 4\n") != std::string::npos);
   CHECK(f.find("lat:") == std::string::npos);
   const std::string l = slurp(lat.path());
@@ -132,7 +132,7 @@ TEST(a_batched_instance_holds_rows_until_flush) {
   const std::string dir = make_dir("batched");
   const std::string mk = marker_for("batched");
   set_marker(mk, dir);
-  maburplay::LatLog frame(mk.c_str(), "frame.log", "# framelog 1",
+  maburplay::LatLog frame(mk.c_str(), "frame.log", "# framelog 2",
                           /*batched=*/true);
   frame.write(1'000'000, "row-a");
   frame.write(1'016'000, "row-b");
@@ -140,7 +140,7 @@ TEST(a_batched_instance_holds_rows_until_flush) {
   CHECK(slurp(frame.path()).find("row-a") == std::string::npos);
   frame.flush();
   const std::string f = slurp(frame.path());
-  CHECK(f.rfind("# framelog 1\n", 0) == 0);
+  CHECK(f.rfind("# framelog 2\n", 0) == 0);
   CHECK(f.find("1000000 row-a\n1016000 row-b\n") != std::string::npos);
 }
 
@@ -151,7 +151,7 @@ TEST(a_batched_rotation_lands_held_rows_in_the_old_session) {
   const std::string b = make_dir("batched-rot-b");
   const std::string mk = marker_for("batched-rot");
   set_marker(mk, a);
-  maburplay::LatLog frame(mk.c_str(), "frame.log", "# framelog 1", true);
+  maburplay::LatLog frame(mk.c_str(), "frame.log", "# framelog 2", true);
   frame.write(1'000'000, "row-old");
   set_marker(mk, b);
   frame.write(7'000'000, "row-new");  // past the 5 s recheck: rotates
@@ -160,7 +160,7 @@ TEST(a_batched_rotation_lands_held_rows_in_the_old_session) {
   const std::string fb = slurp(b + "/frame.log");
   CHECK(fa.find("1000000 row-old\n") != std::string::npos);
   CHECK(fa.find("row-new") == std::string::npos);
-  CHECK(fb.rfind("# framelog 1\n", 0) == 0);
+  CHECK(fb.rfind("# framelog 2\n", 0) == 0);
   CHECK(fb.find("7000000 row-new\n") != std::string::npos);
   CHECK(fb.find("row-old") == std::string::npos);
 }
@@ -174,7 +174,7 @@ TEST(an_earlier_row_stamp_does_not_force_a_recheck) {
   const std::string b = make_dir("backstamp-b");
   const std::string mk = marker_for("backstamp");
   set_marker(mk, a);
-  maburplay::LatLog frame(mk.c_str(), "frame.log", "# framelog 1", true);
+  maburplay::LatLog frame(mk.c_str(), "frame.log", "# framelog 2", true);
   frame.write(6'000'000, "row-1");
   set_marker(mk, b);
   frame.write(5'990'000, "row-0");  // earlier stamp: no recheck
@@ -188,7 +188,7 @@ TEST(an_earlier_row_stamp_does_not_force_a_recheck) {
 TEST(flush_with_no_session_is_nonfatal) {
   const std::string mk = marker_for("flush-absent");
   std::remove(mk.c_str());
-  maburplay::LatLog frame(mk.c_str(), "frame.log", "# framelog 1", true);
+  maburplay::LatLog frame(mk.c_str(), "frame.log", "# framelog 2", true);
   frame.flush();  // never opened: must not crash
   frame.write(1'000'000, "row");
   frame.flush();

@@ -2,6 +2,7 @@
 #define MABUR_PLAYER_LAT_TRACKER_H_
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -136,6 +137,12 @@ class LatTracker {
 
   Breakdown p99_frame_, p50_frame_;
 };
+
+// frame.log's format marker and one row's payload (everything after the
+// writer's t_flip column), in the order docs/observability.md lists.
+// snprintf semantics: returns the length the full row needs.
+inline constexpr const char* kFrameLogHeader = "# framelog 2";
+int format_frame_row(const LatTracker::FrameRow& r, char* buf, size_t n);
 
 }  // namespace maburplay
 
