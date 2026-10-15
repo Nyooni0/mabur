@@ -30,7 +30,10 @@ bool FrameRegulator::offer(const DmaFrame& f, uint64_t mono_us,
   uint64_t release = 0;
   uint64_t target_v = 0;
   servo_now_ = vsync_lock_ && est_.valid(mono_us);
-  if (servo_now_) {
+  const bool by_capture =
+      servo_now_ && sched_cap_us_ > 0 &&
+      place_by_capture(obs.pts64, f.pts_us, mono_us, &release, &target_v, out);
+  if (servo_now_ && !by_capture) {
     const auto r = est_.next_release(mono_us, lead_us_);
     const uint64_t clamp =
         static_cast<uint64_t>(2.0 * est_.period_us()) + lead_us_;
@@ -153,6 +156,55 @@ void FrameRegulator::heal_slip() {
     held_[j] = h;
   }
   if (any) ++heals_;
+}
+
+// Capture-time placement: the frame's slot follows the drone's capture
+// cadence, not its arrival. Lateness = arrival - mapped capture time (the
+// anchor's floor is the fastest delivery seen, so 0 is a perfect frame;
+// it excludes this regulator's own hold, which would otherwise feed back
+// into the allowance). The window gives the delivery floor (p1) and the
+// clean-link spread (p99 - p1); the slot is the first vblank whose release
+// is at or after capture + floor + allowance, allowance = spread + 1 ms
+// capped at sched_cap_us_. A frame later than that slot loses it and goes
+// down the arrival path; the next on-time frame claims the same vblank and
+// wins it (freshest wins), so one late frame costs one hitch and no chain.
+bool FrameRegulator::place_by_capture(uint64_t pts64, uint32_t pts32,
+                                      uint64_t mono_us, uint64_t* release,
+                                      uint64_t* target_v, Displaced* out) {
+  const uint64_t cap_t = anchor_.map_us(pts64);
+  const int64_t late = static_cast<int64_t>(mono_us) - static_cast<int64_t>(cap_t);
+  if (!was_incomplete(pts32)) win_.add(late);
+  if (win_.empty()) return false;
+  const int64_t floor_us = win_.lo();
+  int64_t allow = win_.hi() - floor_us + 1000;
+  if (allow > sched_cap_us_) allow = sched_cap_us_;
+  if (allow < 0) allow = 0;
+  allowance_us_ = allow;
+  const int64_t want = static_cast<int64_t>(cap_t) + floor_us + allow;
+  const auto r = est_.release_at_or_after(want > 0 ? static_cast<uint64_t>(want) : 0, lead_us_);
+  if (r.release_us < mono_us) {
+    ++late_slot_;
+    return false;
+  }
+  const uint64_t per = static_cast<uint64_t>(est_.period_us());
+  const uint64_t clamp = 2 * per + lead_us_ + static_cast<uint64_t>(sched_cap_us_);
+  if (r.release_us > mono_us + clamp) return false;  // implausible phase
+  // Every held frame is older than this one (offers arrive in decode
+  // order). One on this vblank loses it (freshest wins); one targeted LATER
+  // -- a late frame the arrival path chained forward -- would show after
+  // this newer frame, i.e. backwards, so it goes too.
+  const uint64_t hp = per / 2;
+  for (int i = 0; i < count_;) {
+    const uint64_t hv = held_[i].target_v;
+    if (hv != 0 && hv + hp > r.vblank_us)
+      displace(i, out);
+    else
+      ++i;
+  }
+  chain_run_ = 0;
+  *release = r.release_us;
+  *target_v = r.vblank_us;
+  return true;
 }
 
 bool FrameRegulator::release_due(uint64_t mono_us, DmaFrame* out) {

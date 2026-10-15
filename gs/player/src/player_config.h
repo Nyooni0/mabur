@@ -102,6 +102,14 @@ struct DisplayCfg {
   // docs/findings/2026-09-02-regulator-chain-budget.md: e2e p50 -3.9 ms for
   // 1.44 drops/s; 6 was -2.4 ms for 0.56/s; p99 unchanged at any value).
   int chain_budget = 3;
+  // Capture-time scheduling (frame_regulator.h place_by_capture), servo
+  // mode only: a frame's vblank follows its capture time plus an adaptive
+  // allowance (p99 - p1 of recent frame lateness + 1 ms), capped at this
+  // many ms, instead of following its arrival. Late-tail frames within the
+  // allowance keep their slot, so the clean-link repeat/skip judder in the
+  // phases where frames arrive near the latch goes away, at up to one extra
+  // refresh of latency in those phases. 0 = off (arrival-based servo).
+  int sched_cap_ms = 0;
 };
 
 // GS-side reverse of the drone's ColorTrans sensor tuning (docs/colortrans.md).

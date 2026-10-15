@@ -521,7 +521,7 @@ submits=… parks=… notes_dropped=…` (the feed thread's tally for the run).
 
 The 1 Hz `regulator:` line: `held= late= replaced= disconts= hold_ema=
 present_jitter= vsync= skips= fallback= pend= heals= pdrop= chained= chain=
-chain_max= chains= cuts=`.
+chain_max= chains= cuts= alw= lslot=`.
 
 - `vsync=locked|fallback` — whether the vblank estimator is locked (servo
   release) or has fallen back to the `anchor_floor(pts) + regulate_ms`
@@ -563,6 +563,21 @@ chain_max= chains= cuts=`.
   segment, so read `chained/held` per second next to `reg` p50. Shipped
   budget 3; 0 = unbounded. Bench A/B behind that default:
   `docs/findings/2026-09-02-regulator-chain-budget.md`.
+- `alw=`/`lslot=` — capture-time scheduling (`display.sched_cap_ms`, bundle
+  16, code default 0 = off). In servo mode a frame's vblank follows its
+  capture time, not its arrival: the first vblank whose release is at or
+  after capture + delivery floor + `alw`. Lateness is a frame's arrival
+  past the fastest delivery seen, measured before the regulator's own hold
+  (enc+dq+air+fec+dec, not `reg`/`dsp`). The floor is its p1 over the last
+  600 frames (~10 s), `alw` is p99 − p1 + 1 ms capped at `sched_cap_ms`,
+  and salvaged AUs stay out of the window. A late-tail frame within `alw`
+  keeps its slot, so in the phases where frames arrive near the latch the
+  repeat/skip judder (OSD LAT p99 a refresh above p50) becomes one extra
+  refresh on every frame instead (p50 meets p99). `lslot` counts frames
+  that missed their capture slot (loss, or a delivery shift beyond the
+  cap); they are placed by the arrival rule above, and the next on-time
+  frame that claims the same vblank wins it, so a stall costs a local
+  freeze and catch-up with no trailing chain.
 
 ### fps-log, display bring-up, MSP OSD
 

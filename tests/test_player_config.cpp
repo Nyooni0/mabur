@@ -391,6 +391,21 @@ TEST(display_chain_budget_key) {
   CHECK(threw == true);
 }
 
+TEST(display_sched_cap_ms_key) {
+  // display.sched_cap_ms: capture-time scheduling's allowance cap. Code
+  // default 0 = off (arrival-based servo); the bundle turns it on at 16;
+  // range [0, 50].
+  const auto bare = maburplay::load_config(write_tmp_play(""));
+  CHECK(bare.display.sched_cap_ms == 0);
+  const auto cfg = maburplay::load_config(
+      write_tmp_play("[display]\nsched_cap_ms = 16\n"));
+  CHECK(cfg.display.sched_cap_ms == 16);
+  bool threw = false;
+  try { maburplay::load_config(write_tmp_play("[display]\nsched_cap_ms = 51\n")); }
+  catch (const std::exception&) { threw = true; }
+  CHECK(threw == true);
+}
+
 // "Every knob is in the bundle": the loader reports each known key the file
 // did not set, so an empty report IS the completeness gate. Adding a config
 // key without writing it into the bundle fails here, which is the point --

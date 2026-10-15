@@ -643,7 +643,8 @@ int main(int argc, char** argv) {
   maburplay::FrameRegulator regulator(cfg.display.regulate_ms,
                                       cfg.display.vsync_lock,
                                       cfg.display.vsync_lead_ms,
-                                      cfg.display.chain_budget);
+                                      cfg.display.chain_budget,
+                                      cfg.display.sched_cap_ms);
   maburplay::LatLog lat_log;
   // Installs the display stage: the CUBIC_LUT (always a table on a LUT
   // CRTC, identity when off) or the video-plane CTM, and pre-inverts both
@@ -781,7 +782,8 @@ int main(int argc, char** argv) {
                    "regulator: held=%llu late=%llu replaced=%llu disconts=%llu "
                    "hold_ema=%.2fms present_jitter=%.2fms vsync=%s skips=%llu "
                    "fallback=%llu pend=%llu heals=%llu pdrop=%llu "
-                   "chained=%llu chain=%llu chain_max=%llu chains=%llu cuts=%llu\n",
+                   "chained=%llu chain=%llu chain_max=%llu chains=%llu cuts=%llu "
+                   "alw=%.1fms lslot=%llu\n",
                    static_cast<unsigned long long>(regulator.held_count()),
                    static_cast<unsigned long long>(regulator.late_count()),
                    static_cast<unsigned long long>(regulator.replaced_count()),
@@ -798,7 +800,9 @@ int main(int argc, char** argv) {
                    static_cast<unsigned long long>(regulator.chain_run()),
                    static_cast<unsigned long long>(regulator.chain_max()),
                    static_cast<unsigned long long>(regulator.chains_count()),
-                   static_cast<unsigned long long>(regulator.chain_cuts()));
+                   static_cast<unsigned long long>(regulator.chain_cuts()),
+                   regulator.allowance_ms(),
+                   static_cast<unsigned long long>(regulator.late_slot_count()));
     } else {
       std::fprintf(stderr, "regulator: off present_jitter=%.2fms\n",
                    present_jitter_ema_ms);
@@ -1217,6 +1221,10 @@ int main(int argc, char** argv) {
     if (n.kind == maburplay::FeedNote::Kind::kSubmit) {
 #ifdef MABUR_PLAYER_HW
       lat.on_submit(n.meta, n.t_us);
+      // A salvaged (incomplete) AU is a loss event: keep its delivery time
+      // out of the capture-time scheduler's lateness window.
+      if (!(n.meta.flags & maburgs::kRecFlagComplete))
+        regulator.note_incomplete(n.meta.pts_us);
 #endif
       return;
     }
