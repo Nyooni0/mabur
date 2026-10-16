@@ -466,7 +466,7 @@ prints the vsync A/B verdict (four log-derived gates: `e2e` p50 B≤A−8,
 (flatness) — `anchor=warm` windows are excluded from all four, with a
 printed count).
 
-### `frame.log` (`# framelog 2`)
+### `frame.log` (`# framelog 3`)
 
 The per-frame rows behind the `lat:` line, from the same `LatTracker`
 window (`gs/player/src/lat_tracker.h` `FrameRow`): one row per frame that
@@ -474,9 +474,10 @@ completed the whole chain and joined the window — a displaced frame or one
 submitted on a cold anchor gets no row, exactly as it is absent from the
 `lat:` percentiles. Written by the same follow-the-marker writer as
 `lat.log`, in the same idle-gated 1 Hz burst (never on the flip or decode
-path), buffered so each burst reaches the file in one write. Twenty columns:
+path), buffered so each burst reaches the file in one write. Twenty-two
+columns:
 
-    t_flip pts fid sid len flags slices t_submit t_complete t_decoded t_release enc dq air fec dec reg dsp e2e exact
+    t_flip pts fid sid len flags slices t_submit t_complete t_decoded t_release enc dq air fec dec reg dsp e2e exact t_commit pbits
 
 `t_flip` is the frame's scanout-start stamp (mono µs); `t_submit` is when
 the player handed the AU (or its first slice) to the decoder, `t_complete`
@@ -490,6 +491,25 @@ vblank event. `pts` joins the row to `au.log` (same value), which carries
 in hex as `au.log` prints it (`framelog 1` printed it in decimal). A
 streamed frame has `t_submit < t_complete`, so `t_decoded − t_submit` is
 not decode time for it; split `dec` with `t_complete` instead.
+
+`t_commit` is when the frame's atomic commit ioctl returned (mono µs; 0
+when the presenter parked the frame in its mailbox because a flip was
+still in flight, or the commit failed), so `t_commit − t_release` is the
+present() path's own cost and `t_flip − t_commit` the kernel's latch.
+`pbits` are the presenter's commit bits in hex
+(`DrmPresenter::CommitBits`): `0x01` the OSD plane rode along (a
+vsync-paced two-plane commit), `0x02` `PAGE_FLIP_ASYNC` was set, `0x04`
+parked, `0x08` the commit failed, `0x10` a blocking modeset commit.
+`framelog 2` and earlier rows end at `exact`.
+
+### `reg.log` (`# reglog 1`)
+
+The 1 Hz `regulator:` line ("Regulator line" below), written by the same
+follow-the-marker writer as `lat.log`: `<mono_us> regulator: held= ...`.
+Its counters are cumulative since maburplay started; difference adjacent
+rows for the per-second rate. It exists because `pend`/`pdrop`/`heals` are
+the presenter's side of a missed latch, and `/tmp/maburplay.log` does not
+outlive a power-off.
 
 ### `cal.log` (`callog 3`)
 
@@ -545,10 +565,20 @@ submits=… parks=… notes_dropped=…` (the feed thread's tally for the run).
 
 ### Regulator line
 
-The 1 Hz `regulator:` line: `held= late= replaced= disconts= hold_ema=
+The 1 Hz `regulator:` line (stderr, and `reg.log` in the session
+directory): `held= late= replaced= disconts= hold_ema=
 present_jitter= vsync= skips= fallback= pend= heals= pdrop= chained= chain=
-chain_max= chains= cuts= alw= lslot=`.
+chain_max= chains= cuts= alw= lslot= present= acq= req= ioctl=`.
 
+- `present=N acq=p50/max req=p50/max ioctl=p50/max` — the N present()
+  calls since the previous line, split into the framebuffer acquire (the
+  dma-buf import plus `drmModeAddFB2`, served from the presenter's
+  framebuffer cache, `gs/player/src/fb_cache.h`: a pool buffer seen again
+  is a lookup, a new one an import of ~3 ms), the atomic request build and
+  the commit ioctl, µs. `display.vsync_lead_ms` has to cover their sum: a
+  frame whose present() path runs past the lead latches a vblank late and
+  the frame behind it is a `pdrop` (`frame.log`'s `t_commit` shows it per
+  frame).
 - `vsync=locked|fallback` — whether the vblank estimator is locked (servo
   release) or has fallen back to the `anchor_floor(pts) + regulate_ms`
   rule.

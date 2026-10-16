@@ -653,6 +653,10 @@ int main(int argc, char** argv) {
   // burst's rows leave in one write at flush(), not one syscall per row.
   maburplay::LatLog frame_log(maburplay::kSessionMarker, "frame.log",
                               maburplay::kFrameLogHeader, /*batched=*/true);
+  // The 1 Hz regulator: line, into the session too (docs/observability.md
+  // "reg.log"): its pend/pdrop/heals counters are the presenter's side of
+  // a missed latch, and /tmp/maburplay.log does not outlive a power-off.
+  maburplay::LatLog reg_log(maburplay::kSessionMarker, "reg.log", "# reglog 1");
   // Installs the display stage: the CUBIC_LUT (always a table on a LUT
   // CRTC, identity when off) or the video-plane CTM, and pre-inverts both
   // overlays only for the LUT. Runs once per presenter acquire, BEFORE
@@ -782,15 +786,16 @@ int main(int argc, char** argv) {
   // the DrmPresenter's mailbox engagement count (frame parked, or displacing
   // one already parked because a flip was in flight) -- 0 when there is no
   // presenter (decode-only, or init failed).
-  auto log_regulator_line = [&regulator, &presenter, &present_jitter_ema_ms]() {
+  auto log_regulator_line = [&regulator, &presenter, &present_jitter_ema_ms, &reg_log]() {
+    char line[512];
     if (regulator.enabled()) {
       const uint64_t pend = presenter ? presenter->mailbox_engagements() : 0;
-      std::fprintf(stderr,
+      std::snprintf(line, sizeof(line),
                    "regulator: held=%llu late=%llu replaced=%llu disconts=%llu "
                    "hold_ema=%.2fms present_jitter=%.2fms vsync=%s skips=%llu "
                    "fallback=%llu pend=%llu heals=%llu pdrop=%llu "
                    "chained=%llu chain=%llu chain_max=%llu chains=%llu cuts=%llu "
-                   "alw=%.1fms lslot=%llu\n",
+                   "alw=%.1fms lslot=%llu",
                    static_cast<unsigned long long>(regulator.held_count()),
                    static_cast<unsigned long long>(regulator.late_count()),
                    static_cast<unsigned long long>(regulator.replaced_count()),
@@ -810,10 +815,25 @@ int main(int argc, char** argv) {
                    static_cast<unsigned long long>(regulator.chain_cuts()),
                    regulator.allowance_ms(),
                    static_cast<unsigned long long>(regulator.late_slot_count()));
+      if (presenter) {
+        // present() stage cost over the last window (µs p50/max):
+        // framebuffer acquire (cached dma-buf import + AddFB2), request
+        // build, atomic commit ioctl. The lead (display.vsync_lead_ms) has
+        // to cover their sum; a frame whose sum exceeds it misses its latch
+        // and the next one is pdropped.
+        const auto pt = presenter->present_timing();
+        const size_t used = std::strlen(line);
+        std::snprintf(line + used, sizeof(line) - used,
+                      " present=%u acq=%u/%u req=%u/%u ioctl=%u/%u",
+                      pt.n, pt.p50[0], pt.max[0], pt.p50[1], pt.max[1],
+                      pt.p50[2], pt.max[2]);
+      }
     } else {
-      std::fprintf(stderr, "regulator: off present_jitter=%.2fms\n",
-                   present_jitter_ema_ms);
+      std::snprintf(line, sizeof(line), "regulator: off present_jitter=%.2fms",
+                    present_jitter_ema_ms);
     }
+    std::fprintf(stderr, "%s\n", line);
+    reg_log.write(mono_us(), line);
   };
 #endif
 
@@ -1069,6 +1089,8 @@ int main(int argc, char** argv) {
     last_present_us = t;
     lat.on_present(f.pts_us, t);  // t_release
     presenter->present(f);
+    const auto ci = presenter->last_commit();
+    lat.on_commit(f.pts_us, ci.t_commit_us, ci.bits);
   };
 #endif
   std::function<void()> drain_notes_fn;  // set once a FeedLoop exists; run before lat.on_decoded

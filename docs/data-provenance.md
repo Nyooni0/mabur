@@ -96,6 +96,13 @@ Chronological; each line names the section below that carries the detail.
   `# framelog 2` prints its `flags` column in hex (`0x80`) as `au.log`
   does. A `framelog 1` file carries the same byte in decimal (`128`); the
   columns are otherwise identical. `int(x, 0)` reads both.
+- 2026-10-16 — `# framelog 3` appends `t_commit pbits` (22 columns): when
+  the frame's atomic commit returned and the presenter's commit bits.
+  Rows of `framelog ≤ 2` end at `exact`. The same day `reg.log`
+  (`# reglog 1`) appears beside it: the player's 1 Hz `regulator:` line,
+  whose trailing `present= acq= req= ioctl=` fields are the present()
+  stage split (the first build of the day printed `fd2h= addfb=` in
+  their place, for the few minutes before the framebuffer cache).
 
 ## 2026-09-23 — `link.pre_fec_loss` scale break, twice
 

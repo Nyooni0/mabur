@@ -15,9 +15,10 @@ inline constexpr const char* kSessionMarker = "/tmp/mabur-session";
 
 // Persists a player record into the CURRENT debug session, so it survives
 // power-off (/tmp is tmpfs; the flight-0035 tail was lost exactly that
-// way). Two instances exist: the 1 Hz `lat:` line (lat.log, "# latlog 2")
-// and the per-frame rows behind it (frame.log, "# framelog 2", batched:
-// each second's rows are written together at flush()).
+// way). Three instances exist: the 1 Hz `lat:` line (lat.log, "# latlog 2"),
+// the per-frame rows behind it (frame.log, "# framelog 3", batched: each
+// second's rows are written together at flush()) and the 1 Hz `regulator:`
+// line (reg.log, "# reglog 1").
 //
 // maburplay holds no logging config: it follows the marker maburgs writes.
 // No marker means no session means no file -- which is how one knob in
