@@ -472,7 +472,8 @@ which, and latency/air numbers across that break are not comparable.
 
 When `display.vsync_lock` is on, `reg` becomes hold-to-vblank (grows to
 ~½ panel period mean, up from the old D=12 dejitter hold); `dsp`
-collapses to ≈ lead (`display.vsync_lead_ms`, default 6 ms) + flip
+collapses to ≈ lead (`display.vsync_lead_ms`, 6 ms then, 5 since
+2026-10-17) + flip
 completion, down from the old 10–25 ms beat sweep. Their SUM is
 comparable across the change — total release→latched time moves the way
 the vsync-locked-regulator spec predicts — but the SPLIT between the two
