@@ -408,15 +408,16 @@ truncated.
 **Across an outage.** The requester keeps retrying every 300 ms while the
 link is down — `fec.log`'s `I` rows and the `retries` counter climb
 through the whole outage, and the eventual `H` row's `heal_ms` includes
-that dead time. The drone ignores `idr_epoch` outside `LINKED`
-(`RcAgent` resets `idr_epoch_seen_` to 0 on every session edge), so the
-request just waits; the entering-LINKED IDR it serves on reconnect covers
-whatever broke while unlinked, and that same IDR clears the request. A
-drone restart looks the same from the GS side: the old in-flight base AU
-ends incomplete and arms one request, which the new producer's link-up
-IDR clears. The GS's epoch counter is not reset per session, so the first
-RCF of a new session can land on an epoch the drone has already seen and
-cost one extra IDR before the mismatch resolves.
+that dead time. `RcAgent` only serves a pending GS/chain request while
+`state_ == LINKED`, so the request just waits; the entering-LINKED IDR it
+serves on reconnect covers whatever broke while unlinked, and that same
+IDR clears the request. A drone restart looks the same from the GS side:
+the old in-flight base AU ends incomplete and arms one request, which the
+new producer's link-up IDR clears. The GS's epoch is not reset per
+session, while the drone's `idr_epoch_seen_` is reset to 0 at every
+session edge, so the first RCF of a new session reads as a request:
+absorbed by the link-up IDR when the session starts with one, otherwise
+one extra IDR.
 
 **The 65535-frame GOP is not forever.** With nothing else restarting it
 first, the encoder still emits a GOP-start picture every ~65535 frames —

@@ -524,10 +524,12 @@ See `docs/airtime-model.md` §1 and §7.
     `RcAgent::idr_chain_total()`.
   - The one exception is a **GS-requested** IDR (RCF `idr_epoch`). An epoch
     change raises a pending request that survives a pacer refusal and goes
-    out on the first tick past the floor. maburgs's `RefreshRequester`
-    drives `idr_epoch` now (not just the web GS page): it is frozen
-    waiting on the IDR it asked for, and its own retry is 300 ms. See
-    `docs/fec-nack.md` "Demand refresh".
+    out on the first tick past the floor. maburgs's `RefreshRequester` and
+    the web GS page both drive `idr_epoch`; each retries every 300 ms.
+    Only the web page actually freezes waiting on it — maburplay/MPP
+    conceals and keeps decoding instead (`docs/slices.md`,
+    `docs/web-gs.md` "Known limits"). See `docs/fec-nack.md` "Demand
+    refresh".
   - Session edges (DISC, unconfirmed move, FAILSAFE) clear the pending
     request. The entering-LINKED IDR on a return from FAILSAFE/RENDEZVOUS
     also clears it, so no redundant second IDR follows.
