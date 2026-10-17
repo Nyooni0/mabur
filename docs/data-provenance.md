@@ -103,6 +103,8 @@ Chronological; each line names the section below that carries the detail.
   whose trailing `present= acq= req= ioctl=` fields are the present()
   stage split (the first build of the day printed `fd2h= addfb=` in
   their place, for the few minutes before the framebuffer cache).
+- 2026-10-17 — demand refresh: `# aulog 7` (+vcl column), `feclog 4`
+  (I/H rows), sideport `link.refresh` (docs/fec-nack.md "Demand refresh").
 
 ## 2026-09-23 — `link.pre_fec_loss` scale break, twice
 

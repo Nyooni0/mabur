@@ -203,7 +203,7 @@ void FrameStream::finish(Slot& s, bool complete) {
 // every VPS/SPS/PPS before it is whole, and the slice data (tens of kB)
 // is never copied or scanned. That runs inside the AU's publish tail, and
 // a whole-AU copy plus NAL scan cost ~0.4 ms per refresh frame on the GS.
-void FrameStream::feed_params(const Slot& s) {
+void FrameStream::feed_params(Slot& s) {
   const auto c0 = s.chunks.find(0);
   if (c0 == s.chunks.end()) return;
   const auto& b = c0->second;
@@ -225,6 +225,8 @@ void FrameStream::feed_params(const Slot& s) {
     if (it == s.chunks.end()) return;
     head.insert(head.end(), it->second.begin(), it->second.end());
   }
+  for (const mabur::NalView& v : mabur::split_nals(head.data(), head.size()))
+    if (v.type < 32) { s.lat.vcl_nal = v.type; break; }
   params_.feed(head.data(), head.size());
 }
 
