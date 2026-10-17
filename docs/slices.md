@@ -218,7 +218,7 @@ Bench record: `docs/findings/2026-10-10-slice-salvage.md`.
 - The assembler's hold-back: slice k is only known whole when slice k+1's
   start code arrives, so of a 4-slice picture slices 0–2 decode while the
   air delivers the rest and slice 3 goes in at the close.
-- Refresh-start pictures stay one slice: they decode whole, and pay the
+- IDRs stay one slice: they decode whole, and pay the
   link-mode-off cost. rkvdec2's stream mode is slice-granular — a slice
   handed over in byte parts is not decoded as it arrives (the decoder
   ignores a `str_len` inside a slice, and runs into unwritten bytes when
@@ -242,10 +242,11 @@ Full record: `docs/findings/2026-10-10-slice-salvage.md`.
   in ffmpeg with zero slice-data/CABAC errors. A filled band is a slightly
   stale copy of the previous frame. Enhance fills never propagate; a base
   fill is a reference, so moving content drifts blocky inside that band
-  until the next refresh-start picture (≤ 0.5 s).
+  until the IDR the GS requests for it (`docs/fec-nack.md` "Demand
+  refresh").
 - **Streamed decode** (with FeedLoop): `dec` p50 −2.7 ms (means), `e2e`
   p50 −2.3 ms; ~96 % of AUs stream, the rest are the one-slice
-  refresh starts, which decode whole. Turning rkvdec2 link mode off costs nothing
+  IDRs, which decode whole. Turning rkvdec2 link mode off costs nothing
   measurable. Killing a stream-on maburplay mid-stream: 0 of 10 resets.
 
 ## Choosing the slice count

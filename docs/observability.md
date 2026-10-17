@@ -824,6 +824,12 @@ fps number. Startup logs the resolved mapping and every toggle logs
 START/STOP; the OSD REC field is the live indicator. GPIO failures (pin not
 found, line held by another consumer) are non-fatal and logged once.
 
+The same loopback socket the player uses to tell `maburgs` its `vtx_rec`
+wish also carries one-shot `refresh <reason>` lines — `start`, `resync`,
+`decoder`, `dvr` — each one arming a demand-refresh IDR request
+(`docs/vtx-recorder.md` "Wire"; mechanism: `docs/fec-nack.md` "Demand
+refresh").
+
 ## Tools: which one when
 
 - **Verifying maburgs itself → `tools/bench/ausniff.py`** (on the GS:

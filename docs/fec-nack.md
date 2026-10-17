@@ -365,3 +365,77 @@ end the binary goes in before a config that carries `[nack]` /
 keys). Turning the feature off is config-only on the GS (`[link.nack]
 enable = false`, the shipped default); a drone that is never asked never
 re-sends.
+
+## Demand refresh
+
+The bundle runs the drone with no periodic refresh at all
+(`venc.gop_s = 0` → the SigmaStar SDK's largest GOP, `VENC_GOP_NONE` =
+65535 frames; `venc.intra_refresh_frames = 0`, since the GDR sweep only
+fires at a GOP start and there is none). Healing a damaged base picture is
+therefore on demand: `RefreshRequester` (`gs/src/refresh_requester.h`) in
+`maburgs` decides when the RCF's `idr_epoch` byte changes, and
+`RcAgent` on the drone serves one paced IDR per change
+(`docs/link-adaptation.md` "RcAgent is the only IDR authority").
+
+**Order.** FEC recovery and the software NACK retransmit (above) run
+first, inside `FrameStream`'s reassembly; only once an access unit is
+finished — complete, truncated, or slice-salvaged — does
+`RefreshRequester::note_au()` see it and decide whether to arm. A request
+then rides `idr_epoch` on every RCF until `RcAgent` serves the IDR and a
+later complete base IRAP clears it: FEC → NACK → request → IDR → clear.
+
+**Arms on:** a base AU (`sid 0`) that finishes incomplete (the NACK's
+repair window has already passed); a base AU rebuilt by slice salvage (a
+filled band is a stale reference); any AU the stream force-advanced past
+(`FrameStream::frames_dropped()` rising — its layer is unknown, so it
+counts as base); or one of four one-shot reports from `maburplay` over
+the same loopback control socket that carries the record button's VTX
+wish (`gs/player/src/core_control_client.h`, `docs/vtx-recorder.md`
+"Wire"): `start` (ring open, nothing to arm on yet), `resync` (the ring
+reader skipped AUs), `decoder` (the decode watchdog reset or recreated
+the backend — not raised on an ordinary decode error), and `dvr` (the
+raw DVR opened and needs a key frame to begin on). Never arms on enhance
+damage: nothing references an enhance frame.
+
+**Clears on:** a complete base AU whose first slice NAL is an IRAP
+(16..21), requested or not — a refresh-start (TRAIL_R) picture does not
+clear it, since the GDR sweep that would have produced one is off by
+default anyway. While armed the byte is bumped again every 300 ms
+(`RefreshRequester::kRetryMs`): the expected heal is one RCF period plus
+the IDR's transit, so a retry only means the IDR itself was lost or
+truncated.
+
+**Across an outage.** The requester keeps retrying every 300 ms while the
+link is down — `fec.log`'s `I` rows and the `retries` counter climb
+through the whole outage, and the eventual `H` row's `heal_ms` includes
+that dead time. The drone ignores `idr_epoch` outside `LINKED`
+(`RcAgent` resets `idr_epoch_seen_` to 0 on every session edge), so the
+request just waits; the entering-LINKED IDR it serves on reconnect covers
+whatever broke while unlinked, and that same IDR clears the request. A
+drone restart looks the same from the GS side: the old in-flight base AU
+ends incomplete and arms one request, which the new producer's link-up
+IDR clears. The GS's epoch counter is not reset per session, so the first
+RCF of a new session can land on an epoch the drone has already seen and
+cost one extra IDR before the mismatch resolves.
+
+**The 65535-frame GOP is not forever.** With nothing else restarting it
+first, the encoder still emits a GOP-start picture every ~65535 frames —
+about 18 minutes at 60 fps
+(`docs/findings/2026-10-17-sdk-gop-ceiling.md`). Any chain-break, rung
+change, or demand-refresh IDR restarts the count, so this ceiling only
+matters on a flight with none of those for that long.
+
+**Observability:** `fec.log`'s `I <t_ms> <reason> <epoch>` / `H <t_ms>
+<heal_ms> <retries>` rows (`feclog 4`) and the sideport's `link.refresh`
+block (`docs/observability.md`) carry the same counters;
+`flightreport.py`'s REFRESH section and maburtop's `refresh:` line read
+them.
+
+**What this gives up.** A periodic refresh used to bound how long
+undetected wire corruption — a frame that decodes without error but is
+wrong — could propagate: at most one `venc.gop_s` period. Demand refresh
+has no such bound, because nothing arms it unless FEC/NACK/the stream
+already know a frame is damaged, salvaged, or lost. The only mitigation
+left is the player's own decode-watchdog report (`refresh decoder`),
+which catches a decoder that is visibly failing, not a reference that is
+silently wrong.

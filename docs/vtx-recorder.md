@@ -64,7 +64,11 @@ size         = "1920x1080"      # default venc.size; see "Recording size" below
 The following values are compiled in: fragment 1000 ms, GOP 1 s, a new
 file at 3.9 GB (FAT32 limits a file to 4 GiB), and a writer queue of
 64 AUs (about 1.07 s at 60 fps). Files are named `record-NNNN.mp4` in
-`dir`, using the GS DVR's namer. `maburd` never deletes a file.
+`dir`, using the GS DVR's namer. `maburd` never deletes a file. This
+channel's GOP is its own compiled-in 1 s, independent of `venc.gop_s` on
+the link channel: the onboard recording keeps a periodic keyframe even
+with the link's demand refresh running no periodic refresh of its own
+(`docs/fec-nack.md` "Demand refresh").
 
 ## Recording size — `record.size`
 
