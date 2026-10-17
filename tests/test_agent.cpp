@@ -70,6 +70,8 @@ struct MockActuator : Actuator {
   }
   std::vector<uint8_t> remembered;
   void remember_channel(uint8_t ch) override { remembered.push_back(ch); }
+  std::vector<int> sensor_offsets;
+  void set_sensor_offset(int mfps) override { sensor_offsets.push_back(mfps); }
 };
 
 Config make_cfg() {
@@ -2552,6 +2554,47 @@ TEST(rcf_rec_retries_until_the_actuator_takes_it) {
   auto w3 = make_rcf_wire_rec(4, kRecKnown | kRecOn, vtx);
   agent.on_rc_frame(w3.data(), w3.size(), 220);
   CHECK(act.records.size() == 2);   // failed once, taken once, then latched
+}
+
+// Phase lock: RcAgent hands the RCF snr_off to venc on change only, and
+// keeps it through link loss (the phase barely moves while the link is down).
+static std::vector<uint8_t> make_rcf_wire_snr(uint16_t seq, int16_t off, uint32_t vtx) {
+  Rcf r; r.seq = seq; r.profile = 0x24;
+  r.fec_overhead_base = 1.0; r.fec_overhead_enh = 0.5; r.snr_off = off;
+  return pack_rcf(r, mabur::kDefaultLinkKey, TagCtx{kVrx, vtx, seq});
+}
+
+TEST(rcf_snr_off_reaches_actuator_on_change_only) {
+  auto cfg = make_cfg(); MockActuator act; RcAgent agent(cfg, act); const uint32_t vtx = link_agent(agent, act, cfg);
+  auto a = make_rcf_wire_snr(2, 0, vtx);
+  agent.on_rc_frame(a.data(), a.size(), 200);
+  CHECK(act.sensor_offsets.empty());          // 0 is where the drone already is
+  auto b = make_rcf_wire_snr(3, 20, vtx);
+  agent.on_rc_frame(b.data(), b.size(), 210);
+  auto c = make_rcf_wire_snr(4, 20, vtx);
+  agent.on_rc_frame(c.data(), c.size(), 220);
+  auto d = make_rcf_wire_snr(5, -15, vtx);
+  agent.on_rc_frame(d.data(), d.size(), 230);
+  REQUIRE(act.sensor_offsets.size() == 2);
+  CHECK(act.sensor_offsets[0] == 20);
+  CHECK(act.sensor_offsets[1] == -15);
+}
+
+TEST(rcf_snr_off_survives_failsafe_and_repair) {
+  auto cfg = make_cfg(); MockActuator act; RcAgent agent(cfg, act); const uint32_t vtx = link_agent(agent, act, cfg);
+  auto on = make_rcf_wire_snr(2, 20, vtx);
+  agent.on_rc_frame(on.data(), on.size(), 200);
+  agent.tick(200 + cfg.link.failsafe_ms + 100, RadioHealth{});   // link lost
+  CHECK(agent.state() == RcAgent::State::FAILSAFE);
+  CHECK(act.sensor_offsets.size() == 1);                          // no reset on failsafe
+  const uint32_t vtx2 = ack_agent(agent, act, 136, kVrx, 1900);   // re-pair
+  auto same = make_rcf_wire_snr(3, 20, vtx2);
+  agent.on_rc_frame(same.data(), same.size(), 2000);
+  CHECK(act.sensor_offsets.size() == 1);                          // unchanged value: no call
+  auto zero = make_rcf_wire_snr(4, 0, vtx2);
+  agent.on_rc_frame(zero.data(), zero.size(), 2010);
+  REQUIRE(act.sensor_offsets.size() == 2);
+  CHECK(act.sensor_offsets[1] == 0);                              // back to the trim
 }
 
 // GS-requested IDR (web IDR request): an idr_epoch CHANGE

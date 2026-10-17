@@ -657,6 +657,16 @@ struct RealActuator : mabur::Actuator {
     return true;
   }
 
+  void set_sensor_offset(int mfps) override {
+    if (dry_run) {
+      std::fprintf(stderr, "[dry-run] set_sensor_offset(%d)\n", mfps);
+      return;
+    }
+#ifdef MABUR_HAVE_VENC
+    (void)venc_set_sensor_offset(mfps);
+#endif
+  }
+
   // Auto channel set: RcAgent calls this once per confirmed move, from the
   // agent thread. A failed write is one stderr line, never fatal -- the drone
   // still parks on the right channel this session, it just won't remember it

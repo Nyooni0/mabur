@@ -109,6 +109,11 @@ class Actuator {
   // recorder. true = handed over (the recorder reports its own outcome in
   // Telem::rec_status); RcAgent latches the wish only on true.
   virtual bool set_record(bool on) = 0;
+  // Phase lock: the GS's sensor-rate offset (milli-fps on top of the boot
+  // trim; 0 = the trim's own rate). No return: venc stores it and applies it
+  // from the encoder thread once the trim has locked, clamped to its range.
+  // Default no-op: dry-run and builds without venc have no sensor.
+  virtual void set_sensor_offset(int mfps) { (void)mfps; }
   // A move the GS has confirmed (the first accepted RCF on the new channel):
   // persist it to the state file so the next boot parks there. Default
   // no-op: tests and dry-run have nowhere to write.
@@ -448,6 +453,7 @@ class RcAgent {
   // Last recorder wish the actuator TOOK (-1 = none yet). Only a KNOWN wish
   // (rc::kRecKnown) is applied; link loss never touches it.
   int rec_applied_ = -1;
+  int16_t snr_off_sent_ = 0;  // last offset handed to the actuator
   void intake_arm_state_(uint64_t now_ms);
 
   // GS-requested IDR. The last RCF

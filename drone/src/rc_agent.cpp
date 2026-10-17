@@ -696,6 +696,15 @@ void RcAgent::on_rc_frame(const uint8_t* body, size_t len, uint64_t now_ms) {
       if (want != rec_applied_ && act_.set_record(want == 1)) rec_applied_ = want;
     }
 
+    // Phase lock: the GS's sensor-rate offset, level-triggered in every RCF
+    // and handed over on change. Kept through FAILSAFE and re-pairing: with
+    // the link down the phase drifts at most ~0.15 ms/s per sensor line of
+    // error, and the GS re-locks when the link returns.
+    if (r->snr_off != snr_off_sent_) {
+      act_.set_sensor_offset(r->snr_off);
+      snr_off_sent_ = r->snr_off;
+    }
+
     // GS-requested IDR: a CHANGED epoch is a request.
     // Marked seen on receipt -- pending stays set until tick() serves it, so
     // any number of bumps collapse into one IDR. No silent adopt of the
