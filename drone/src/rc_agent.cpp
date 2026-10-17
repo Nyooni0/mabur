@@ -804,10 +804,10 @@ void RcAgent::tick(uint64_t now_ms, const RadioHealth& health) {
   }
 
   // GS-requested IDR, same tick-entry state rule as the
-  // chain-break consumer above. Unlike a chain break, a refused request is
-  // DEFERRED (pending survives to the next tick): the requester is frozen
-  // and waiting, and dropping would cost it a full retry interval. Still
-  // bounded by idr_due's 100 ms floor.
+  // chain-break consumer above. Like the chain break above, a refused
+  // request is deferred (pending survives to the next tick): the
+  // requester is frozen and waiting, and dropping would cost it a full
+  // retry interval. Still bounded by idr_due's 100 ms floor.
   if (idr_gs_pending_ && state_ == State::LINKED && idr_due(now_ms, /*chain=*/false)) {
     act_.request_idr();
     idr_gs_pending_ = false;

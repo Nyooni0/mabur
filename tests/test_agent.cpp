@@ -2053,6 +2053,14 @@ TEST(chain_break_pending_is_cleared_by_failsafe) {
   // still pending.
   agent.tick(1100, RadioHealth{});
   CHECK(agent.state() == RcAgent::State::FAILSAFE);
+  // note_chain_break()'s intake is unconditional (chain_break_pending_ ->
+  // chain_idr_pending_ happens regardless of state_), so a break raised
+  // while the link is down also arms chain_idr_pending_ -- it just can't
+  // be SERVED until state_ is LINKED again. Only the session-edge clears
+  // (promotion ~:641, the link-up IDR ~:732) stop it from firing as a
+  // stale IDR once the GS reconnects.
+  agent.note_chain_break();
+  agent.tick(1200, RadioHealth{});
   const int before = act.idr_calls;
   const uint32_t vtx2 = ack_agent(agent, act, 136, kVrx, 1400);
   auto w2 = make_rcf_wire(5, encode_profile(PhyMode::HT, 2, 20), 8, vtx2);
@@ -2060,6 +2068,11 @@ TEST(chain_break_pending_is_cleared_by_failsafe) {
   CHECK(act.idr_calls == before + 1);
   agent.tick(1700, RadioHealth{});
   CHECK(act.idr_calls == before + 1);         // the stale chain request did not survive
+  // REVERT CHECK: drop the `chain_idr_pending_ = false;` added at the
+  // promotion block (~:641) AND at the link-up IDR (~:732) and the
+  // t=1700 tick's chain holdoff (last served at t=150) and pacer floor
+  // (last_idr_ms_ set to 1500 by the link-up IDR) have both lapsed, so it
+  // serves the leaked request and idr_calls lands at before + 2.
 }
 
 // 15. A refused encoder verb must not be latched as applied. Before this,
