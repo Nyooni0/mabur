@@ -11,6 +11,12 @@
 // Owns the per-card NhmWindowTracker: an NHM reading counts only if this
 // sampler armed it, on the same channel, with no scout dwell and no core
 // retune since (the two generation counters the core bumps).
+// Owns the per-card device-use lock (hold_card): one pass holds a card's
+// lock across all of that card's reads, and the card lifecycle's
+// stop/reopen, the core's dwell burst and the in-flight scout's dwell take
+// the same lock, so the reads never land on a card being torn down or
+// tuned away and back. The core's single retunes and width changes do not
+// take it: the tune generation already voids an arm they span.
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -92,10 +98,16 @@ class WindowSampler {
   std::optional<WindowRecord> take();     // core thread
   uint64_t dropped() const { return dropped_.load(std::memory_order_relaxed); }
 
+  // Card i's device-use lock, held for as long as the returned lock lives.
+  // Waits for at most one in-flight pass on that card. Never call stop()
+  // while holding it: the pass stop() joins may be waiting on it.
+  std::unique_lock<std::mutex> hold_card(size_t i);
+
  private:
   std::vector<LinkCard*> cards_;
   WindowSamplerCfg cfg_;
   WindowGates gates_;
+  std::vector<std::mutex> card_mu_;          // per-card device-use lock (hold_card)
   std::vector<NhmWindowTracker> trackers_;   // sampling thread only (after reset_req_)
   std::atomic<bool> reset_req_{false};
   std::atomic<uint32_t> epoch_{0};           // bumped by reset(); pins publish() to its pass

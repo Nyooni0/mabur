@@ -1044,8 +1044,15 @@ static int run_radio(const maburgs::Config& cfg) {
       // before the scout thread exists.
       if (!fe.alive() && !(chan.scout_working() && chan.scout_owns_card(i)) &&
           now_ms_u >= retry_at_ms[static_cast<size_t>(i)]) {
-        fe.stop();
-        if (!fe.open_and_start())
+        bool opened = false;
+        {
+          // Off the card's device first: a window-sampler pass or an
+          // in-flight dwell on it finishes before stop() frees the device.
+          auto hold = chan.hold_card(i);
+          fe.stop();
+          opened = fe.open_and_start();
+        }
+        if (!opened)
           std::fprintf(stderr, "card %d: open failed, retrying\n", i);
         else {
           // USB: InitWrite tunes start_ch; the relay re-asserts its last target.

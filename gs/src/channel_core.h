@@ -168,6 +168,12 @@ class ChannelCore {
   bool scout_working() const { return scout_ && scout_->working(); }       // card reopen gate
   bool scout_owns_card(int card) const { return scout_owns_() && card == scout_card_; }  // TX snapshots
   uint64_t sampler_dropped() const { return sampler_ ? sampler_->dropped() : 0; }
+  // The card's device-use lock (WindowSampler::hold_card): the card
+  // lifecycle holds it across stop() + open_and_start() so no window read
+  // or dwell is on the device while it is torn down. Not across shutdown().
+  std::unique_lock<std::mutex> hold_card(int card) {
+    return sampler_->hold_card(static_cast<size_t>(card));
+  }
 
   // ---- test seam (threaded = false) ----
   void run_scout_step();      // one ChannelScout::run_once()

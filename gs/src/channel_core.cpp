@@ -628,12 +628,20 @@ void ChannelCore::step_controller_(const ChannelTickIn& in) {
       // generation (not the channel number) can mark an NHM arm as stale
       // if it spans the burst; bump before and after so a read on either
       // side of the retune-away sees a generation newer than its arm.
+      // The burst holds the card's device-use lock throughout: the
+      // sampler's op-channel check cannot see the retune-away (the card
+      // stores its channel only after each retune returns), and a pass
+      // landing mid-burst would cut the dwells' FA/CCA delta and re-arm
+      // NHM over theirs. Taken after inflight_mu_, the order every holder
+      // of both follows.
+      auto hold = sampler_->hold_card(static_cast<size_t>(burst_card));
       tune_gen_[static_cast<size_t>(burst_card)].fetch_add(1, std::memory_order_release);
       std::vector<ScoutDwell> recs;
       for (const auto& v : inflight_->burst(plan_.op(), recs)) ranker_.add(v);
-      for (const auto& d : recs) sink_.dwell(now_ms, burst_card, d);
       cur_ch_[static_cast<size_t>(burst_card)] = fe.channel();
       tune_gen_[static_cast<size_t>(burst_card)].fetch_add(1, std::memory_order_release);
+      hold.unlock();
+      for (const auto& d : recs) sink_.dwell(now_ms, burst_card, d);
       fill_hop_targets(ht);
     }
   }
@@ -818,15 +826,23 @@ void ChannelCore::inflight_body_() {
     for (int i = 0; i < 20 && au_seq_.load() == s0; ++i) sleep_(1);
   }
   std::lock_guard<std::mutex> ilk(inflight_mu_);
-  inflight_->set_radio(fe);
-  dwell_card_.store(card);
-  dwell_busy_.store(true);
   ScoutDwell d;
   HopVisit v;
-  const bool ok = inflight_->dwell(*dwell_ch, fe.channel(), d, v);
-  dwell_gen_[static_cast<size_t>(card)].fetch_add(1, std::memory_order_release);
-  dwell_busy_.store(false);
-  dwell_card_.store(-1);
+  bool ok = false;
+  {
+    // The card's device-use lock (after inflight_mu_, as the burst takes
+    // it): the sampler skips a dwelling card, but its dwell_busy check and
+    // this dwell are otherwise unordered; the lock makes a pass either
+    // finish before the dwell starts or start after it has ended.
+    auto hold = sampler_->hold_card(static_cast<size_t>(card));
+    inflight_->set_radio(fe);
+    dwell_card_.store(card);
+    dwell_busy_.store(true);
+    ok = inflight_->dwell(*dwell_ch, fe.channel(), d, v);
+    dwell_gen_[static_cast<size_t>(card)].fetch_add(1, std::memory_order_release);
+    dwell_busy_.store(false);
+    dwell_card_.store(-1);
+  }
   std::lock_guard<std::mutex> lk(dwell_mu_);
   dwell_recs_.emplace_back(card, d);
   if (ok) dwell_visits_.push_back(v);

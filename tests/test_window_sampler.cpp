@@ -1,5 +1,7 @@
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <thread>
 #include <vector>
 #include "fake_link_card.h"
@@ -172,4 +174,92 @@ TEST(thread_publishes_and_stops) {
   CHECK(s.take().has_value());
   CHECK(s.dropped() >= 1);   // several windows elapsed, only the newest is kept
 }
+// A card whose next NHM read blocks until the test releases it, and which
+// signals the first device call of a pass (the survey rebase).
+struct GatedCard : FakeCard {
+  std::mutex m;
+  std::condition_variable cv;
+  bool block_next_read = false, in_read = false, release = false, touched = false;
+  maburgs::SurveyWindow read_survey_window() override {
+    { std::lock_guard<std::mutex> lk(m); touched = true; }
+    cv.notify_all();
+    return FakeCard::read_survey_window();
+  }
+  maburgs::NhmBusyRead read_nhm_busy() override {
+    std::unique_lock<std::mutex> lk(m);
+    if (block_next_read) {
+      block_next_read = false;
+      in_read = true;
+      cv.notify_all();
+      cv.wait(lk, [&] { return release; });
+      in_read = false;
+    }
+    return nhm_read;
+  }
+};
+
+TEST(hold_card_waits_for_an_in_flight_pass) {
+  GatedCard card;
+  card.ch = 40;
+  card.block_next_read = true;
+  Gates gates(1);
+  WindowSamplerCfg cfg; cfg.window_ms = 20; cfg.nhm_period_4us = 35000; cfg.busy_dbm = -83;
+  WindowSampler s({&card}, cfg, gates.view());
+  s.start([] { return uint64_t{1000}; },
+          [](int ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); });
+  {
+    std::unique_lock<std::mutex> lk(card.m);
+    card.cv.wait(lk, [&] { return card.in_read; });   // the sampler is inside the card's pass
+  }
+  std::mutex hm;
+  std::condition_variable hcv;
+  bool held = false, done = false;
+  std::thread holder([&] {
+    auto h = s.hold_card(0);
+    { std::lock_guard<std::mutex> lk(hm); held = true; }
+    hcv.notify_all();
+    std::unique_lock<std::mutex> lk(hm);
+    hcv.wait(lk, [&] { return done; });
+  });
+  {
+    std::unique_lock<std::mutex> lk(hm);
+    // The pass is blocked mid-read: the holder must not get the card.
+    CHECK(!hcv.wait_for(lk, std::chrono::milliseconds(100), [&] { return held; }));
+  }
+  { std::lock_guard<std::mutex> lk(card.m); card.release = true; }
+  card.cv.notify_all();
+  {
+    std::unique_lock<std::mutex> lk(hm);
+    hcv.wait(lk, [&] { return held; });   // the pass ended: now it does
+    CHECK(held);
+    done = true;
+  }
+  hcv.notify_all();
+  holder.join();
+  s.stop();
+}
+
+TEST(hold_card_excludes_a_pass) {
+  GatedCard card;
+  card.ch = 40;
+  Gates gates(1);
+  WindowSamplerCfg cfg; cfg.window_ms = 150; cfg.nhm_period_4us = 35000; cfg.busy_dbm = -83;
+  WindowSampler s({&card}, cfg, gates.view());
+  auto hold = s.hold_card(0);
+  std::thread pass([&] { s.publish(s.sample_once(1000)); });
+  {
+    std::unique_lock<std::mutex> lk(card.m);
+    // Held: the pass must not touch the card at all.
+    CHECK(!card.cv.wait_for(lk, std::chrono::milliseconds(100), [&] { return card.touched; }));
+  }
+  hold.unlock();
+  {
+    std::unique_lock<std::mutex> lk(card.m);
+    card.cv.wait(lk, [&] { return card.touched; });
+    CHECK(card.touched);
+  }
+  pass.join();
+  CHECK(s.take().has_value());
+}
+
 MTEST_MAIN

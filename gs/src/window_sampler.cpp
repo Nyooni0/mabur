@@ -8,7 +8,7 @@
 namespace maburgs {
 
 WindowSampler::WindowSampler(std::vector<LinkCard*> cards, WindowSamplerCfg cfg, WindowGates gates)
-    : cards_(std::move(cards)), cfg_(cfg), gates_(gates), trackers_(cards_.size()) {}
+    : cards_(std::move(cards)), cfg_(cfg), gates_(gates), card_mu_(cards_.size()), trackers_(cards_.size()) {}
 
 WindowSampler::~WindowSampler() { stop(); }
 
@@ -28,6 +28,10 @@ WindowRecord WindowSampler::sample_once(uint64_t now_ms) {
   for (size_t i = 0; i < cards_.size(); ++i) {
     LinkCard& fe = *cards_[i];
     CardSample& s = rec.cards[i];
+    // The card's whole pass under its device-use lock: the card lifecycle
+    // (stop/reopen), the core's dwell burst and the scout dwell take the
+    // same lock, so none of them overlaps these reads.
+    std::lock_guard<std::mutex> card_lk(card_mu_[i]);
     // Always: a relay's survey window rebases on every read, usable or not.
     s.survey = fe.read_survey_window();
     const bool blocked =
@@ -53,6 +57,10 @@ WindowRecord WindowSampler::sample_once(uint64_t now_ms) {
     s.valid = true;
   }
   return rec;
+}
+
+std::unique_lock<std::mutex> WindowSampler::hold_card(size_t i) {
+  return std::unique_lock<std::mutex>(card_mu_.at(i));
 }
 
 void WindowSampler::reset(uint64_t now_ms) {
