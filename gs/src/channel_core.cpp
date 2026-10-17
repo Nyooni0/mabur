@@ -188,6 +188,9 @@ ChannelTickOut ChannelCore::tick(const ChannelTickIn& in) {
                     static_cast<unsigned>(ev.from), static_cast<unsigned>(ev.to)));
   }
   step_mechanical_retune_();
+  // Again at the end: a scout search or relay sweep started during this
+  // tick is gated before the sampler's next pass, not a tick later.
+  step_gates_();
   // s1_hop_loss is fed from the same base-sid arrival counters as the
   // assembler's s1_loss, on the same now_ms.
   // Fed at the end of tick() (old main.cpp: right after fstream.poll);

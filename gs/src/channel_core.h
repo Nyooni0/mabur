@@ -275,8 +275,9 @@ class ChannelCore {
   std::atomic<bool> scout_working_atomic_{false};
   std::vector<std::atomic<uint32_t>> dwell_gen_;
   // Bumped after every core-thread retune / width change of a card
-  // (step_mechanical_retune_, step_width_resync_): pins an NHM arm to the
-  // tune the card had when it was armed.
+  // (step_mechanical_retune_, step_width_resync_) and on both sides of a
+  // dwell burst (step_controller_): pins an NHM arm to the tune the card
+  // had when it was armed.
   std::vector<std::atomic<uint32_t>> tune_gen_;
   // The sampler's view of the op channel and of "the core owns this card
   // right now" (boot scout on it, relay sweep on it), written each tick.

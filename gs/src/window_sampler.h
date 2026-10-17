@@ -78,10 +78,12 @@ class WindowSampler {
 
   bool active() const;                    // in_session && !cal_running
   WindowRecord sample_once(uint64_t now_ms);
-  // Hop-inactive edge: drop every arm and the mailbox, restart the cadence
-  // so the first window after the edge is a full window_ms away, and bump
-  // the reset epoch so a pass already in flight can never republish its
-  // pre-edge record once this returns.
+  // Hop-inactive edge: drop every arm and the mailbox, bump the reset epoch
+  // so a pass already in flight can never republish its pre-edge record
+  // once this returns, and (stepped mode) restart the cadence so the first
+  // window after the edge is a full window_ms away. The thread keeps its
+  // own phase; its first record after the edge only primes the core's
+  // per-card baselines.
   void reset(uint64_t now_ms);
   // Stepped mode: one cadence check; publishes when a window is due and active.
   void step(uint64_t now_ms);
@@ -90,7 +92,9 @@ class WindowSampler {
   void step_now(uint64_t now_ms);
   // Threaded mode: one thread, sleep_ms(window_ms) between passes.
   void start(NowMsFn now_ms, SleepFn sleep_ms);
-  void stop();                            // idempotent; joins
+  // Idempotent; joins. Returns after up to one sleep_ms(window_ms) plus a
+  // pass, so callers order stop() before tearing the cards down.
+  void stop();
 
   // Newest wins; a replaced record is counted as dropped and its FA/CCA
   // delta folded into the newer one, but a record sampled under an epoch

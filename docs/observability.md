@@ -236,9 +236,15 @@ is `null` until any hop event has fired. `sweep_timeouts` counts relay
 (`max(1000, passes·n·(observe_ms+40)+300)` ms); 0 on a GS that never sweeps
 a relay. `sampler_dropped` counts channel-health window records the
 sampler thread published that the core loop never consumed (replaced by
-the next window): 0 unless the core loop fell a whole `hop.window_ms`
-behind. maburtop's header shows `hop <state>/<verdict>`. Full key
-semantics, the OSD `(h)` mark and the `flightreport.py` HOP section:
+the next window): the core consumes only the newest record, and a
+replaced one hands its FA/CCA delta on to the record that replaced it; a
+record sampled before a hop-active edge is discarded uncounted. It grows
+only when the core loop falls a whole `hop.window_ms` behind -- which a
+dwell burst does by design: the core runs the burst for longer than a
+window, so a record published just before the burst can be replaced by
+the one the sampler publishes once the burst releases the card.
+maburtop's header shows `hop <state>/<verdict>`. Full key semantics, the
+OSD `(h)` mark and the `flightreport.py` HOP section:
 `docs/inflight-channel-hop.md`.
 
 ### `drone` — telemetry from T_TELEM

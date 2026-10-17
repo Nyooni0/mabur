@@ -135,13 +135,21 @@ one `WindowRecord`; `ChannelCore::step_hop_edge_and_window_` takes the
 latest record and runs the verdict on it, reading its own in-memory inputs
 (per-card CRC failures, RSSI/SNR EMAs, recovered symbols, AU count) at that
 moment. Per-window spans (`own_air_pct`) are measured between sample
-instants. On the Radxa the sampler is a thread; with `threaded = false`
-(tests, the web GS without `core_threads`) `tick()` runs one sampler step
-inline. The core tells the sampler what it may touch through atomics: the
-op channel, a card the boot scout owns or a relay sweep holds, a dwell in
-progress, and two per-card generation counters -- one bumped after every
-in-flight scout dwell, one after every core-thread retune or width change
--- that pin an NHM arm to the state the card had when it was armed.
+instants. The sampler runs on its own thread wherever `ChannelCore` runs
+threaded -- maburgs, and the web GS page build (`core_threads`); with
+`threaded = false` (tests, the web GS without `core_threads`) `tick()` runs
+one sampler step inline. The core tells the sampler what it may touch
+through atomics: the op channel, a card the boot scout owns or a relay
+sweep holds, a dwell in progress, and two per-card generation counters --
+one bumped after every in-flight scout dwell, one around every core-thread
+retune, width change or dwell burst -- that pin an NHM arm to the state the
+card had when it was armed. Device use itself is serialized per card by
+the sampler's device-use lock (`WindowSampler::hold_card`, forwarded as
+`ChannelCore::hold_card`): a sampler pass holds it across all of a card's
+reads, the core's dwell burst and the in-flight scout's dwell hold it for
+their whole retune-away-and-back, and maburgs's card lifecycle holds it
+across `stop()` + `open_and_start()`, so no read lands on a card being
+torn down or tuned away. Lock order: `inflight_mu_` before the card lock.
 
 On every edge of `hop_active`, `ChannelCore::
 step_hop_edge_and_window_()` resets the engine, re-primes the `au_seq` and
