@@ -37,6 +37,7 @@ struct CardSample {
 struct WindowRecord {
   uint64_t t_ms = 0;                    // sample instant, the core's ms clock
   std::vector<CardSample> cards;
+  uint32_t epoch = 0;                   // reset generation this record was sampled under
 };
 
 struct WindowSamplerCfg {
@@ -72,7 +73,9 @@ class WindowSampler {
   bool active() const;                    // in_session && !cal_running
   WindowRecord sample_once(uint64_t now_ms);
   // Hop-inactive edge: drop every arm and the mailbox, restart the cadence
-  // so the first window after the edge is a full window_ms away.
+  // so the first window after the edge is a full window_ms away, and bump
+  // the reset epoch so a pass already in flight can never republish its
+  // pre-edge record once this returns.
   void reset(uint64_t now_ms);
   // Stepped mode: one cadence check; publishes when a window is due and active.
   void step(uint64_t now_ms);
@@ -83,7 +86,9 @@ class WindowSampler {
   void start(NowMsFn now_ms, SleepFn sleep_ms);
   void stop();                            // idempotent; joins
 
-  void publish(WindowRecord r);           // newest wins; a replaced record is counted
+  // Newest wins; a replaced record is counted as dropped, but a record
+  // sampled under an epoch reset() has since moved past is discarded silently.
+  void publish(WindowRecord r);
   std::optional<WindowRecord> take();     // core thread
   uint64_t dropped() const { return dropped_.load(std::memory_order_relaxed); }
 
@@ -93,6 +98,7 @@ class WindowSampler {
   WindowGates gates_;
   std::vector<NhmWindowTracker> trackers_;   // sampling thread only (after reset_req_)
   std::atomic<bool> reset_req_{false};
+  std::atomic<uint32_t> epoch_{0};           // bumped by reset(); pins publish() to its pass
   uint64_t last_ms_ = 0;                     // stepped cadence (core thread)
   std::mutex mu_;
   std::optional<WindowRecord> box_;

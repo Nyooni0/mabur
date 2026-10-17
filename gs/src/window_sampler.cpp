@@ -22,6 +22,7 @@ WindowRecord WindowSampler::sample_once(uint64_t now_ms) {
     for (auto& t : trackers_) t.invalidate();
   WindowRecord rec;
   rec.t_ms = now_ms;
+  rec.epoch = epoch_.load(std::memory_order_acquire);
   rec.cards.resize(cards_.size());
   const uint8_t op = gates_.op.load(std::memory_order_relaxed);
   for (size_t i = 0; i < cards_.size(); ++i) {
@@ -59,6 +60,7 @@ void WindowSampler::reset(uint64_t now_ms) {
   last_ms_ = now_ms;
   std::lock_guard<std::mutex> lk(mu_);
   box_.reset();
+  epoch_.fetch_add(1, std::memory_order_release);
 }
 
 void WindowSampler::step(uint64_t now_ms) {
@@ -91,6 +93,11 @@ void WindowSampler::stop() {
 
 void WindowSampler::publish(WindowRecord r) {
   std::lock_guard<std::mutex> lk(mu_);
+  // A record sampled before the last reset() belongs to a pass that was
+  // mid-read across the reset edge; it must not land in a mailbox the
+  // core has already been told is clear, and it is not a dropped sample
+  // either -- it was never going to be a live window.
+  if (r.epoch != epoch_.load(std::memory_order_acquire)) return;
   if (box_) dropped_.fetch_add(1, std::memory_order_relaxed);
   box_ = std::move(r);
 }

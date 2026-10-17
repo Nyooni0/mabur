@@ -123,6 +123,17 @@ TEST(reset_drops_arms_and_the_mailbox) {
   CHECK(!g.s->sample_once(1250).cards[0].nhm_busy_pct);   // the old arm is gone
 }
 
+TEST(record_sampled_before_reset_is_not_published) {
+  Rig g(1);
+  auto r = g.s->sample_once(1000);
+  g.s->reset(1100);
+  g.s->publish(std::move(r));
+  CHECK(!g.s->take().has_value());
+  CHECK(g.s->dropped() == 0);
+  g.s->publish(g.s->sample_once(1250));
+  CHECK(g.s->take().has_value());
+}
+
 TEST(mailbox_keeps_newest_and_counts_dropped) {
   Rig g(1);
   g.s->publish(g.s->sample_once(1000));
