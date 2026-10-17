@@ -56,11 +56,16 @@ and 216000 was tried. Both the bitrate verb and the fps verb re-apply the
 GOP without error at 65535 (`{"ok":true}`, `> FPS delivered 30, RC fpsNum
 30, gop 65535 (bind 90:30)`, then 60 back, proc still `CBR65535`).
 
-**No IDR arrives on a timer.** From the top rung (446.0 s) to the first
-fps-verb test (619.9 s), 173 s, the only parameter-set AUs are the four
-at the two writes and their re-asserts. Every IDR is 7.3 to 7.6 kB on the
-base layer (`min_iqp` 34 holds it well below the ~23 kB base P frames),
-with `dq` 0 or 1 ms.
+**No IDR arrives on a timer within the run.** From the top rung
+(446.0 s) to the first fps-verb test (619.9 s), 173 s, the only
+parameter-set AUs are the four at the two writes and their re-asserts.
+The SDK still holds a GOP, though: 65535 frames is about 18 min at
+60 fps, so a stream that goes that long with no bitrate change, chain
+break or GS request still gets one GOP-start picture at the cap
+interval. No run here lasted 18 min without another IDR restarting the
+GOP, so that residual refresh was not observed. Every IDR is 7.3 to
+7.6 kB on the base layer (`min_iqp` 34 holds it well below the ~23 kB
+base P frames), with `dq` 0 or 1 ms.
 
 **The step takes effect within the same second and settles.** Seconds
 around the writes (session mono seconds; the 7 Mbit/s write landed at
@@ -115,9 +120,14 @@ Restart 1 was stopped 34 s after the top to try 216000.
 `VENC_GOP_NONE` is 65535 frames, 18 min at 60 fps: the largest count
 tried that the star6e SDK takes. 216000 is refused, and the refusal is
 at `MI_VENC_StartRecvPic`, not `CreateChn`, so a bad count kills the
-channel rather than being clamped. With no periodic refresh the stream
-carries an IDR only when the encoder attributes change: a bitrate step
-takes effect within the same second, settles in the next, keeps `dq` at
-1 ms or less, and the ladder climbs 0 → 4 in 5.2 s as it did at 0.5 s
-and 10 s GOPs. What this does not exercise: the chain-break IDR path
-(clean bench, no losses), and demote/promote under real fades.
+channel rather than being clamped. The GOP the SDK takes is below an
+hour (one hour, 216000, is refused), so "no periodic refresh" is really
+one GOP-start picture per 65535 frames (about 18 min at 60 fps) whenever
+nothing else restarts the GOP first; that residual refresh is left as it
+is, not worked around, and was not observed in these runs. Short of that
+interval the stream carries an IDR only when the encoder attributes
+change: a bitrate step takes effect within the same second, settles in
+the next, keeps `dq` at 1 ms or less, and the ladder climbs 0 → 4 in
+5.2 s as it did at 0.5 s and 10 s GOPs. What this does not exercise: the
+chain-break IDR path (clean bench, no losses), demote/promote under real
+fades, and the 18 min residual GOP-start picture itself.
