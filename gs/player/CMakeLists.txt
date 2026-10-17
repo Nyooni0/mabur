@@ -20,6 +20,7 @@ add_library(mabur_player_core STATIC
   src/osd_palette.cpp
   src/in_formats.cpp
   src/frame_regulator.cpp
+  src/phase_lock.cpp
   src/lat_tracker.cpp
   src/lat_log.cpp
   src/splash_image.cpp
