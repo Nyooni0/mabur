@@ -137,4 +137,19 @@ TEST(first_bump_at_time_zero) {                                     // Review Fo
   CHECK(q.epoch() == 1);                  // no double bump on the same instant
 }
 
+TEST(retry_and_heal_rows_keep_the_arming_reason) {
+  RefreshRequester q;
+  q.request(R::kStart, 0);
+  q.note_au(0, false, false, 0, 100);     // hole while armed: counted, reason not changed
+  q.poll(300);                            // retry
+  q.note_au(0, true, false, 19, 400);     // IRAP clears
+  auto ev = q.take_events();
+  REQUIRE(ev.size() == 3);
+  CHECK(ev[0].kind == 'I' && ev[0].reason == R::kStart);  // initial request
+  CHECK(ev[1].kind == 'I' && ev[1].reason == R::kStart);  // the retry
+  CHECK(ev[2].kind == 'H' && ev[2].reason == R::kStart);  // the heal
+  CHECK(q.counters().by_reason[static_cast<size_t>(R::kStart)] == 1);
+  CHECK(q.counters().by_reason[static_cast<size_t>(R::kHole)] == 1);  // hole still counted
+}
+
 MTEST_MAIN
