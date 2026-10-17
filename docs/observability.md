@@ -161,6 +161,20 @@ by `link.nack.min_lead_ms` because the answer could not land before the
 deadline. The drone side is `drone.nack` (below). maburtop draws a `nack:`
 line in the LADDER panel. Design: `docs/fec-nack.md`.
 
+### `link.refresh` — demand refresh
+
+`link.refresh{armed, requests, retries, heals, heal_ms_last, by_reason{hole,
+salvaged, lost, start, resync, decoder, dvr}}`: the GS's `RefreshRequester`,
+counters cumulative since the daemon started. `armed` is true while a
+request is outstanding (waiting on a complete base IRAP to clear it);
+`requests` counts arming events, `retries` the repeated asks before each one
+cleared, `heals` completed clears and `heal_ms_last` the most recent
+arm-to-heal span; `by_reason` tallies `requests` by what armed it. maburtop
+draws a `refresh:` line in the LADDER panel, right after `nack:`, folding
+`start`/`resync`/`decoder`/`dvr` into one `player` figure. Mechanism:
+`docs/fec-nack.md` "Demand refresh"; the per-request/heal trace is
+`fec.log` below.
+
 ### `cards[]` — per card
 
 - `id`, `up`, `kind` (`"usb"` | `"relay"`; relays follow the USB cards),
@@ -437,7 +451,11 @@ timestamp digit, so an episode row is still distinguishable by its leading
 is whatever armed it — `hole`, `salvaged`, `lost`, `start`, `resync`,
 `decoder`, `dvr` — and a retry repeats the same reason), and
 `H <t_ms> <heal_ms> <retries>` logs a complete base IRAP clearing that
-request. `load_feclog()` skips both; they are read by `load_refresh_rows`.
+request. `load_feclog()` skips both; they are read by `load_refresh_rows`,
+and `flightreport.py`'s REFRESH section (requests by reason, retries,
+heal_ms distribution, and how many requests fall within 2 s of a ladder
+demote / a FEC episode) prints from it — on a bare `fec.log` argument and
+in session mode alike.
 
 ### `scan.log` (`scanlog 6`)
 
@@ -539,7 +557,8 @@ highest-numbered session under `/media/dvr/log` — highest index, never
 newest mtime).
 
 - `tools/flightreport.py` — the post-flight report over the whole session
-  (sections named above, plus BW40, NACK, wall/rung-store, episode reports).
+  (sections named above, plus BW40, NACK, REFRESH, wall/rung-store, episode
+  reports).
 - `tools/flightjitter.py` — reproduces the player's jitter EMA from the AU
   rows (arrival basis `t_complete`), splits it into size-explained vs
   residual (`docs/airtime-model.md` §4), and classifies each stutter event —

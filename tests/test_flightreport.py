@@ -1970,6 +1970,49 @@ def test_session_dir_mode_prints_fec_section():
     assert "FEC EPISODES" in result.stdout, result.stdout
 
 
+class RefreshReportTest(unittest.TestCase):
+    # The second FEC episode row sits at t=12000, 2.5 s after the dvr
+    # request at t=9000 -- outside the 2 s join window -- so only the
+    # hole request at t=1052 (0.052 s before the first episode's t=1000)
+    # lines up with an episode.
+    FEC = ("feclog 4\n"
+           "1000 0 4 40 0.50 10 7 12 11 4 1 0 32 32\n"
+           "I 1052 hole 1\n"
+           "I 1352 hole 2\n"
+           "H 1480 428 1\n"
+           "I 9000 dvr 3\n"
+           "H 9120 120 0\n"
+           "12000 1 4 40 0.25 90 3 3 3 0 0 0 8 32\n")
+
+    def test_episode_loader_skips_request_rows(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "fec.log")
+            open(p, "w").write(self.FEC)
+            rows = flightreport.load_feclog(p)
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["rtx"], 4)
+
+    def test_refresh_rows_and_report(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "fec.log")
+            open(p, "w").write(self.FEC)
+            rr = flightreport.load_refresh_rows(p)
+            self.assertEqual([r["reason"] for r in rr["I"]], ["hole", "hole", "dvr"])
+            self.assertEqual(rr["H"][0]["heal_ms"], 428)
+            ctl_E = [{"t_ms": 1500.0, "from": 4, "to": 3, "reason": "s3_residual"}]
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                flightreport.print_refresh_report(rr, ctl_E=ctl_E, fec_rows=flightreport.load_feclog(p))
+            text = out.getvalue()
+            self.assertIn("REFRESH", text)
+            self.assertIn("hole=1", text)        # requests by reason (retries excluded)
+            self.assertIn("dvr=1", text)
+            self.assertIn("retries=1", text)
+            self.assertIn("heal_ms p50/p90/max=120/428/428", text)
+            self.assertIn("with demote within 2 s: 1", text)
+            self.assertIn("with fec episode within 2 s: 1", text)
+
+
 if __name__ == "__main__":
     test_fec_section_counterfactual_overhead_per_sid_and_rung()
     test_session_dir_mode_prints_fec_section()

@@ -863,6 +863,63 @@ def load_feclog(path):
     return rows
 
 
+def load_refresh_rows(path):
+    """feclog 4 request rows (gs/src/fec_log.h): `I <t_ms> <reason> <epoch>`
+    per IDR request the GS sent (a retry repeats the arming reason) and
+    `H <t_ms> <heal_ms> <retries>` per complete base IRAP that cleared it.
+    Older feclog versions have none; both lists come back empty."""
+    I, H = [], []
+    with open(path) as f:
+        for line in f:
+            tok = line.split()
+            if len(tok) != 4:
+                continue
+            if tok[0] == "I":
+                I.append({"t_ms": float(tok[1]), "reason": tok[2], "epoch": int(tok[3])})
+            elif tok[0] == "H":
+                H.append({"t_ms": float(tok[1]), "heal_ms": int(tok[2]), "retries": int(tok[3])})
+    return {"I": I, "H": H}
+
+
+def print_refresh_report(rr, ctl_E=None, fec_rows=None):
+    """REFRESH (demand refresh): IDR requests the GS raised because its base
+    picture was damaged and nothing periodic would heal it. A request is one
+    arming (the first I row of a run); the I rows after it before the next H
+    are retries. Each request is lined up against the ladder's demotes and
+    the FEC episodes so the NACK -> IDR -> demote stack reads per episode."""
+    I, H = rr["I"], rr["H"]
+    if not I and not H:
+        return
+    # Walk I and H rows in time order; a run starts at an I row while idle
+    # and ends at the next H row.
+    events = sorted([("I", r) for r in I] + [("H", r) for r in H], key=lambda e: e[1]["t_ms"])
+    requests, by_reason, retries, armed = [], {}, 0, False
+    for kind, r in events:
+        if kind == "H":
+            armed = False
+        elif armed:
+            retries += 1
+        else:
+            armed = True
+            requests.append(r)
+            by_reason[r["reason"]] = by_reason.get(r["reason"], 0) + 1
+    span_s = max(1e-9, (events[-1][1]["t_ms"] - events[0][1]["t_ms"]) / 1000.0)
+    print("REFRESH (demand refresh, fec.log I/H rows)")
+    print(f"  requests={len(requests)} ({len(requests) / span_s * 60:.1f}/min) "
+          + " ".join(f"{k}={v}" for k, v in sorted(by_reason.items()))
+          + f" retries={retries}")
+    hm = sorted(h["heal_ms"] for h in H)
+    if hm:
+        print(f"  heals={len(hm)} heal_ms p50/p90/max={_pct(hm, 0.5)}/{_pct(hm, 0.9)}/{hm[-1]}")
+    def near(rows, t, win=2000.0):
+        return any(abs(x["t_ms"] - t) <= win for x in rows)
+    if ctl_E is not None:
+        demotes = [e for e in ctl_E if e["to"] < e["from"]]
+        print(f"  with demote within 2 s: {sum(1 for r in requests if near(demotes, r['t_ms']))}")
+    if fec_rows is not None:
+        print(f"  with fec episode within 2 s: {sum(1 for r in requests if near(fec_rows, r['t_ms']))}")
+
+
 def fec_ov_req(m, r, ov):
     """The overhead this episode would have needed. At overhead x the same
     lost air carries m*(1+ov)/(1+x) sources (an aggregate is a fixed number
@@ -1621,6 +1678,7 @@ def print_hop_report(scanlog, ctllog):
 def main(path, aulog=None, probelog_path=None, scanlog_path=None):
     if sniff_feclog(path):
         print_fec_report(load_feclog(path))
+        print_refresh_report(load_refresh_rows(path), fec_rows=load_feclog(path))
         return
     if sniff_probelog(path):
         # A probe log on its own (bench use): just the per-body report and
@@ -1877,6 +1935,9 @@ if __name__ == "__main__":
         # fec.log is a sibling too: the FEC EPISODES section
         # rides along whichever primary the session offered.
         if s.fec:
-            print_fec_report(load_feclog(s.fec))
+            fec_rows = load_feclog(s.fec)
+            print_fec_report(fec_rows)
+            ctl_E = load_ctllog(s.ctl)["E"] if s.ctl else None
+            print_refresh_report(load_refresh_rows(s.fec), ctl_E=ctl_E, fec_rows=fec_rows)
     else:
         main(arg, sys.argv[2] if len(sys.argv) > 2 else None)
