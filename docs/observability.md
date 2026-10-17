@@ -555,14 +555,16 @@ vsync-paced two-plane commit), `0x02` `PAGE_FLIP_ASYNC` was set, `0x04`
 parked, `0x08` the commit failed, `0x10` a blocking modeset commit.
 `framelog 2` and earlier rows end at `exact`.
 
-### `reg.log` (`# reglog 1`)
+### `reg.log` (`# reglog 2`)
 
 The 1 Hz `regulator:` line ("Regulator line" below), written by the same
 follow-the-marker writer as `lat.log`: `<mono_us> regulator: held= ...`.
 Its counters are cumulative since maburplay started; difference adjacent
 rows for the per-second rate. It exists because `pend`/`pdrop`/`heals` are
 the presenter's side of a missed latch, and `/tmp/maburplay.log` does not
-outlive a power-off.
+outlive a power-off. reglog 2 adds the phase-lock fields `lock= lerr=
+loff= lctr=` (docs/phase-lock.md); reglog 1 rows end at `lslot=` before
+`present=`.
 
 ### `cal.log` (`callog 3`)
 
@@ -622,7 +624,8 @@ submits=… parks=… notes_dropped=…` (the feed thread's tally for the run).
 The 1 Hz `regulator:` line (stderr, and `reg.log` in the session
 directory): `held= late= replaced= disconts= hold_ema=
 present_jitter= vsync= skips= fallback= pend= heals= pdrop= chained= chain=
-chain_max= chains= cuts= alw= lslot= present= acq= req= ioctl=`.
+chain_max= chains= cuts= alw= lslot= lock= lerr= loff= lctr= present= acq=
+req= ioctl=`.
 
 - `present=N acq=p50/max req=p50/max ioctl=p50/max` — the N present()
   calls since the previous line, split into the framebuffer acquire (the
@@ -685,7 +688,8 @@ chain_max= chains= cuts= alw= lslot= present= acq= req= ioctl=`.
   `docs/findings/2026-09-02-regulator-chain-budget.md` (budget 3 chosen),
   `docs/findings/2026-10-15-regulator-chain-cuts.md` (budget 0 chosen).
 - `alw=`/`lslot=` — capture-time scheduling (`display.sched_cap_ms`, 0 = off
-  in code and bundle; bench result and cost:
+  in code; the bundle runs 16, the phase lock's placement switch —
+  docs/phase-lock.md; bench result and cost:
   `docs/findings/2026-10-15-capture-sched.md`). In servo mode a frame's vblank follows its
   capture time, not its arrival: the first vblank whose release is at or
   after capture + delivery floor + `alw`. The window holds each frame's
@@ -702,6 +706,9 @@ chain_max= chains= cuts= alw= lslot= present= acq= req= ioctl=`.
   cap); they are placed by the arrival rule above, and the next on-time
   frame that claims the same vblank wins it, so a stall costs a local
   freeze and catch-up with no trailing chain.
+- `lock=`/`lerr=`/`loff=`/`lctr=` — the phase lock's state (`off` when
+  `display.phase_lock` is false), last window's error, the offset it sends
+  and its centre, mfps (docs/phase-lock.md).
 
 ### fps-log, display bring-up, MSP OSD
 
@@ -975,10 +982,13 @@ deploy, no video) and you need to know whether the encoder is running.
 
 maburd's own stderr (`/tmp/mabur.log`): the 1 Hz `stats:` line (incl.
 `enc_pk100=`, the peak 100 ms encoder byte rate in kbit/s inside that
-second, `lp=`/`armed=` for low-power mode, and `snr_mhz=`, the trimmed
-sensor rate in milli-Hz (same value as `GET /venc`'s `sensor_mhz`);
-`rc: low_power ENTER/EXIT` lines mark transitions, `[sensor] cal:` lines
-the trim's rounds and lock) and the 5 s `frame_ring:` line (below).
+second, `lp=`/`armed=` for low-power mode, `snr_mhz=`, the trimmed
+sensor rate in milli-Hz (same value as `GET /venc`'s `sensor_mhz`), and
+`snr_off=`, the phase-lock offset on the sensor in milli-fps (0 = the
+trim's own rate); `rc: low_power ENTER/EXIT` lines mark transitions,
+`[sensor] cal:` lines the trim's rounds and lock, `[sensor] steer:` lines
+the phase lock's first offset, clamps and refusals) and the 5 s
+`frame_ring:` line (below).
 
 ## Frame loss inside the drone ("wire clean" ≠ no frame loss)
 

@@ -3,7 +3,7 @@
 Spec: `docs/superpowers/specs/2026-10-05-fec-nack-design.md` (gitignored;
 this page is the committed, as-built record). Spike:
 `docs/findings/2026-10-05-fec-nack-spike.md`; as-built bench gate:
-`docs/findings/2026-10-06-fec-nack-bench.md`. RC_VERSION 15.
+`docs/findings/2026-10-06-fec-nack-bench.md`. RC_VERSION 16.
 
 ## What it is
 
@@ -61,8 +61,9 @@ retx_refused`, per Telem period, saturating:
 - `retx_refused` — symbols the air bucket refused. A refused symbol is
   never queued; nothing waits for tokens.
 
-**RC_VERSION 15** carries T_NACK's layout and the 54-byte Telem; a pair on
-different RC_VERSIONs has no control link ("Deploy" below).
+**RC_VERSION 16** (T_NACK's layout arrived with 15) carries the 54-byte
+Telem; a pair on different RC_VERSIONs has no control link ("Deploy"
+below).
 
 ## GS: NackTracker
 
@@ -358,7 +359,7 @@ as-built gate against these criteria
 
 ## Deploy
 
-RC_VERSION 15 is a flag day: `maburd` and `maburgs` must both run it (a
+Any RC_VERSION bump is a flag day: `maburd` and `maburgs` must both run it (a
 mismatched pair has no control link), so swap the two back to back. On each
 end the binary goes in before a config that carries `[nack]` /
 `[link.nack]` — a build without those keys fails boot on them (strict

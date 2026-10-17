@@ -88,6 +88,7 @@ Two kinds of doc, two rules:
 | pairing / the link key file, SipHash tag, session nonces, KEY MISMATCH, auth_reject | docs/link-pairing.md |
 | the software NACK (base-layer selective repeat): T_NACK, the retx ring, the air bucket, the retx accounting class, feclog 3 | docs/fec-nack.md (as built) + docs/findings/2026-10-05-fec-nack-spike.md (spike) |
 | H.265 row slices: slice salvage (SliceAssembler, skip-slice fills, `[venc] slices`, FrameHdr `slice_rows`, `kRecFlagSliceSalvaged`, aulog 5) and streamed decode (AU ring v4 open slots, StreamFeeder, the decoder-input thread (FeedLoop), `[decoder] stream`, the MPP patches in `gs/player/mpp-patches/`, the stream-mode GS image and its p1 flash) | docs/slices.md (as built) + docs/findings/2026-10-09-venc-slice.md; flashing: docs/deploy.md |
+| the phase lock (sensor-rate servo against the GS vblank: PhaseLock, the regulator's margin and placement switch, RCF `snr_off`, `display.phase_lock`/`phase_margin_ms`, `screen_mode` exact-rate pick, reg.log `lock=` fields, drone `[sensor] steer`) | docs/phase-lock.md + docs/findings/2026-10-17-phase-lock-spike-2.md |
 | radio/PHY below mabur | `third_party/devourer/CLAUDE.md` |
 
 Design specs and plans live in `docs/superpowers/` — **gitignored**, so
