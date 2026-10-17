@@ -408,7 +408,14 @@ class RcAgent {
   // A chain break the pacer refused (floor or chain holdoff) waits here
   // for the next due tick instead of being dropped: without a periodic
   // refresh there is no GOP to self-clear an unhealed break. Agent-thread
-  // only; cleared at every session edge, where the link-up IDR covers it.
+  // only; cleared at every session edge. A failsafe or rendezvous edge
+  // ends in the link-up IDR, which heals whatever broke while unlinked. A
+  // session promotion while LINKED (a fast GS restart) has no link-up IDR:
+  // there only the new GS session's own request covers it -- its first RCF
+  // reads as one whenever its epoch is non-zero (the drone's seen epoch
+  // restarts at 0), and otherwise it asks once one of its own arming
+  // sources fires (a damaged or lost base AU, a player report). A break
+  // dropped before the frame ring leaves no frame-id gap for the GS to see.
   bool chain_idr_pending_ = false;
   uint64_t idr_chain_total_ = 0;
   // have_* companions rather than a 0 sentinel (the file's own idiom, cf.

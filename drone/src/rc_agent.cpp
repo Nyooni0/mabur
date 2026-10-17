@@ -220,7 +220,8 @@ void RcAgent::intake_arm_state_(uint64_t now_ms) {
 // nothing; chain-break requests also respect a 1 s holdoff from the previous
 // chain IDR, because one IDR heals a break and a ring that has no consumer
 // needs none at all (upstream measurement, waybeam f956a52 venc_frame_ring.h).
-// A refused request is DROPPED, not queued: the next real break re-raises it.
+// A refused request stays pending (idr_gs_pending_ / chain_idr_pending_)
+// and is served on a later tick.
 bool RcAgent::idr_due(uint64_t now_ms, bool chain) {
   if (have_last_idr_ && now_ms - last_idr_ms_ < 100) return false;
   if (chain && have_last_chain_idr_ && now_ms - last_chain_idr_ms_ < 1000)
@@ -630,9 +631,10 @@ void RcAgent::on_rc_frame(const uint8_t* body, size_t len, uint64_t now_ms) {
       pending_ = Session{};
       publish_session_();
       session_promoted_ = true;
-      // Session boundary: a new GS session's hop epoch and IDR epoch
-      // numbering start over, so the old session's latches must not
-      // swallow its first hop order or IDR request.
+      // Session boundary: the drone's seen hop and IDR epochs restart here
+      // (maburgs keeps its own epochs across sessions), so the old
+      // session's latches cannot swallow the new session's first hop order
+      // or IDR request -- that first RCF reads a non-zero epoch as one.
       have_hop_ = false;
       hop_epoch_ = 0;
       hop_ch_ = 0;
@@ -791,8 +793,8 @@ void RcAgent::tick(uint64_t now_ms, const RadioHealth& health) {
   // pending bit here, and the pending bit is served through the pacer on
   // this or a later tick: a refused request is deferred, never dropped,
   // because with no periodic refresh an unhealed break would otherwise
-  // last until the next unrelated IDR. Session edges clear the bit (the
-  // link-up IDR heals whatever broke while unlinked).
+  // last until the next unrelated IDR. Session edges clear the bit: see
+  // chain_idr_pending_ in rc_agent.h for what covers each kind of edge.
   if (chain_break_pending_.exchange(false, std::memory_order_relaxed))
     chain_idr_pending_ = true;
   if (chain_idr_pending_ && state_ == State::LINKED && idr_due(now_ms, /*chain=*/true)) {

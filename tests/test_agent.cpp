@@ -2603,6 +2603,35 @@ TEST(gs_idr_inside_pacer_floor_is_deferred_not_dropped) {
   // leaves idr_calls at base + 1 here.
 }
 
+// The mirror of chain_break_and_gs_request_due_together_emit_one_idr: a
+// chain break refused by the 1 s holdoff is still pending when a GS request
+// is served; that one picture heals the break too, so the chain request
+// retires with it and no second IDR fires when the holdoff expires.
+TEST(gs_idr_served_during_chain_holdoff_retires_the_chain_request) {
+  auto cfg = make_cfg(); MockActuator act; RcAgent agent(cfg, act); const uint32_t vtx = link_agent(agent, act, cfg, 136, /*t0=*/0);
+  const int base = act.idr_calls;
+  agent.note_chain_break();
+  agent.tick(200, RadioHealth{});               // chain IDR at t=200
+  REQUIRE(act.idr_calls == base + 1);
+  agent.note_chain_break();
+  agent.tick(300, RadioHealth{});               // inside the chain holdoff: pending
+  CHECK(act.idr_calls == base + 1);
+  auto w = make_rcf_wire_idr(2, 1, vtx);
+  agent.on_rc_frame(w.data(), w.size(), 340);
+  agent.tick(350, RadioHealth{});               // GS request, floor passed: served
+  CHECK(act.idr_calls == base + 2);
+  CHECK(agent.idr_gs_total() == 1);
+  for (uint16_t i = 0; i < 4; ++i) {           // same epoch: keeps LINKED, asks nothing
+    auto k = make_rcf_wire_idr(static_cast<uint16_t>(3 + i), 1, vtx);
+    agent.on_rc_frame(k.data(), k.size(), 600 + 300 * i);
+    agent.tick(610 + 300 * i, RadioHealth{});   // last tick 1510: holdoff (1200) long past
+  }
+  CHECK(act.idr_calls == base + 2);             // the chain request did not survive
+  CHECK(agent.idr_chain_total() == 1);
+  // REVERT CHECK: dropping `chain_idr_pending_ = false;` from the GS-request
+  // consumer in RcAgent::tick fires a third IDR once the holdoff expires.
+}
+
 TEST(gs_idr_bumps_collapse_into_one_pending_idr) {
   auto cfg = make_cfg(); MockActuator act; RcAgent agent(cfg, act); const uint32_t vtx = link_agent(agent, act, cfg, 136, /*t0=*/0);
   const int base = act.idr_calls;
