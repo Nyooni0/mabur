@@ -47,7 +47,8 @@ ChannelCore::ChannelCore(ChannelCoreCfg cfg, std::vector<LinkCard*> cards, VrxCo
       window_prev_ok_(static_cast<size_t>(n_cards_), false),
       window_prev_ms_(static_cast<size_t>(n_cards_), 0),
       nhm_win_(static_cast<size_t>(n_cards_)),
-      dwell_gen_(static_cast<size_t>(n_cards_)) {
+      dwell_gen_(static_cast<size_t>(n_cards_)),
+      tune_gen_(static_cast<size_t>(n_cards_)) {
   gs_start_ms_ = now_ms_();
   nhm_op_period_ = nhm_period_4us(std::max(cfg_.hop.window_ms - 10, 1));
   can_scout_.assign(static_cast<size_t>(n_cards_), false);
@@ -478,7 +479,9 @@ void ChannelCore::step_hop_edge_and_window_(const ChannelTickIn& in) {
       continue;
     }
     const NhmBusyRead nb = fe.read_nhm_busy();
-    const bool nhm_ok = nhm_win_[si].usable(nb, fe.channel(), dwell_gen_[si].load(std::memory_order_acquire));
+    const bool nhm_ok = nhm_win_[si].usable(nb, fe.channel(),
+                                            dwell_gen_[si].load(std::memory_order_acquire),
+                                            tune_gen_[si].load(std::memory_order_acquire));
     const ScoutEnergy e = fe.read_energy_scout();
     const ScoutFrames f = fe.frames();
     const uint64_t crc_fail = in.agg ? in.agg->card(i).crc_fail : 0;
@@ -486,7 +489,8 @@ void ChannelCore::step_hop_edge_and_window_(const ChannelTickIn& in) {
     const double snr_raw = in.agg ? in.agg->card(i).snr_ema : 0.0;
     const uint8_t arm_ch = fe.channel();
     const uint32_t arm_gen = dwell_gen_[si].load(std::memory_order_acquire);
-    if (fe.arm_nhm_busy(nhm_op_period_)) nhm_win_[si].armed(arm_ch, nhm_op_period_, arm_gen);
+    const uint32_t arm_tune = tune_gen_[si].load(std::memory_order_acquire);
+    if (fe.arm_nhm_busy(nhm_op_period_)) nhm_win_[si].armed(arm_ch, nhm_op_period_, arm_gen, arm_tune);
     else nhm_win_[si].invalidate();
     if (window_prev_ok_[si]) {
       vc[si].valid = true;
@@ -723,7 +727,7 @@ void ChannelCore::step_width_resync_() {
     const uint8_t ch = fe.channel();
     if (fe.set_width(ch, cfg_.radio.width)) {
       cur_ch_[static_cast<size_t>(i)] = fe.channel();
-      nhm_win_[static_cast<size_t>(i)].invalidate();
+      tune_gen_[static_cast<size_t>(i)].fetch_add(1, std::memory_order_release);
     } else {
       sink_.log(logf_("maburgs radio: card %d width resync to %u MHz on ch %u failed", i,
                       static_cast<unsigned>(cfg_.radio.width), static_cast<unsigned>(ch)));
@@ -740,7 +744,7 @@ void ChannelCore::step_mechanical_retune_() {
     const uint8_t want = plan_.desired(i);
     if (cur_ch_[static_cast<size_t>(i)] != want && fe.retune(want)) {
       cur_ch_[static_cast<size_t>(i)] = want;
-      nhm_win_[static_cast<size_t>(i)].invalidate();
+      tune_gen_[static_cast<size_t>(i)].fetch_add(1, std::memory_order_release);
     }
   }
 }

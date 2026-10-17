@@ -269,6 +269,10 @@ class ChannelCore {
   std::atomic<int> tx_card_now_{0};
   std::atomic<bool> scout_working_atomic_{false};
   std::vector<std::atomic<uint32_t>> dwell_gen_;
+  // Bumped after every core-thread retune / width change of a card
+  // (step_mechanical_retune_, step_width_resync_): pins an NHM arm to the
+  // tune the card had when it was armed.
+  std::vector<std::atomic<uint32_t>> tune_gen_;
   std::atomic<uint64_t> au_seq_{0};
   std::mutex dwell_mu_;
   std::vector<std::pair<int, ScoutDwell>> dwell_recs_;

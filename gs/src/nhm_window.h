@@ -20,21 +20,29 @@ namespace maburgs {
 // the candidate channel saw. main.cpp bumps a per-card generation counter
 // after every completed dwell (success or fail); `gen` pins the reading to
 // the generation we armed under. Pure; main.cpp keeps one per card.
+//
+// The core thread's own hop retune and width resync can leave and re-enter
+// the armed channel inside one window, which the channel check cannot see;
+// the core bumps a per-card tune generation after each one and the arm is
+// pinned to that too.
 class NhmWindowTracker {
  public:
-  void armed(uint8_t ch, uint16_t period, uint32_t gen) {
-    armed_ = true; ch_ = ch; period_ = period; gen_ = gen;
+  void armed(uint8_t ch, uint16_t period, uint32_t dwell_gen, uint32_t tune_gen) {
+    armed_ = true; ch_ = ch; period_ = period; dwell_gen_ = dwell_gen; tune_gen_ = tune_gen;
   }
   void invalidate() { armed_ = false; }
-  bool usable(const NhmBusyRead& r, uint8_t ch_now, uint32_t gen_now) const {
-    return armed_ && r.valid && r.period == period_ && ch_now == ch_ && gen_now == gen_;
+  bool usable(const NhmBusyRead& r, uint8_t ch_now, uint32_t dwell_gen_now,
+              uint32_t tune_gen_now) const {
+    return armed_ && r.valid && r.period == period_ && ch_now == ch_ &&
+           dwell_gen_now == dwell_gen_ && tune_gen_now == tune_gen_;
   }
 
  private:
   bool armed_ = false;
   uint8_t ch_ = 0;
   uint16_t period_ = 0;
-  uint32_t gen_ = 0;
+  uint32_t dwell_gen_ = 0;
+  uint32_t tune_gen_ = 0;
 };
 
 }  // namespace maburgs
