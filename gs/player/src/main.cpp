@@ -40,7 +40,7 @@
 #include "ring_client.h"
 #include "stream_feeder.h"
 #include "video_backend.h"
-#include "vtx_rec_client.h"  // sends the button's VTX wish to maburgs
+#include "core_control_client.h"  // sends the button's VTX wish + refresh reports to maburgs
 #include "splash_image.h"  // startup splash asset + cover-fit painter
 
 #ifdef MABUR_PLAYER_HW
@@ -919,9 +919,11 @@ int main(int argc, char** argv) {
   // dvr.target: which recorders the button drives.
   const bool rec_gs = cfg.dvr.target != "vtx";
   const bool rec_vtx = cfg.dvr.target != "gs";
-  maburplay::VtxRecClient vtx_rec;
-  if (!vtx_rec.open(maburgs::kRecControlPort))
-    std::fprintf(stderr, "maburplay: rec: VTX wish socket failed -- the drone recorder will not follow the button\n");
+  maburplay::CoreControlClient core_ctl;
+  if (!core_ctl.open(maburgs::kRecControlPort))
+    std::fprintf(stderr,
+                 "maburplay: rec: core control socket failed -- the drone recorder will not "
+                 "follow the button and refresh reports will not reach maburgs\n");
   // dvr.mode "burned": the recording is produced by re-encoding decoded
   // frames with the OSD composited in by the hardware encoder, so the
   // BurnRecorder owns the file and the raw remux in the ring sink below is
@@ -1162,8 +1164,10 @@ int main(int argc, char** argv) {
   // Autostart: dvr.autostart armed rec_on before this point (see rec_on's
   // declaration above), but the actual start() call has to wait until here,
   // where bcfg is in scope.
-  if (rec_on && rec_gs && !burned_mode)
+  if (rec_on && rec_gs && !burned_mode) {
     dvr.start(dvr_filename(cfg.dvr.dir), bcfg.width, bcfg.height, cfg.dvr.fragment_ms);
+    core_ctl.send_line("refresh dvr");
+  }
 
   // The button's two actions. Both modes are handled here so the press
   // handler stays one line; the raw path is a flag plus a close, the
@@ -1199,7 +1203,10 @@ int main(int argc, char** argv) {
       }
     }
 #endif
-    if (!burned_mode) dvr.start(dvr_filename(cfg.dvr.dir), bcfg.width, bcfg.height, cfg.dvr.fragment_ms);
+    if (!burned_mode) {
+      dvr.start(dvr_filename(cfg.dvr.dir), bcfg.width, bcfg.height, cfg.dvr.fragment_ms);
+      core_ctl.send_line("refresh dvr");
+    }
     std::fprintf(stderr, "maburplay: rec: START (%s)\n", cfg.dvr.mode.c_str());
   };
 
@@ -1312,6 +1319,9 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "maburplay: cannot open ring %s\n", cfg.ring_path.c_str());
     return 2;
   }
+  // A fresh decoder has no key frame to arm on and nothing periodic will
+  // bring one: ask through maburgs. The core retries until an IRAP lands.
+  if (!oneshot) core_ctl.send_line("refresh start");
 
   if (oneshot) {
     ring.oneshot_drain();
@@ -1564,6 +1574,8 @@ int main(int argc, char** argv) {
   uint64_t display_retry_next_ms = 0;
   bool display_retry_announced = false;
 #endif
+  // The ring reader fell behind and skipped AUs that held references.
+  uint64_t resyncs_seen = ring.resyncs();
   while (!g_stop.load()) {
     // 2 ms pump: flip events must be reaped at sub-vsync latency or the
     // mailbox frame waits for the NEXT AU burst before anyone submits it
@@ -1624,8 +1636,12 @@ int main(int argc, char** argv) {
         rec_start();
       }
     }
-    // Every iteration: sends on change, re-sends each second (VtxRecClient).
-    vtx_rec.tick(rec_on && rec_vtx, mono_ms());
+    // Every iteration: sends on change, re-sends each second (CoreControlClient).
+    core_ctl.tick(rec_on && rec_vtx, mono_ms());
+    if (ring.resyncs() != resyncs_seen) {
+      resyncs_seen = ring.resyncs();
+      core_ctl.send_line("refresh resync");
+    }
     // Idle window: true when no release is due within the next 8 ms, so
     // the heavy 1 Hz blocks below (stats/statvfs, lat flush, OSD compose)
     // run clear of a release deadline. This REDUCES misses, it does not
@@ -2094,6 +2110,7 @@ int main(int argc, char** argv) {
                        "respawn\n");
           return 1;
         }
+        core_ctl.send_line("refresh decoder");
         router.disarm();  // resync at the next sid0 AU
         feed.resume();
         wd_submits = router.submits();

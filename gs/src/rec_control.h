@@ -14,8 +14,8 @@
 
 namespace maburgs {
 
-// maburplay's VtxRecClient sends here. Next to CalControl's 8400; the 830x
-// block belongs to the stats sideport and the OSD feed.
+// maburplay's CoreControlClient sends here. Next to CalControl's 8400; the
+// 830x block belongs to the stats sideport and the OSD feed.
 constexpr int kRecControlPort = 8401;
 
 // Loopback-only UDP listener for the record button's VTX wish.

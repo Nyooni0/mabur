@@ -208,9 +208,9 @@ if(MABUR_BUILD_GS)
   add_dependencies(test_gs_draw gsfont_fixtures)
   target_compile_definitions(test_gs_draw PRIVATE GSFONT_20="${GSFONT_20}")
   add_mtest(test_gs_snapshot test_gs_snapshot.cpp LIBS mabur_player_core)
-  # Round-trips maburplay's VtxRecClient against maburgs' RecControl
+  # Round-trips maburplay's CoreControlClient against maburgs' RecControl
   # (gs/src/rec_control.h) over real loopback sockets on a test-only port.
-  add_mtest(test_vtx_rec_client test_vtx_rec_client.cpp LIBS mabur_player_core)
+  add_mtest(test_core_control_client test_core_control_client.cpp LIBS mabur_player_core)
   add_mtest(test_gs_source test_gs_source.cpp LIBS mabur_player_core)
   add_mtest(test_gs_layer test_gs_layer.cpp LIBS mabur_player_core)
   # The only test that loads the SHIPPED .gfont. Everything else stays on
