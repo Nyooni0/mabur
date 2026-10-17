@@ -1671,11 +1671,11 @@ int main(int argc, char** argv) {
 #ifdef MABUR_PLAYER_HW
     if (phase_lock) {
       const uint64_t now = mono_us();
+      const auto before = phase_lock->state();
       if (regulator.discont_count() != phase_disconts_seen) {
         phase_disconts_seen = regulator.discont_count();
         phase_lock->on_discontinuity(now);
       }
-      const auto before = phase_lock->state();
       phase_lock->tick(now);
       if (phase_lock->state() != before) {
         std::fprintf(stderr, "phase-lock: %s err=%.2fms off=%d centre=%.1f\n",
@@ -1772,6 +1772,11 @@ int main(int argc, char** argv) {
           // Same pre-first-flip reseed as the startup path: a hotplugged
           // panel may run a different mode/refresh than the one configured.
           regulator.set_panel_period(presenter->mode_period_us());
+          // Unlike the startup path, the lock may already be locked or
+          // acquiring against the OLD panel's grid here: restart it so the
+          // new mode gets a fresh window instead of up to 2 s of capture
+          // placement judged against a stale vblank period.
+          if (phase_lock) phase_lock->on_discontinuity(mono_us());
           presenter->set_flip_sink(
               [&lat, &regulator](uint32_t pts, uint64_t t, bool ex) {
                 lat.on_flip(pts, t, ex);

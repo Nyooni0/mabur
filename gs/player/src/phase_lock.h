@@ -39,7 +39,12 @@ class PhaseLock {
   static constexpr int kLockOutWindows = 2;
   static constexpr double kCoherentUs = 4000.0;   // window p90 - p10 limit
   static constexpr double kSlopeResidUs = 1000.0; // RMS residual limit for a slope
-  static constexpr uint64_t kSlopeSkipUs = 150'000;  // offset reaches the drone
+  // Slope fit skips samples inside this much of the window's start: the RCF
+  // cadence plus maburgs's feedback_ms (50 in the bundle) before the new
+  // offset reaches the drone, plus a frame or two before the sensor turns it
+  // into a new rate. A window with the step still inside it is caught by the
+  // residual guard in update_centre() and gives no slope.
+  static constexpr uint64_t kSlopeSkipUs = 150'000;
   static constexpr int kMinSamples = 10;
   static constexpr uint64_t kWindowUs = 1'000'000;
   static constexpr uint64_t kQuietUs = 2'000'000;

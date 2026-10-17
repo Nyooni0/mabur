@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <deque>
 #include <utility>
 #include <vector>
@@ -60,9 +61,13 @@ struct RunResult {
 // difference (mod the panel period). Offsets reach the sensor 100 ms after
 // the lock sends them. frame_div N feeds every Nth frame (low-power
 // decimation: the sensor still runs at full rate). A jump shifts the margin
-// once (an allowance step); the 30 s after it are not scored.
+// once (an allowance step); the 30 s after it are not scored. neutral_step_at_s
+// stretches the sensor's own line rate (e.g. auto-exposure), not a steering
+// offset, by 70/60000 from that time on -- a disturbance the lock has to
+// absorb rather than cause; the 30 s after it are likewise not scored.
 RunResult run(double panel_us, double seconds, double margin0_us, int frame_div = 1,
-              double jump_at_s = -1.0, double jump_us = 0.0, double noise_us = 300.0) {
+              double jump_at_s = -1.0, double jump_us = 0.0, double noise_us = 300.0,
+              double neutral_step_at_s = -1.0) {
   PhaseLock lock(kTargetUs / 1000.0);
   RunResult r;
   std::deque<std::pair<double, int32_t>> cmd;
@@ -74,7 +79,9 @@ RunResult run(double panel_us, double seconds, double margin0_us, int frame_div 
       applied = cmd.front().second;
       cmd.pop_front();
     }
-    const double pc = Sensor::period_us(applied);
+    double pc = Sensor::period_us(applied);
+    if (neutral_step_at_s >= 0 && t >= neutral_step_at_s * 1e6)
+      pc /= (1.0 - 70.0 / 60000.0);
     const double t_prev = t;
     t += pc;
     m = pos_mod(m - pc, panel_us);
@@ -89,7 +96,9 @@ RunResult run(double panel_us, double seconds, double margin0_us, int frame_div 
     if (lock.locked() && r.locked_at_s < 0) r.locked_at_s = t / 1e6;
     if (before == PhaseLock::State::Locked && !lock.locked()) ++r.unlocks;
     const double ts = t / 1e6;
-    const bool excluded = jump_at_s >= 0 && ts >= jump_at_s && ts <= jump_at_s + 30.0;
+    const bool excluded = (jump_at_s >= 0 && ts >= jump_at_s && ts <= jump_at_s + 30.0) ||
+                          (neutral_step_at_s >= 0 && ts >= neutral_step_at_s &&
+                           ts <= neutral_step_at_s + 30.0);
     if (r.locked_at_s >= 0 && ts > r.locked_at_s + 5.0 && !excluded)
       r.worst_us = std::max(r.worst_us, std::fabs(wrapped(m - kTargetUs, panel_us)));
   }
@@ -159,6 +168,17 @@ TEST(rides_out_an_allowance_jump) {
   CHECK(r.worst_us <= 1'000.0);
 }
 
+TEST(rides_out_a_neutral_rate_step) {
+  // Auto-exposure stretching the frame mid-flight: the sensor's own line
+  // rate moves on its own, not from a steering request. The lock should
+  // absorb it without ever unlocking.
+  const RunResult r = run(kPanel60, 240, 12'000, 1, -1.0, 0.0, 300.0,
+                           /*neutral_step_at_s=*/150.0);
+  CHECK(r.unlocks == 0);
+  CHECK(r.final_state == PhaseLock::State::Locked);
+  CHECK(r.worst_us <= 1'000.0);
+}
+
 TEST(unreachable_panels_go_out_of_range) {
   // 50 Hz and 59 Hz: the phase sweeps a whole period every second, so no
   // window is coherent, nothing locks, and after 60 s of acquiring the lock
@@ -210,6 +230,96 @@ TEST(quiet_stream_goes_waiting_and_holds_the_offset) {
   CHECK(lock.tick(now + 3'100'000));          // > 2 s since the last window
   CHECK(lock.state() == PhaseLock::State::Waiting);
   CHECK(lock.offset_mfps() == held);          // the drone keeps its rate
+}
+
+TEST(locked_to_acquiring_on_sustained_error) {
+  PhaseLock lock(4.0);
+  uint64_t now = 1'000'000;
+  for (int k = 0; k < 6 * 60; ++k) {          // lock on margins 0.5 ms over target
+    now += 16'667;
+    lock.on_margin(4'500.0, kPanel60, now);
+    lock.tick(now);
+  }
+  REQUIRE(lock.locked());
+  now += 1'000'000;                           // flush the window in progress
+  lock.tick(now);
+  REQUIRE(lock.locked());
+
+  // |e| = 5.5 ms > kLockOutMs: the first bad window only brings out_count to
+  // 1, short of kLockOutWindows (2) -- the lock rides it out.
+  for (int k = 0; k < 60; ++k) {
+    now += 16'667;
+    lock.on_margin(9'500.0, kPanel60, now);
+    lock.tick(now);
+  }
+  CHECK(lock.state() == PhaseLock::State::Locked);
+
+  // Second consecutive bad window reaches kLockOutWindows.
+  for (int k = 0; k < 60; ++k) {
+    now += 16'667;
+    lock.on_margin(9'500.0, kPanel60, now);
+    lock.tick(now);
+  }
+  CHECK(lock.state() == PhaseLock::State::Acquiring);
+}
+
+TEST(locked_to_acquiring_on_incoherent_windows) {
+  PhaseLock lock(4.0);
+  uint64_t now = 1'000'000;
+  for (int k = 0; k < 6 * 60; ++k) {          // lock on margins 0.5 ms over target
+    now += 16'667;
+    lock.on_margin(4'500.0, kPanel60, now);
+    lock.tick(now);
+  }
+  REQUIRE(lock.locked());
+  now += 1'000'000;                           // flush the window in progress
+  lock.tick(now);
+  REQUIRE(lock.locked());
+  const int32_t held = lock.offset_mfps();
+
+  // A margin that sweeps the whole panel period inside one second (p90-p10
+  // way past kCoherentUs) has no meaningful median: it never updates the
+  // offset, only counts against the lock.
+  for (int k = 0; k < 60; ++k) {
+    now += 16'667;
+    lock.on_margin(std::fmod(k * 3'333.0, kPanel60), kPanel60, now);
+    lock.tick(now);
+  }
+  CHECK(lock.state() == PhaseLock::State::Locked);
+  CHECK(lock.offset_mfps() == held);
+
+  for (int k = 0; k < 60; ++k) {
+    now += 16'667;
+    lock.on_margin(std::fmod(k * 3'333.0, kPanel60), kPanel60, now);
+    lock.tick(now);
+  }
+  CHECK(lock.state() == PhaseLock::State::Acquiring);
+  CHECK(lock.offset_mfps() == held);          // incoherent windows never touch it
+}
+
+TEST(acquiring_to_waiting_on_quiet_holds_offset) {
+  PhaseLock lock(4.0);
+  uint64_t now = 1'000'000;
+  // One window, 9 ms off the 4 ms target. 61 ticks: the first one opens the
+  // window (spending its own interval setting win_start_us_, not counting
+  // toward it), so closing needs an extra tick past the usual 60.
+  for (int k = 0; k < 61; ++k) {
+    now += 16'667;
+    lock.on_margin(13'000.0, kPanel60, now);
+    lock.tick(now);
+  }
+  REQUIRE(lock.state() == PhaseLock::State::Acquiring);
+  const int32_t held = lock.offset_mfps();
+  CHECK(lock.tick(now + 2'100'000));          // > 2 s since the last window
+  CHECK(lock.state() == PhaseLock::State::Waiting);
+  CHECK(lock.offset_mfps() == held);          // the drone keeps its rate
+}
+
+TEST(state_names) {
+  CHECK(std::strcmp(maburplay::phase_lock_state_name(PhaseLock::State::Waiting), "wait") == 0);
+  CHECK(std::strcmp(maburplay::phase_lock_state_name(PhaseLock::State::Acquiring), "acq") == 0);
+  CHECK(std::strcmp(maburplay::phase_lock_state_name(PhaseLock::State::Locked), "lock") == 0);
+  CHECK(std::strcmp(maburplay::phase_lock_state_name(PhaseLock::State::OutOfRange), "oor") == 0);
 }
 
 // ---- closed loop: lock + regulator + a line-quantised sensor ----

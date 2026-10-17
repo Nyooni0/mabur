@@ -128,7 +128,10 @@ class FrameRegulator {
     incomplete_head_ = (incomplete_head_ + 1) % kIncomplete;
   }
   // Current allowance (ms): how late past the fast path a frame may be
-  // and still keep its capture-time slot. 0 when the mode is off.
+  // and still keep its capture-time slot. Measured whenever sched_cap_ms
+  // > 0, including in phase-lock mode while frames are placed by arrival
+  // (lock not yet held) -- the margin needs it to judge the lock before
+  // capture placement engages. 0 only when sched_cap_ms itself is 0.
   double allowance_ms() const { return static_cast<double>(allowance_us_) / 1000.0; }
   // Frames that missed their capture-time slot and were placed by arrival.
   uint64_t late_slot_count() const { return late_slot_; }
