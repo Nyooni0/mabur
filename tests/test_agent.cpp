@@ -1982,6 +1982,86 @@ TEST(idr_pacer_min_spacing_and_chain_break_holdoff) {
   CHECK(act.idr_calls == base + 2);
 }
 
+// A refused chain-break IDR (floor or chain holdoff) is DEFERRED to the next
+// due tick, not dropped: with no periodic refresh there is no GOP to
+// self-heal an unhealed break.
+
+static void keepalive(RcAgent& agent, uint16_t seq, uint32_t vtx, uint64_t t) {
+  auto w = make_rcf_wire(seq, encode_profile(PhyMode::HT, 2, 20), 8, vtx);
+  agent.on_rc_frame(w.data(), w.size(), t);
+}
+
+TEST(chain_break_refused_by_the_holdoff_is_served_on_the_next_due_tick) {
+  Config cfg = make_cfg();
+  MockActuator act;
+  RcAgent agent(cfg, act);
+  const uint32_t vtx = link_agent(agent, act, cfg, 136, /*t0=*/0);
+  const int base = act.idr_calls;
+
+  agent.note_chain_break();
+  agent.tick(200, RadioHealth{});
+  CHECK(act.idr_calls == base + 1);          // first chain IDR goes out
+  CHECK(agent.idr_chain_total() == 1);
+
+  agent.note_chain_break();                   // inside the 1 s chain holdoff
+  keepalive(agent, 2, vtx, 500);
+  agent.tick(600, RadioHealth{});
+  CHECK(act.idr_calls == base + 1);          // refused ...
+  keepalive(agent, 3, vtx, 1100);
+  agent.tick(1300, RadioHealth{});
+  CHECK(act.idr_calls == base + 2);          // ... and served once due, not dropped
+  CHECK(agent.idr_chain_total() == 2);
+}
+
+TEST(chain_break_and_gs_request_due_together_emit_one_idr) {
+  Config cfg = make_cfg();
+  MockActuator act;
+  RcAgent agent(cfg, act);
+  const uint32_t vtx = link_agent(agent, act, cfg, 136, /*t0=*/0);
+  agent.tick(100, RadioHealth{});
+  const int base = act.idr_calls;
+
+  // A GS request: an RCF whose idr_epoch differs from the one seen (0).
+  Rcf r;
+  r.seq = 2;
+  r.profile = encode_profile(PhyMode::HT, 2, 20);
+  r.fec_overhead_base = 0.5;
+  r.fec_overhead_enh = 0.5;
+  r.probe_profile = kNoProbeProfile;
+  r.idr_epoch = 1;
+  auto w = pack_rcf(r, mabur::kDefaultLinkKey, TagCtx{kVrx, vtx, 2});
+  agent.on_rc_frame(w.data(), w.size(), 400);
+  agent.note_chain_break();
+  agent.tick(500, RadioHealth{});
+  CHECK(act.idr_calls == base + 1);           // one IDR covers both
+  agent.tick(700, RadioHealth{});
+  CHECK(act.idr_calls == base + 1);           // nothing left pending
+}
+
+TEST(chain_break_pending_is_cleared_by_failsafe) {
+  Config cfg = make_cfg();
+  MockActuator act;
+  RcAgent agent(cfg, act);
+  link_agent(agent, act, cfg, 136, /*t0=*/0);
+  agent.tick(100, RadioHealth{});
+  agent.note_chain_break();
+  agent.tick(150, RadioHealth{});             // served: first chain IDR
+  agent.note_chain_break();                   // refused by the holdoff, now pending
+  // t=1100: still < last_chain_idr_(150) + the 1 s chain holdoff (1150), so
+  // the pending break stays refused, but >= the link's last_fb_(10) + the 1 s
+  // failsafe_ms -- this tick drops the agent into FAILSAFE with the break
+  // still pending.
+  agent.tick(1100, RadioHealth{});
+  CHECK(agent.state() == RcAgent::State::FAILSAFE);
+  const int before = act.idr_calls;
+  const uint32_t vtx2 = ack_agent(agent, act, 136, kVrx, 1400);
+  auto w2 = make_rcf_wire(5, encode_profile(PhyMode::HT, 2, 20), 8, vtx2);
+  agent.on_rc_frame(w2.data(), w2.size(), 1500);   // re-link: ONE link-up IDR
+  CHECK(act.idr_calls == before + 1);
+  agent.tick(1700, RadioHealth{});
+  CHECK(act.idr_calls == before + 1);         // the stale chain request did not survive
+}
+
 // 15. A refused encoder verb must not be latched as applied. Before this,
 // run_bitrate_policy() recorded last_bitrate_kbps_ straight after the (void)
 // actuator call, so one dropped MI call left `changed` false forever and the

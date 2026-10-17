@@ -638,6 +638,7 @@ void RcAgent::on_rc_frame(const uint8_t* body, size_t len, uint64_t now_ms) {
       hop_ch_ = 0;
       idr_epoch_seen_ = 0;
       idr_gs_pending_ = false;
+      chain_idr_pending_ = false;
       if (current_.agreed_ch != 0 && current_.agreed_ch != channel_)
         deferred_move_ch_ = current_.agreed_ch;          // after main's promote Telem
     } else {
@@ -724,8 +725,11 @@ void RcAgent::on_rc_frame(const uint8_t* body, size_t len, uint64_t now_ms) {
       // above -- without this, that pending request survives to the next
       // tick and fires a redundant second IDR ~100 ms later. Leave
       // idr_epoch_seen_ alone: the epoch itself is still correctly seen, so
-      // the same epoch in a later RCF stays "not a new request".
+      // the same epoch in a later RCF stays "not a new request". A chain
+      // break raised while unlinked is covered the same way: whatever
+      // broke while there was no link is healed by this picture too.
       idr_gs_pending_ = false;
+      chain_idr_pending_ = false;
     }
 
     // RCFs that transition into LINKED (from RENDEZVOUS or FAILSAFE) force
@@ -776,24 +780,27 @@ void RcAgent::tick(uint64_t now_ms, const RadioHealth& health) {
     hop_ch_ = 0;
     idr_epoch_seen_ = 0;
     idr_gs_pending_ = false;
+    chain_idr_pending_ = false;
   }
 
   // Chain-break intake, evaluated against the state as of this tick's ENTRY
-  // — deliberately ahead of the failsafe/rendezvous timers below. The
+  // -- deliberately ahead of the failsafe/rendezvous timers below. The
   // encoder broke its reference chain while the link was up, and the tick
   // that notices a missed feedback deadline is the tick most likely to be
-  // carrying that break; deferring the heal until after the state machine
-  // has moved us to FAILSAFE would silently discard exactly the IDR that
-  // matters. The LINKED gate stays, so a break raised while genuinely
-  // unlinked is consumed and dropped rather than queued — affordable only
-  // because the encoder's own GOP is the backstop: at the shipped
-  // venc.gop_s = 0.5 (bundle/mabur.default.toml since b05c60f) an unhealed
-  // chain break self-clears within ~0.5 s. That backstop is only as short as
-  // gop_s: raise it and the safety net stretches with it, at which point
-  // dropping refused requests instead of deferring them needs re-arguing.
-  if (chain_break_pending_.exchange(false, std::memory_order_relaxed) &&
-      state_ == State::LINKED && idr_due(now_ms, /*chain=*/true)) {
+  // carrying that break. The venc thread's flag moves to the agent-side
+  // pending bit here, and the pending bit is served through the pacer on
+  // this or a later tick: a refused request is deferred, never dropped,
+  // because with no periodic refresh an unhealed break would otherwise
+  // last until the next unrelated IDR. Session edges clear the bit (the
+  // link-up IDR heals whatever broke while unlinked).
+  if (chain_break_pending_.exchange(false, std::memory_order_relaxed))
+    chain_idr_pending_ = true;
+  if (chain_idr_pending_ && state_ == State::LINKED && idr_due(now_ms, /*chain=*/true)) {
     act_.request_idr();
+    chain_idr_pending_ = false;
+    ++idr_chain_total_;
+    // One picture answers both producers.
+    idr_gs_pending_ = false;
   }
 
   // GS-requested IDR, same tick-entry state rule as the
@@ -804,6 +811,7 @@ void RcAgent::tick(uint64_t now_ms, const RadioHealth& health) {
   if (idr_gs_pending_ && state_ == State::LINKED && idr_due(now_ms, /*chain=*/false)) {
     act_.request_idr();
     idr_gs_pending_ = false;
+    chain_idr_pending_ = false;
     ++idr_gs_total_;
   }
 
@@ -822,6 +830,7 @@ void RcAgent::tick(uint64_t now_ms, const RadioHealth& health) {
       hop_ch_ = 0;
       idr_epoch_seen_ = 0;
       idr_gs_pending_ = false;
+      chain_idr_pending_ = false;
       // Rebase the rendezvous_ms timer from the moment failsafe was
       // entered (not the last real feedback), so a link silent since t=0
       // with failsafe_ms=1000/rendezvous_ms=30000 falls back to
