@@ -13,6 +13,7 @@
 #include "mabur/nack_tracker.h"
 #include "mabur/rc_proto.h"
 #include "op_point.h"
+#include "refresh_requester.h"
 #include "relay_stats.h"
 
 namespace maburgs {
@@ -200,6 +201,14 @@ struct StatsNackIn {
   double interval_s = 0.0;       // for fill_pps; 0 = no window yet -> null
 };
 
+// Demand refresh: the core's RefreshRequester, exported as link.refresh
+// whenever the core has one (always in maburgs; never in the web GS).
+struct StatsRefreshIn {
+  bool present = false;
+  bool armed = false;
+  RefreshRequester::Counters c;
+};
+
 // Continuous probe gate snapshot (probe-stream), straight from
 // LadderController::probe_gate() -- plain values only, same no-controller-
 // reference pattern as StatsCtlIn. Unlike StatsCtlIn::ctl this is NOT
@@ -270,6 +279,7 @@ struct StatsInput {
   std::optional<int> scan_pick;
   StatsRcfSlotIn rcf_slot;
   StatsNackIn nack;
+  StatsRefreshIn refresh;
   bool in_session = false;  // VrxState::SESSION
   bool key_mismatch = false;   // VrxState::KEY_MISMATCH
   std::string key_fp;          // mabur::key_fingerprint(cfg.link.key)
