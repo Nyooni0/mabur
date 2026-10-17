@@ -399,7 +399,7 @@ plus FEC decode, `t_complete − t_push` FrameStream emit and the ring write.
 (IRAP 16..21, a refresh start's TRAIL_R is 1), 0 when the AU did not open
 with VPS/SPS/PPS — the GS-requested-IDR clearing signal.
 
-### `fec.log` (`feclog 3`)
+### `fec.log` (`feclog 4`)
 
 Per-episode FEC loss record (`gs/src/fec_log.h`), the measurement behind
 "is the rung table's overhead pair oversized". A *loss episode* is a run of
@@ -430,6 +430,14 @@ file live; `fec.log` alone is also a valid `flightreport.py` argument. The
 first ~18 s after a maburgs restart log a block of rung-0 boot warm-up
 episodes — drop them by time. Bench record:
 `docs/findings/2026-09-16-fec-log-overhead-bench.md`.
+
+`feclog 4` adds two row kinds that start with a letter instead of a
+timestamp digit, so an episode row is still distinguishable by its leading
+`t_ms`: `I <t_ms> <reason> <epoch>` logs an IDR request going out (`reason`
+is whatever armed it — `hole`, `salvaged`, `lost`, `start`, `resync`,
+`decoder`, `dvr` — and a retry repeats the same reason), and
+`H <t_ms> <heal_ms> <retries>` logs a complete base IRAP clearing that
+request. `load_feclog()` skips both; they are read by `load_refresh_rows`.
 
 ### `scan.log` (`scanlog 6`)
 

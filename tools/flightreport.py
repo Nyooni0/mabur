@@ -834,7 +834,8 @@ def load_feclog(path):
     everything else is a row. feclog 2 (40 MHz rungs) inserts `bw` after
     mcs; feclog 1 rows carry no bw and are 20 MHz. feclog 3 (software NACK)
     inserts `rtx` (symbols the episode received via retransmit) after
-    `rec`; feclog 1/2 rows read rtx=0."""
+    `rec`; feclog 1/2 rows read rtx=0. feclog 4 adds `I`/`H` request rows,
+    read by load_refresh_rows."""
     rows = []
     version = 1
     with open(path) as f:
@@ -845,6 +846,8 @@ def load_feclog(path):
                     version = int(tok[1])
                 continue
             if line.startswith("#"):
+                continue
+            if line[:2] in ("I ", "H "):
                 continue
             tok = line.split()
             if version < 2:
