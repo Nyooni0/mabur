@@ -24,8 +24,18 @@ scene, 4 row slices, SVC-T, NACK on at the GS. The drone ran the maburd
 from the GOP ceiling run (branch `demand-refresh`, `VENC_GOP_NONE` 65535;
 the MI proc node read `CBR65535`), with `gop_s` 0 and
 `intra_refresh_frames` 0 and no other config change. The GS ran
-`maburgs` and `maburplay` built from branch `demand-refresh` at 5fb9cde0
-(glibc Radxa build), deployed together. No GS config changed.
+`maburgs` and `maburplay` (glibc Radxa build, deployed together) built
+from the tree at 5fb9cde0. The build finished at the moment 6c34cf13
+landed. Both commits change only docs and the drone bundle on top of
+642b2353, so the GS code is as of 642b2353. No GS config changed.
+
+**The benched GS build predates the review fix wave 030487d0..974ffc36**,
+which landed on the branch during the bench. That wave books slice-salvaged
+base AUs as `salvaged` instead of `hole` (4af5a88c), retries a refresh
+request only while maburgs is in a session (4af5a88c), corrects the
+drone's IDR pacer comments and tests (030487d0), and rewrites
+`docs/fec-nack.md` "Across an outage". Where a result below depends on
+that, it says so.
 
 | session | GS binary | what ran |
 |---|---|---|
@@ -94,7 +104,7 @@ baseline is −1.1 to −3.0 ms at an MCS 5 park):
 | | 3 % eff, burst 6, 117 s | 10 % eff, burst 8, 61 s |
 |---|---|---|
 | bodies dropped (s0) | 16580 | 29501 |
-| NACK requests / filled / wasted / deadline-dropped | 260 / 1827 / 315 / 0 | 279 / 1913 / 251 / 96 |
+| NACK requests / filled / wasted / deadline-dropped (`link.nack` deltas) | 260 / 1827 / 315 / 0 | 279 / 1913 / 251 / 96 |
 | base AUs incomplete / slice-salvaged | 0 / 0 | 6 / 22 |
 | requests (runs) by reason | 1 `lost` | 27 `lost`, 21 `hole`, 0 `salvaged` |
 | requests with a retry | 0 | 1 |
@@ -109,16 +119,19 @@ the middle of it read 1815 AUs, all complete, 0 gaps, 60.5 fps.
 At 10 %, each of the 28 damaged base AUs had an `I` row in the same
 second. The seconds with 4 or 5 `I` rows are separate requests, each
 healed in about 100 ms before the next damage, not retries. For example,
-in second 3988 five requests healed in 106, 109, 87, 97 and 83 ms.
+in second 3988 five requests healed in 106, 109, 87, 97 and 83 ms. That
+misses the brief's expectation of never more than 3 `I` rows per second:
+two seconds had 5 and 4. Each was a separate request, not a retry.
 
 Two things in the rows do not match the design:
 
-- **Salvaged base AUs arm as `hole`.** The 22 base AUs that au.log flags
-  `0x40` (slice-salvaged) each logged `I … hole`. The sideport's
+- **Salvaged base AUs arm as `hole` (pre-fix build; fixed since in
+  4af5a88c).** The 22 base AUs that au.log flags `0x40`
+  (slice-salvaged) each logged `I … hole`. The sideport's
   `by_reason.salvaged` stayed 0 for the whole session while
-  `slice_salvaged` counted 22. They still arm, so the heal is not
-  affected, but the reason is wrong.
-- **A `lost` arms right after a heal.** 11 of the 32 `lost` requests in
+  `slice_salvaged` counted 22. They still armed, so the heal was not
+  affected, only the label.
+- **A `lost` arms right after a heal (open).** 11 of the 32 `lost` requests in
   0137 start within 30 ms of the `H` before them (for example
   `H 3988517 87 0` then `I 3988517 lost 25`, healed 97 ms later). One
   pair is logged out of time order (`H 4030948` then `I 4030940 lost`).
@@ -130,7 +143,7 @@ lost 28, start 1), retries 17, heals 54, heal_ms p50/p90/max 97/144/3739,
 6 within 2 s of a demote, 48 within 2 s of an FEC episode. Read in file
 order, the rows give 54 requests and 13 retries. When an `H` and the next
 `I` share a millisecond, the report's sort puts the `I` first and counts a
-new request as a retry.
+new request as a retry. This miscount is open.
 
 **Player triggers (session 0136).**
 
@@ -161,9 +174,12 @@ not tested because it needs a GS `/config` edit.
 During the power cut nothing armed. No base AU was finished incomplete
 while the drone was silent, so the request armed only when the restarted
 producer's AUs force-advanced the stream past the dead one. That AU was
-already covered by the link-up IDR. `docs/fec-nack.md` "Across an outage"
-describes the old in-flight AU arming one request at the cut and retrying
-through the outage. That is what the 3 s burst did, but not the power cut.
+already covered by the link-up IDR. On this pre-fix build the 3 s burst
+retried through the whole outage. Since 4af5a88c, retries accrue only
+while maburgs is in a session, and the "Across an outage" text was
+rewritten to match. The burst kept the session up (the RCF uplink and
+telemetry were not dropped), so its retry rows would likely look the same
+at HEAD; that was not re-run.
 
 ## Answer
 
@@ -181,12 +197,16 @@ given up: none at 3 %, and one per damaged base AU at 10 %, heal p50
 retries every 300 ms and heals as the link returns, with the `starved`
 demote inside a second.
 
-Three things need a code look before the flight:
+Two things still need a code look before the flight:
 
-- salvaged base AUs are labelled `hole`;
-- about a third of `lost` requests arm right after a heal, so each costs
-  one redundant IDR;
-- flightreport's REFRESH counts break on same-millisecond `H`/`I` ties.
+- about a third of `lost` requests arm within 30 ms after a heal, likely
+  one redundant IDR each, and one I/H pair is logged out of time order;
+- flightreport's REFRESH section counts a new request in the same
+  millisecond as a heal as a retry, because it sorts `I` before `H` on
+  equal `t_ms`.
+
+The `hole` label on salvaged AUs seen here is fixed in code since
+(4af5a88c), but the fix is not benched.
 
 The raw-DVR `dvr` trigger and a real radio pull remain untested. The
 flight is pending.
