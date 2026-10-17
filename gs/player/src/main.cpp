@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -31,6 +32,7 @@
 #include "gs_source.h"
 #include "mabur/hevc_params.h"
 #include "mabur/frame_wire.h"
+#include "mode_pick.h"  // parse_screen_want, used by parse_screen_mode below
 #include "osd_font.h"
 #include "osd_raster.h"
 #include "osd_source.h"
@@ -47,6 +49,7 @@
 #include "burn_recorder.h"  // dvr.mode "burned": re-encode with the OSD burnt in
 #include "drm_presenter.h"  // KMS atomic NV12 presenter, the default display path
 #include "frame_regulator.h"  // phase-aware pts+D display release
+#include "phase_lock.h"  // PhaseLock, the sensor-rate controller for the phase lock
 #include "release_wait.h"  // the pre-release wait that keeps collecting decoded frames
 #include "gs_draw.h"         // set_colour_inverse() for the GS overlay pre-invert
 #include "lat_tracker.h"    // tail latency segments + 1 Hz lat line
@@ -336,15 +339,16 @@ std::string dvr_filename(const std::string& dir) {
   return namer.next(dir);
 }
 
-// Parses player_config's "WIDTHxHEIGHT@FPS" screen_mode convention; falls
-// back to BackendCfg's default (1920x1080@60) if malformed.
+// Parses player_config's "WIDTHxHEIGHT@RATE" screen_mode (mode_pick.h);
+// the burn encoder gets the rate rounded to whole fps. Falls back to
+// BackendCfg's default (1920x1080@60) if malformed.
 maburplay::BackendCfg parse_screen_mode(const std::string& s) {
   maburplay::BackendCfg cfg;
-  int w = 0, h = 0, fps = 0;
-  if (std::sscanf(s.c_str(), "%dx%d@%d", &w, &h, &fps) == 3 && w > 0 && h > 0 && fps > 0) {
-    cfg.width = w;
-    cfg.height = h;
-    cfg.fps = fps;
+  const maburplay::ScreenWant w = maburplay::parse_screen_want(s);
+  if (w.ok) {
+    cfg.width = w.w;
+    cfg.height = w.h;
+    cfg.fps = static_cast<int>(std::lround(w.hz));
   }
   return cfg;
 }
@@ -646,6 +650,15 @@ int main(int argc, char** argv) {
                                       cfg.display.vsync_lead_ms,
                                       cfg.display.chain_budget,
                                       cfg.display.sched_cap_ms);
+  // Phase lock (display.phase_lock; phase_lock.h): steers the drone's
+  // sensor rate through maburgs and the RCF, and owns capture-time placement
+  // while it holds.
+  std::unique_ptr<maburplay::PhaseLock> phase_lock;
+  if (cfg.display.phase_lock) {
+    phase_lock = std::make_unique<maburplay::PhaseLock>(cfg.display.phase_margin_ms);
+    regulator.set_phase_lock_mode(true);
+  }
+  uint64_t phase_disconts_seen = 0;
   maburplay::LatLog lat_log;
   // Per-frame rows of the same window as the lat: line (docs/observability.md
   // "frame.log"), written in the same idle-gated 1 Hz burst so a stalled
@@ -656,7 +669,7 @@ int main(int argc, char** argv) {
   // The 1 Hz regulator: line, into the session too (docs/observability.md
   // "reg.log"): its pend/pdrop/heals counters are the presenter's side of
   // a missed latch, and /tmp/maburplay.log does not outlive a power-off.
-  maburplay::LatLog reg_log(maburplay::kSessionMarker, "reg.log", "# reglog 1");
+  maburplay::LatLog reg_log(maburplay::kSessionMarker, "reg.log", "# reglog 2");
   // Installs the display stage: the CUBIC_LUT (always a table on a LUT
   // CRTC, identity when off) or the video-plane CTM, and pre-inverts both
   // overlays only for the LUT. Runs once per presenter acquire, BEFORE
@@ -786,7 +799,8 @@ int main(int argc, char** argv) {
   // the DrmPresenter's mailbox engagement count (frame parked, or displacing
   // one already parked because a flip was in flight) -- 0 when there is no
   // presenter (decode-only, or init failed).
-  auto log_regulator_line = [&regulator, &presenter, &present_jitter_ema_ms, &reg_log]() {
+  auto log_regulator_line = [&regulator, &presenter, &present_jitter_ema_ms, &reg_log,
+                             &phase_lock]() {
     char line[512];
     if (regulator.enabled()) {
       const uint64_t pend = presenter ? presenter->mailbox_engagements() : 0;
@@ -815,6 +829,19 @@ int main(int argc, char** argv) {
                    static_cast<unsigned long long>(regulator.chain_cuts()),
                    regulator.allowance_ms(),
                    static_cast<unsigned long long>(regulator.late_slot_count()));
+      {
+        const size_t used = std::strlen(line);
+        if (phase_lock) {
+          std::snprintf(line + used, sizeof(line) - used,
+                        " lock=%s lerr=%.2fms loff=%d lctr=%.1f",
+                        maburplay::phase_lock_state_name(phase_lock->state()),
+                        phase_lock->error_ms(), static_cast<int>(phase_lock->offset_mfps()),
+                        phase_lock->centre_mfps());
+        } else {
+          std::snprintf(line + used, sizeof(line) - used,
+                        " lock=off lerr=0.00ms loff=0 lctr=0.0");
+        }
+      }
       if (presenter) {
         // present() stage cost over the last window (µs p50/max):
         // framebuffer acquire (cached dma-buf import + AddFB2), request
@@ -1129,6 +1156,9 @@ int main(int argc, char** argv) {
       maburplay::FrameRegulator::Displaced disp;
       if (regulator.offer(f, mono_us(), &disp))
         present_now(f);
+      double margin_us = 0.0;
+      if (phase_lock && regulator.take_margin(&margin_us))
+        phase_lock->on_margin(margin_us, regulator.panel_period_us(), mono_us());
       for (int i = 0; i < disp.n; ++i) {
         lat.on_drop(disp.f[i].pts_us);
         backend->release_frame(disp.f[i]);
@@ -1638,6 +1668,25 @@ int main(int argc, char** argv) {
     }
     // Every iteration: sends on change, re-sends each second (CoreControlClient).
     core_ctl.tick(rec_on && rec_vtx, mono_ms());
+#ifdef MABUR_PLAYER_HW
+    if (phase_lock) {
+      const uint64_t now = mono_us();
+      if (regulator.discont_count() != phase_disconts_seen) {
+        phase_disconts_seen = regulator.discont_count();
+        phase_lock->on_discontinuity(now);
+      }
+      const auto before = phase_lock->state();
+      phase_lock->tick(now);
+      if (phase_lock->state() != before) {
+        std::fprintf(stderr, "phase-lock: %s err=%.2fms off=%d centre=%.1f\n",
+                     maburplay::phase_lock_state_name(phase_lock->state()),
+                     phase_lock->error_ms(), static_cast<int>(phase_lock->offset_mfps()),
+                     phase_lock->centre_mfps());
+      }
+      regulator.set_capture_placement(phase_lock->locked());
+      core_ctl.tick_phase(phase_lock->offset_mfps(), now / 1000);
+    }
+#endif
     if (ring.resyncs() != resyncs_seen) {
       resyncs_seen = ring.resyncs();
       core_ctl.send_line("refresh resync");

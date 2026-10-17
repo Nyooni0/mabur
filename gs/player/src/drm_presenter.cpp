@@ -6,6 +6,7 @@
 #include "fb_cache.h"
 
 #include "in_formats.h"  // in_formats_has_linear: the IN_FORMATS parser, unit-tested
+#include "mode_pick.h"  // ModeCand, pick_mode, parse_screen_want, mode_hz
 #include "osd_layout.h"  // plan_zpos: the plane stacking policy, unit-tested
 #include "osd_surface.h"
 #include "vblank_estimator.h"  // mode_period_us: pure timing math, unit-tested
@@ -755,38 +756,36 @@ bool DrmPresenter::Impl::init(const std::string& screen_mode, bool want_osd, Rel
   }
   connector_id = chosen->connector_id;
 
-  // Mode select: "WIDTHxHEIGHT@FPS" against the connector's mode list;
-  // fall back to the connector's DRM_MODE_TYPE_PREFERRED mode (or its
-  // first mode if none is flagged preferred) with a warning.
-  int want_w = 0, want_h = 0, want_fps = 0;
-  const bool have_want =
-      std::sscanf(screen_mode.c_str(), "%dx%d@%d", &want_w, &want_h, &want_fps) == 3;
-  const drmModeModeInfo* selected = nullptr;
-  const drmModeModeInfo* preferred = nullptr;
+  // Mode select (mode_pick.h): the closest exact rate among modes of the
+  // wanted size; the preferred mode (or the first) when none fits.
+  std::vector<ModeCand> cands;
+  cands.reserve(static_cast<size_t>(chosen->count_modes));
   for (int i = 0; i < chosen->count_modes; ++i) {
     const drmModeModeInfo* m = &chosen->modes[i];
-    // Interlaced modes are never acceptable for this player (progressive
-    // 60 fps content on a 1080i mode = combing artifacts at half the
-    // temporal rate). The connector lists 1080i@60 AFTER 1080p@60, and an
-    // early version of this loop kept overwriting `selected` with later
-    // matches -- shipping the interlaced mode. Skip them entirely, and
-    // take the FIRST acceptable match.
-    if (m->flags & DRM_MODE_FLAG_INTERLACE) continue;
-    if (!preferred && (m->type & DRM_MODE_TYPE_PREFERRED)) preferred = m;
-    if (!selected && have_want && static_cast<int>(m->hdisplay) == want_w &&
-        static_cast<int>(m->vdisplay) == want_h && static_cast<int>(m->vrefresh) == want_fps) {
-      selected = m;
-    }
+    ModeCand c;
+    c.w = m->hdisplay;
+    c.h = m->vdisplay;
+    c.clock_khz = static_cast<int>(m->clock);
+    c.htotal = m->htotal;
+    c.vtotal = m->vtotal;
+    c.interlaced = (m->flags & DRM_MODE_FLAG_INTERLACE) != 0;
+    c.preferred = (m->type & DRM_MODE_TYPE_PREFERRED) != 0;
+    cands.push_back(c);
   }
-  if (!selected) {
-    selected = preferred ? preferred : (chosen->count_modes > 0 ? &chosen->modes[0] : nullptr);
-    if (selected) {
+  bool matched = false;
+  const int pick = pick_mode(cands, parse_screen_want(screen_mode), &matched);
+  const drmModeModeInfo* selected = pick >= 0 ? &chosen->modes[pick] : nullptr;
+  if (selected) {
+    if (!matched) {
       std::fprintf(stderr,
                    "DrmPresenter: warning: screen_mode \"%s\" not offered by connector %u; "
                    "falling back to %ux%u@%u\n",
                    screen_mode.c_str(), connector_id, selected->hdisplay, selected->vdisplay,
                    selected->vrefresh);
     }
+    std::fprintf(stderr, "DrmPresenter: mode %ux%u @%.3f Hz (requested %s)\n",
+                 selected->hdisplay, selected->vdisplay, mode_hz(cands[static_cast<size_t>(pick)]),
+                 screen_mode.c_str());
   }
   if (!selected) {
     if (log_init_failures)
