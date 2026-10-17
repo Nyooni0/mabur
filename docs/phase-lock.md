@@ -39,7 +39,7 @@ slot. The evidence is `docs/findings/2026-10-17-phase-lock-spike.md` and
    encoder thread sets the sensor to the trim request plus the offset,
    clamped to ±200 mfps, once the boot trim has locked (or given up): one
    sensor writer. 0 restores the trim's own request. Link loss keeps the
-   last value. A refused value is not retried until the offset changes.
+   last value. A refused value is not retried until another request succeeds.
 
 ## States
 
@@ -54,11 +54,26 @@ lock → acq after 2 windows with \|e\| > 3 ms or incoherent. oor → wait
 after 60 s. An unreachable panel (50 Hz, 59 Hz) never produces a coherent
 window and ends in oor.
 
+A sensor that refuses every `SetFps` (or a drone build with no venc
+steering at all) never moves, so the centre walks to the range limit
+without ever producing a coherent window: the lock unlocks, goes oor
+after 60 s, and retries a minute later -- a steady acq/oor cycle visible
+in `reg.log`, paired with a `[sensor] steer: ... refused` line on the
+drone.
+
 ## Wire
 
 `Rcf::snr_off`: int16 little-endian at RCF head offset 15, milli-fps on the
 drone's trim request, 0 = no steering. `RC_VERSION` 16. The web GS and
 spotters always send 0.
+
+## Deploy
+
+`RC_VERSION` 16 is a flag day for `maburd`, `maburgs` and the hosted web GS
+page: finish the deploy on both devices (and republish the web page) before
+judging the link, per `docs/deploy.md`. On the GS, the `maburplay` binary
+goes in before its config -- an older binary exits on the new
+`[display]` keys (`phase_lock`, `phase_margin_ms`).
 
 ## Configuration
 
