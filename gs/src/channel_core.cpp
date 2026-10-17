@@ -480,7 +480,16 @@ void ChannelCore::step_hop_edge_and_window_(const ChannelTickIn& in) {
     sampler_->reset(now_ms_u);
   }
   if (!active) return;
-  if (!cfg_.threaded) sampler_->step(now_ms_u);
+  if (cfg_.threaded) {
+    // One thread for the window's card reads, started once the hop is
+    // live; it stays up across sessions and samples only while active.
+    if (!sampler_started_) {
+      sampler_started_ = true;
+      sampler_->start(now_ms_, sleep_);
+    }
+  } else {
+    sampler_->step(now_ms_u);
+  }
   const auto rec = sampler_->take();
   if (!rec) return;
   const uint64_t t_ms = rec->t_ms;   // the sample instant: every per-window span is measured to it
@@ -614,6 +623,11 @@ void ChannelCore::step_controller_(const ChannelTickIn& in) {
       std::lock_guard<std::mutex> ilk(inflight_mu_);
       auto& fe = *cards_[static_cast<size_t>(burst_card)];
       inflight_->set_radio(fe);
+      // The burst leaves the op channel and returns to it, so only the
+      // generation (not the channel number) can mark an NHM arm as stale
+      // if it spans the burst; bump before and after so a read on either
+      // side of the retune-away sees a generation newer than its arm.
+      tune_gen_[static_cast<size_t>(burst_card)].fetch_add(1, std::memory_order_release);
       std::vector<ScoutDwell> recs;
       for (const auto& v : inflight_->burst(plan_.op(), recs)) ranker_.add(v);
       for (const auto& d : recs) sink_.dwell(now_ms, burst_card, d);
