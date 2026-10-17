@@ -1157,18 +1157,21 @@ TEST(sampled_record_consumed_next_tick_uses_sample_span) {
   // a record at a known time T1 (the seam restarts the cadence from T1)
   g.core->run_sampler_step();
   g.clk.ms += 10;
-  g.core->tick(g.in(true));                // consumed: window_prev_ms_[0] = T1
+  g.core->tick(g.in(true));                // consumed at T1 + 10: window_prev_ms_[0] = T1
   for (int i = 0; i < 13; ++i) g.tick(true);   // now T1 + 140, no window due before T1 + 150
   g.cards[0]->fr.own_air_us += 70000;      // 50 % of the 140 ms since T1
   g.cards[0]->fr.own += 10;
   g.core->run_sampler_step();              // sample at T1 + 140
-  g.clk.ms += 10;
+  g.clk.ms += 30;
   g.cards[0]->fr.own_air_us += 5000;       // airtime after the sample: must not count
-  g.core->tick(g.in(true));                // consume one tick later; nothing else is due
+  g.core->tick(g.in(true));                // consumed at T1 + 170; nothing else is due
   const auto e = g.core->snapshot(0).energy[0];
   REQUIRE(e.has_value());
   REQUIRE(e->own_air_pct.has_value());
-  CHECK(*e->own_air_pct > 49.0 && *e->own_air_pct < 51.0);   // 70000 / 140000; 46.7 if measured to the consume
+  // 70000 us over the 140 ms sample span (T1 -> T1 + 140) = 50 %. The two
+  // consume delays differ (10 ms, 30 ms), so a span measured between the
+  // consumes (T1 + 10 -> T1 + 170, 160 ms) reads 43.75 % instead.
+  CHECK(*e->own_air_pct > 49.0 && *e->own_air_pct < 51.0);
 }
 
 MTEST_MAIN
