@@ -401,8 +401,7 @@ damage: nothing references an enhance frame.
 
 **Clears on:** a complete base AU whose first slice NAL is an IRAP
 (16..21), requested or not — a refresh-start (TRAIL_R) picture does not
-clear it, since the GDR sweep that would have produced one is off by
-default anyway. While armed the byte is bumped again every 300 ms
+clear it: only an IRAP restarts every reference. While armed the byte is bumped again every 300 ms
 (`RefreshRequester::kRetryMs`): the expected heal is one RCF period plus
 the IDR's transit, so a retry only means the IDR itself was lost or
 truncated.

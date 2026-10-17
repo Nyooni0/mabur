@@ -656,11 +656,12 @@ chain_max= chains= cuts= alw= lslot= present= acq= req= ioctl=`.
   bundle default to budget 0 (never cut): a chain then ends only on an arrival gap, so
   through the part of the sensor/panel beat where arrivals sit just past
   the release point the whole stream runs one period late (the `lat:` p50
-  sawtooth) but nothing is dropped, and the refresh-start frame's ~10 ms
-  of extra encode, air and decode fits inside that slack. A budget N
-  instead keeps the lower latency and pays one dropped frame per cut; on a
-  clean link the refresh-start frame misses its release in about half of
-  each beat cycle and every miss then costs a repeat plus a cut (bench:
+  sawtooth) but nothing is dropped, and a key frame's ~10 ms of extra
+  encode, air and decode fits inside that slack. A budget N instead keeps
+  the lower latency and pays one dropped frame per cut; with a periodic
+  refresh (`venc.gop_s > 0`, the config these benches ran) the
+  refresh-start frame misses its release in about half of each beat cycle
+  on a clean link and every miss then costs a repeat plus a cut (bench:
   budget 3 = 59–73 % of seconds with a visible event and 1.6–2.5 drops/s,
   budget 0 = 14 % and 0.16 drops/s, at +12.5 ms median). Records:
   `docs/findings/2026-09-02-regulator-chain-budget.md` (budget 3 chosen),
