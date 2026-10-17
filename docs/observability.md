@@ -495,6 +495,15 @@ current session directory: `# latlog 2`, then one `<mono_us> <lat-payload>`
 line per second, line-buffered (`gs/player/src/lat_log.h`). The marker is
 re-read every 5 s; a missing session or failed open (DVR not mounted yet)
 never blocks and never spams, and the stderr line keeps going regardless.
+
+The player's three session files (`lat.log`, `frame.log`, `reg.log`) are
+each written by their own writer thread: the main loop, which also drives
+decode and display, only queues a row. Every marker read, open, write and
+flush happens on that thread, so an SD card that stalls on writeback (the
+burned DVR streams to the same card) delays the log, never the picture. The
+queue holds 256 KiB, about 20 s of `frame.log`; a row that does not fit is
+dropped and counted, and the file gets one `# dropped N` line where the gap
+is, as maburgs' own files do.
 `tools/bench/latab.py latA.log latB.log` reads a pair of these logs and
 prints the vsync A/B verdict (four log-derived gates: `e2e` p50 B≤A−8,
 `dsp` p50 B≤6 (level), `dsp` p99 B≤A−8, `dsp` p50 4 s-bucket sweep ≤3
@@ -508,8 +517,8 @@ window (`gs/player/src/lat_tracker.h` `FrameRow`): one row per frame that
 completed the whole chain and joined the window — a displaced frame or one
 submitted on a cold anchor gets no row, exactly as it is absent from the
 `lat:` percentiles. Written by the same follow-the-marker writer as
-`lat.log`, in the same idle-gated 1 Hz burst (never on the flip or decode
-path), buffered so each burst reaches the file in one write. Twenty-two
+`lat.log`, in the same 1 Hz burst, on its own writer thread and buffered
+so each burst reaches the file in one write. Twenty-two
 columns:
 
     t_flip pts fid sid len flags slices t_submit t_complete t_decoded t_release enc dq air fec dec reg dsp e2e exact t_commit pbits
