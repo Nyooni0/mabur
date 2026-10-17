@@ -2077,6 +2077,51 @@ class RefreshReportTest(unittest.TestCase):
         self.assertNotIn("/min", result.stdout)
 
 
+class PhaseLockReportTest(unittest.TestCase):
+    REG = (
+        "# reglog 2\n"
+        "1000000 regulator: held=1 alw=2.0ms lslot=0 lock=wait lerr=0.00ms loff=0 lctr=0.0 present=60 acq=1/2 req=1/2 ioctl=1/2\n"
+        "2000000 regulator: held=2 alw=2.0ms lslot=0 lock=acq lerr=8.10ms loff=-60 lctr=-12.0\n"
+        "3000000 regulator: held=3 alw=2.0ms lslot=0 lock=acq lerr=3.20ms loff=-60 lctr=-20.0\n"
+        "4000000 regulator: held=4 alw=2.0ms lslot=0 lock=acq lerr=0.40ms loff=8 lctr=7.0\n"
+        "5000000 regulator: held=5 alw=2.0ms lslot=0 lock=lock lerr=0.30ms loff=8 lctr=7.5\n"
+        "6000000 regulator: held=6 alw=2.0ms lslot=0 lock=lock lerr=-0.50ms loff=16 lctr=7.5\n"
+        "7000000 regulator: held=7 alw=2.0ms lslot=0 lock=lock lerr=0.20ms loff=8 lctr=7.4\n"
+    )
+
+    def test_lock_rows_and_report(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "reg.log")
+            with open(p, "w") as f:
+                f.write(self.REG)
+            rows = flightreport.load_reglog_lock(p)
+        self.assertEqual(len(rows), 7)
+        self.assertEqual(rows[1]["loff"], -60)
+        self.assertAlmostEqual(rows[5]["lerr"], -0.5)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            flightreport.print_lock_report(rows)
+        text = out.getvalue()
+        self.assertIn("PHASE LOCK", text)
+        self.assertIn("locked=43%", text)
+        self.assertIn("acquire=3 s", text)
+        self.assertIn("offset changes=4 (40.0/min)", text)   # 0>-60, -60>8, 8>16, 16>8 over 6 s
+        self.assertIn("offset range=-60..16 mfps", text)
+        self.assertIn("|lerr| while locked p50/p90/max=0.30/0.50/0.50 ms", text)
+
+    def test_reglog_1_prints_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "reg.log")
+            with open(p, "w") as f:
+                f.write("# reglog 1\n1000000 regulator: held=1 alw=2.0ms lslot=0\n")
+            rows = flightreport.load_reglog_lock(p)
+        self.assertEqual(rows, [])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            flightreport.print_lock_report(rows)
+        self.assertEqual(out.getvalue(), "")
+
+
 if __name__ == "__main__":
     test_fec_section_counterfactual_overhead_per_sid_and_rung()
     test_session_dir_mode_prints_fec_section()

@@ -904,6 +904,53 @@ def refresh_span_ms(rr, ctl=None, fec_rows=None):
     return span if span > 0 else None
 
 
+def load_reglog_lock(path):
+    """reg.log phase-lock fields per 1 Hz regulator line (`# reglog 2`):
+    `lock=<off|wait|acq|lock|oor> lerr=<ms>ms loff=<mfps> lctr=<mfps>`.
+    Rows without them (reglog 1, before the phase lock) are skipped, so an
+    empty list means the recording has no lock data."""
+    rows = []
+    with open(path) as f:
+        for line in f:
+            tok = line.split()
+            if len(tok) < 3 or tok[1] != "regulator:":
+                continue
+            kv = dict(t.split("=", 1) for t in tok[2:] if "=" in t)
+            if "lock" not in kv:
+                continue
+            rows.append({"t_us": int(tok[0]), "lock": kv["lock"],
+                         "lerr": float(kv["lerr"].rstrip("ms")),
+                         "loff": int(kv["loff"]), "lctr": float(kv["lctr"])})
+    return rows
+
+
+def print_lock_report(rows):
+    """PHASE LOCK section from load_reglog_lock rows. Silent when the
+    recording has no lock fields or the lock was off throughout."""
+    rows = [r for r in rows if r["lock"] != "off"]
+    if not rows:
+        return
+    n = len(rows)
+    locked = sum(1 for r in rows if r["lock"] == "lock")
+    first_run = next((r["t_us"] for r in rows if r["lock"] in ("acq", "lock")), None)
+    first_lock = next((r["t_us"] for r in rows if r["lock"] == "lock"), None)
+    acq = (f"{(first_lock - first_run) / 1e6:.0f} s"
+           if first_lock is not None and first_run is not None else "never")
+    oor = sum(1 for r in rows if r["lock"] == "oor")
+    print("PHASE LOCK (reg.log)")
+    print(f"  rows={n} locked={100.0 * locked / n:.0f}% acquire={acq} oor_rows={oor}")
+    span_min = (rows[-1]["t_us"] - rows[0]["t_us"]) / 60e6
+    changes = sum(1 for a, b in zip(rows, rows[1:]) if a["loff"] != b["loff"])
+    offs = [r["loff"] for r in rows]
+    rate = f" ({changes / span_min:.1f}/min)" if span_min > 0 else ""
+    print(f"  offset changes={changes}{rate} offset range={min(offs)}..{max(offs)} mfps"
+          f" centre last={rows[-1]['lctr']:.1f}")
+    errs = [abs(r["lerr"]) for r in rows if r["lock"] == "lock"]
+    if errs:
+        print(f"  |lerr| while locked p50/p90/max={_pct(errs, 0.5):.2f}/"
+              f"{_pct(errs, 0.9):.2f}/{max(errs):.2f} ms")
+
+
 def print_refresh_report(rr, ctl_E=None, fec_rows=None, span_ms=None):
     """REFRESH (demand refresh): IDR requests the GS raised because its base
     picture was damaged and nothing periodic would heal it. A request is one
@@ -1973,5 +2020,9 @@ if __name__ == "__main__":
             rr = load_refresh_rows(s.fec)
             print_refresh_report(rr, ctl_E=ctl["E"] if ctl else None, fec_rows=fec_rows,
                                  span_ms=refresh_span_ms(rr, ctl=ctl, fec_rows=fec_rows))
+        # reg.log is a sibling too: the PHASE LOCK section, silent when the
+        # recording predates the lock or ran with it off.
+        if s.reg:
+            print_lock_report(load_reglog_lock(s.reg))
     else:
         main(arg, sys.argv[2] if len(sys.argv) > 2 else None)
