@@ -51,7 +51,9 @@ vsync_lock    = true       # time frames to the screen refresh
 vsync_lead_ms = 5          # hand a frame to the display this long before the refresh
 chain_budget  = 0          # 0 = never drop a frame to cut a one-refresh-late run (smooth; the run ends on its own);
                            # N = drop one after N such frames to regain the refresh (lower latency, visible drops)
-sched_cap_ms  = 0          # time frames by when they were captured, letting one up to this many ms late keep its slot: no judder from late frames, but ~+10 ms median latency at 16; 0 = time them by arrival
+sched_cap_ms  = 16         # while the phase lock holds: a frame may arrive up to this many ms late and keep its capture-time slot; 0 = time frames by arrival
+phase_lock    = true       # steer the drone camera's frame rate so frames land a fixed margin before the screen refresh (flat latency, no judder)
+phase_margin_ms = 4        # that margin, ms: smaller is lower latency but less room for late frames
 
 # Undo the drone camera's colour tuning (the "colortrans" sensor file in the
 # drone's venc.sensor_bin) on the screen, the OSD and the recording.
