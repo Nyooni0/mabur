@@ -1970,6 +1970,27 @@ def test_session_dir_mode_prints_fec_section():
     assert "FEC EPISODES" in result.stdout, result.stdout
 
 
+class RefreshTieOrderTest(unittest.TestCase):
+    # maburgs writes I/H rows in event order. A new request in the same
+    # millisecond as the heal before it is a new request, not a retry.
+    FEC = ("feclog 4\n"
+           "I 1000 hole 1\n"
+           "H 1100 100 0\n"
+           "I 1100 hole 2\n"
+           "H 1200 100 0\n")
+
+    def test_same_ms_request_after_a_heal_is_a_new_request(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "fec.log")
+            open(p, "w").write(self.FEC)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                flightreport.print_refresh_report(flightreport.load_refresh_rows(p))
+            text = out.getvalue()
+            self.assertIn("requests=2", text)
+            self.assertIn("retries=0", text)
+
+
 class RefreshReportTest(unittest.TestCase):
     # The second FEC episode row sits at t=12000, 2.5 s after the dvr
     # request at t=9000 -- outside the 2 s join window -- so only the

@@ -867,17 +867,22 @@ def load_refresh_rows(path):
     """feclog 4 request rows (gs/src/fec_log.h): `I <t_ms> <reason> <epoch>`
     per IDR request the GS sent (a retry repeats the arming reason) and
     `H <t_ms> <heal_ms> <retries>` per complete base IRAP that cleared it.
-    Older feclog versions have none; both lists come back empty."""
+    Older feclog versions have none; both lists come back empty. Each row
+    keeps its line number as `seq`: maburgs writes the rows in event order,
+    which is the order a request/retry walk needs (several rows can share a
+    millisecond)."""
     I, H = [], []
     with open(path) as f:
-        for line in f:
+        for seq, line in enumerate(f):
             tok = line.split()
             if len(tok) != 4:
                 continue
             if tok[0] == "I":
-                I.append({"t_ms": float(tok[1]), "reason": tok[2], "epoch": int(tok[3])})
+                I.append({"t_ms": float(tok[1]), "reason": tok[2], "epoch": int(tok[3]),
+                          "seq": seq})
             elif tok[0] == "H":
-                H.append({"t_ms": float(tok[1]), "heal_ms": int(tok[2]), "retries": int(tok[3])})
+                H.append({"t_ms": float(tok[1]), "heal_ms": int(tok[2]), "retries": int(tok[3]),
+                          "seq": seq})
     return {"I": I, "H": H}
 
 
@@ -910,9 +915,11 @@ def print_refresh_report(rr, ctl_E=None, fec_rows=None, span_ms=None):
     I, H = rr["I"], rr["H"]
     if not I and not H:
         return
-    # Walk I and H rows in time order; a run starts at an I row while idle
-    # and ends at the next H row.
-    events = sorted([("I", r) for r in I] + [("H", r) for r in H], key=lambda e: e[1]["t_ms"])
+    # Walk I and H rows in the order maburgs wrote them (time order for rows
+    # without a line number); a run starts at an I row while idle and ends
+    # at the next H row.
+    events = sorted([("I", r) for r in I] + [("H", r) for r in H],
+                    key=lambda e: (e[1].get("seq", -1), e[1]["t_ms"]))
     requests, by_reason, retries, armed = [], {}, 0, False
     for kind, r in events:
         if kind == "H":
