@@ -162,6 +162,11 @@ struct AuLatMeta {
   // prefix, so this is free. 16..21 is an IRAP; a refresh start is TRAIL_R.
   // au.log's vcl column and the refresh requester's clearing condition.
   uint8_t vcl_nal = 0;
+  // Whole AUs FrameStream skipped (never emitted) immediately before this
+  // one, in stream order. The refresh requester reads them here, on the
+  // AU that follows them, so a skip healed by the IRAP right after it asks
+  // for nothing. Not in the SlotHdr or au.log.
+  uint32_t skipped_before = 0;
 };
 
 // Creates/truncates the ring file and publishes AUs. Never blocks on

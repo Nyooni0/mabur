@@ -388,9 +388,9 @@ later complete base IRAP clears it: FEC → NACK → request → IDR → clear.
 repair window has already passed; reason `hole`); a base AU rebuilt by
 slice salvage (a filled band is a stale reference; `FrameStream` reports
 it incomplete with the salvaged flag set, and it books as `salvaged`, not
-`hole`); any AU the stream force-advanced past
-(`FrameStream::frames_dropped()` rising — its layer is unknown, so it
-counts as base); or one of four one-shot reports from `maburplay` over
+`hole`); whole AUs the stream skipped (reason `lost`; their layer is
+unknown, so they count as base); or one of four one-shot reports from
+`maburplay` over
 the same loopback control socket that carries the record button's VTX
 wish (`gs/player/src/core_control_client.h`, `docs/vtx-recorder.md`
 "Wire"): `start` (ring open, nothing to arm on yet), `resync` (the ring
@@ -399,17 +399,27 @@ the backend — not raised on an ordinary decode error), and `dvr` (the
 raw DVR opened and needs a key frame to begin on). Never arms on enhance
 damage: nothing references an enhance frame.
 
+A skip is reported on the AU emitted right after it
+(`AuLatMeta::skipped_before`), in stream order. When that AU is a complete
+base IRAP the skip is already healed and arms nothing, so the answering
+IDR arriving behind a skipped AU does not buy a second one. A late copy of
+a skipped AU is evicted, and a headerless slot aged out, without booking
+anything: the skip itself already did (both still count in
+`frames_dropped()`). AUs lost at the end of a stream with no successor arm
+nothing until the next AU arrives.
+
 **Clears on:** a complete base AU whose first slice NAL is an IRAP
 (16..21), requested or not — a refresh-start (TRAIL_R) picture does not
-clear it: only an IRAP restarts every reference. While armed the byte is bumped again every 300 ms
-(`RefreshRequester::kRetryMs`): the expected heal is one RCF period plus
+clear it: only an IRAP restarts every reference. While armed the byte is
+bumped again every 300 ms (`RefreshRequester::kRetryMs`): the expected heal is one RCF period plus
 the IDR's transit, so a retry only means the IDR itself was lost or
 truncated.
 
 **Across an outage.** Retries only run while maburgs is in a session
 (`vrx.link_state() == SESSION`): with no drone to hear them, they would
 only pile up `I` rows. Arming still bumps the epoch at once whatever the
-link state, and the first in-session tick resumes the 300 ms retry clock.
+link state, and the first in-session tick retries at once if the last
+bump is 300 ms old.
 `heal_ms` counts from arming, though, so a request armed before the link
 is up — the player's boot `start`, which usually lands long before the
 drone powers up, or a hole at the start of an outage — reads as a long

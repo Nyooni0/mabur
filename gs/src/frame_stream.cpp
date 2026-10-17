@@ -137,6 +137,7 @@ void FrameStream::try_emit(uint64_t now_ms) {
         bool ahead = max_known >= next_emit_id64_ + static_cast<uint64_t>(cfg_.lookahead);
         if (!stale && !ahead) return;
         dropped_ += head->id64 - next_emit_id64_;
+        head->lat.skipped_before += static_cast<uint32_t>(head->id64 - next_emit_id64_);
         next_emit_id64_ = head->id64;
       }
     }

@@ -19,10 +19,14 @@ namespace maburgs {
 // Arms on: a base AU finished incomplete (the NACK's repair window has
 // already passed by then; reason hole), a base AU rebuilt by slice
 // salvage (FrameStream reports it incomplete with salvaged set; a filled
-// base band is a stale reference; reason salvaged), any AU the stream
-// advanced past (its layer is unknown, so it counts as base), or a player
-// report. Never on enhance damage: nothing references an enhance frame.
-// A salvaged AU never clears, even if reported complete.
+// base band is a stale reference; reason salvaged), AUs the stream skipped
+// whole (reason lost; their layer is unknown, so they count as base), or a
+// player report. Never on enhance damage: nothing references an enhance
+// frame. A salvaged AU never clears, even if reported complete.
+//
+// Skipped AUs arrive on the AU emitted right after them (skipped_before),
+// in stream order. When that AU is a complete base IRAP the skip is healed
+// by it and arms nothing; a late copy of a skipped AU is never booked.
 //
 // Clears on: a COMPLETE base AU whose first slice NAL is an IRAP
 // (16..21), requested or not. A refresh-start picture (TRAIL_R) does not
@@ -54,21 +58,18 @@ class RefreshRequester {
     uint64_t retries;
   };
 
-  void note_au(uint8_t sid, bool complete, bool salvaged, uint8_t vcl_nal, uint64_t now_ms) {
-    if (sid != 0) return;
-    if (complete && !salvaged) {
-      if (vcl_nal >= 16 && vcl_nal <= 21) clear_(now_ms);
+  // One finished AU. skipped_before: whole AUs FrameStream skipped right
+  // before it (AuLatMeta::skipped_before).
+  void note_au(uint8_t sid, bool complete, bool salvaged, uint8_t vcl_nal,
+               uint32_t skipped_before, uint64_t now_ms) {
+    const bool clean = complete && !salvaged;
+    if (sid == 0 && clean && vcl_nal >= 16 && vcl_nal <= 21) {
+      clear_(now_ms);  // also heals whatever was skipped right before it
       return;
     }
+    if (skipped_before > 0) arm_(Reason::kLost, now_ms);
+    if (sid != 0 || clean) return;
     arm_(salvaged ? Reason::kSalvaged : Reason::kHole, now_ms);
-  }
-
-  // Cumulative FrameStream::frames_dropped(); a rise is AUs the stream
-  // force-advanced past.
-  void note_dropped_total(uint64_t total, uint64_t now_ms) {
-    if (have_dropped_ && total > dropped_seen_) arm_(Reason::kLost, now_ms);
-    dropped_seen_ = total;
-    have_dropped_ = true;
   }
 
   void request(Reason r, uint64_t now_ms) { arm_(r, now_ms); }
@@ -134,8 +135,6 @@ class RefreshRequester {
   uint64_t armed_since_ms_ = 0;
   uint64_t last_bump_ms_ = 0;
   uint64_t retries_this_ = 0;
-  uint64_t dropped_seen_ = 0;
-  bool have_dropped_ = false;
   Counters c_;
   std::vector<Event> events_;
 };

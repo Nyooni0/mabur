@@ -140,6 +140,33 @@ TEST(lookahead_forces_advance) {
   CHECK(fs.frames_clean() == 3);
 }
 
+// Whole AUs the stream skips ride on the AU emitted right after them, in
+// stream order, so the refresh requester can tell a skip healed by the IDR
+// that follows it from a skip that needs one. A late copy of a skipped AU is
+// evicted, not booked again.
+TEST(skipped_aus_ride_on_the_next_emitted_au) {
+  Capture cap;
+  FrameStream fs({50, 8}, cap.cbs());
+  mabur::Fragmenter frag;
+  std::vector<uint8_t> pay(400, 0x5A);
+  auto f0 = frag_frame(frag, 0, pay);
+  auto f1 = frag_frame(frag, 1, pay);    // frame 1: wholly lost for now
+  auto f2 = frag_frame(frag, 2, pay);
+  auto f3 = frag_frame(frag, 3, pay);
+  for (auto& p : f0) fs.push_fragment(1, p.data(), p.size(), 10);
+  for (auto& p : f2) fs.push_fragment(1, p.data(), p.size(), 11);
+  for (auto& p : f3) fs.push_fragment(1, p.data(), p.size(), 11);
+  fs.poll(80);                           // the gap before frame 2 goes stale
+  REQUIRE(cap.evs.size() == 6);          // B E (0), B E (2), B E (3)
+  CHECK(cap.evs[1].lat.skipped_before == 0);
+  CHECK(cap.evs[2].hdr.frame_id == 2);
+  CHECK(cap.evs[3].lat.skipped_before == 1);
+  CHECK(cap.evs[5].lat.skipped_before == 0);
+  for (auto& p : f1) fs.push_fragment(1, p.data(), p.size(), 90);   // late copy
+  fs.poll(91);
+  CHECK(cap.evs.size() == 6);            // evicted, never emitted, never re-booked
+}
+
 TEST(discontinuity_resets_ordering) {
   Capture cap;
   FrameStream fs({50, 8}, cap.cbs());

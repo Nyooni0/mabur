@@ -736,7 +736,7 @@ static int run_radio(const maburgs::Config& cfg) {
          // boundary to start
          // its dwell on, not a specific outcome.
          chan.note_au_end();
-         refresh.note_au(cur_au_sid, c, lat.slice.salvaged, lat.vcl_nal, mono_ms());
+         refresh.note_au(cur_au_sid, c, lat.slice.salvaged, lat.vcl_nal, lat.skipped_before, mono_ms());
          if (au_on) {
            const uint64_t rec = au_ring.finish(c, lat);
            if (rec != UINT64_MAX) au_bell.notify(rec);
@@ -1343,8 +1343,7 @@ static int run_radio(const maburgs::Config& cfg) {
     // only run in a session: with no drone to hear them (the player's boot
     // `start` arrives long before the drone powers up, and every outage)
     // they would only pile up `I` rows; arming still bumps at once, and the
-    // first in-session poll resumes the retry clock.
-    refresh.note_dropped_total(fstream.frames_dropped(), drained_ms);
+    // first in-session poll retries at once if the last bump is 300 ms old.
     if (in_session) refresh.poll(drained_ms);
     vrx.set_idr_epoch(refresh.epoch());
     for (const auto& e : refresh.take_events()) {
@@ -2038,7 +2037,7 @@ int main(int argc, char** argv) {
          file_out.append(d, n);
        },
        [&](bool c, const maburgs::AuLatMeta& lat) {
-         dry_refresh.note_au(dry_sid, c, lat.slice.salvaged, lat.vcl_nal, replay_ms);
+         dry_refresh.note_au(dry_sid, c, lat.slice.salvaged, lat.vcl_nal, lat.skipped_before, replay_ms);
          if (au_on) {
            const uint64_t rec = au_ring.finish(c, lat);
            if (rec != UINT64_MAX) au_bell.notify(rec);
@@ -2061,7 +2060,6 @@ int main(int argc, char** argv) {
     agg.on_rx_body(*m);
     const uint64_t now_ms = m->mono_us / 1000;
     fstream.poll(now_ms);
-    dry_refresh.note_dropped_total(fstream.frames_dropped(), now_ms);
     if (au_on) au_bell.poll();
     last_ms = now_ms;
   }
@@ -2071,7 +2069,6 @@ int main(int argc, char** argv) {
   // flush's clock.
   replay_ms = last_ms + static_cast<uint64_t>(cfg.video.frame_gap_timeout_ms) + 1;
   fstream.poll(replay_ms);
-  dry_refresh.note_dropped_total(fstream.frames_dropped(), replay_ms);
 
   if (au_on)
     std::fprintf(stderr, "au_ring: published=%llu dropped_oversize=%llu\n",

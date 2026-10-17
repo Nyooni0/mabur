@@ -69,13 +69,16 @@ echo "== 2 cards, 20% independent loss each: union recovers everything, both str
 python3 tests/integration/verify_aus.py "$TMP/aus2.bin" "$FIX" --require-all \
   --min-stream0 1.0 --min-stream1 1.0
 
-echo "== 60% loss past the FEC: a lost or truncated AU must raise a refresh request =="
-# Seed 1 loses whole AUs (frames_out dropped=3, truncated=0), so this run
-# arms on the stream's dropped-AU count ("lost": the layer of a skipped AU
-# is unknown, so it counts as base). The fixture's only IRAP is its first
-# frame, so the request never heals and the count stays at 1.
+echo "== 40% loss past the FEC: a lost or truncated AU must raise a refresh request =="
+# Seed 2 truncates a base AU and skips a whole AU mid-stream (frames_out
+# truncated=1), so this run arms on a base hole and on an AU the stream
+# skipped ("lost": the skipped AU's layer is unknown, so it counts as base;
+# the AU emitted after the skip carries it). AUs lost after the fixture's
+# last AU have no successor to carry them and arm nothing here. The
+# fixture's only IRAP is its first frame, so the request never heals and
+# the count stays at 1.
 "$MABURGS" -c "$GSCFG" --dry-run --in "$TMP/frames.bin" \
-  --drop-pct 60 --seed 1 --out-aus "$TMP/aus3.bin" 2> "$TMP/lossy.err" || true
+  --drop-pct 40 --seed 2 --out-aus "$TMP/aus3.bin" 2> "$TMP/lossy.err" || true
 grep -E 'refresh_requests=[1-9]' "$TMP/lossy.err" || { echo "lossy replay produced no refresh request"; cat "$TMP/lossy.err"; exit 1; }
 
 echo "== all GS E2E checks passed =="
