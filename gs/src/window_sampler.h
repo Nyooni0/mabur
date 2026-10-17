@@ -1,0 +1,104 @@
+#pragma once
+// WindowSampler: the channel-health window's card reads, off the core
+// thread. Every hop.window_ms it samples each card -- survey rebase, NHM
+// busy read, FA/CCA delta, frame counters, NHM re-arm -- and hands the core
+// one WindowRecord through a one-slot mailbox. The reads are synchronous
+// USB register I/O that shares devourer's per-device lock with the card's
+// own coex tick (10-26 ms every 2 s); the core thread must never wait on
+// that, because a frame body waits in BodyQueue for as long as it does.
+// Threaded: its own thread (start/stop). Stepped (tests, the web GS
+// without core_threads): step() from tick(), same tick as the consume.
+// Owns the per-card NhmWindowTracker: an NHM reading counts only if this
+// sampler armed it, on the same channel, with no scout dwell and no core
+// retune since (the two generation counters the core bumps).
+#include <atomic>
+#include <cstdint>
+#include <functional>
+#include <mutex>
+#include <optional>
+#include <thread>
+#include <vector>
+
+#include "link_card.h"
+#include "nhm_window.h"
+#include "sweep_types.h"
+
+namespace maburgs {
+
+struct CardSample {
+  bool valid = false;                   // ready, not blocked, on the op channel
+  std::optional<double> nhm_busy_pct;   // empty = no NHM evidence this window
+  ScoutEnergy energy;                   // read_energy_scout(): fa/cca since the previous read
+  ScoutFrames frames;                   // counters at the sample instant
+  uint8_t channel = 0;
+  SurveyWindow survey;                  // relay cards; invalid on USB cards
+};
+
+struct WindowRecord {
+  uint64_t t_ms = 0;                    // sample instant, the core's ms clock
+  std::vector<CardSample> cards;
+};
+
+struct WindowSamplerCfg {
+  int window_ms = 150;
+  uint16_t nhm_period_4us = 0;          // the arm period (nhm_period_4us(window_ms - 10))
+  int busy_dbm = -83;                   // radio.scan.busy.busy_dbm
+};
+
+// Facts the core thread owns, mirrored as atomics it writes and the
+// sampler only reads. card_blocked = the boot scout owns the card or a
+// relay sweep is on it; a dwell in progress is dwell_busy/dwell_card.
+struct WindowGates {
+  const std::atomic<bool>& in_session;
+  const std::atomic<bool>& cal_running;
+  const std::atomic<uint8_t>& op;
+  const std::atomic<bool>& dwell_busy;
+  const std::atomic<int>& dwell_card;
+  const std::vector<std::atomic<uint32_t>>& dwell_gen;
+  const std::vector<std::atomic<uint32_t>>& tune_gen;
+  const std::vector<std::atomic<bool>>& card_blocked;
+};
+
+class WindowSampler {
+ public:
+  using NowMsFn = std::function<uint64_t()>;
+  using SleepFn = std::function<void(int)>;
+
+  WindowSampler(std::vector<LinkCard*> cards, WindowSamplerCfg cfg, WindowGates gates);
+  ~WindowSampler();   // stop()
+  WindowSampler(const WindowSampler&) = delete;
+  WindowSampler& operator=(const WindowSampler&) = delete;
+
+  bool active() const;                    // in_session && !cal_running
+  WindowRecord sample_once(uint64_t now_ms);
+  // Hop-inactive edge: drop every arm and the mailbox, restart the cadence
+  // so the first window after the edge is a full window_ms away.
+  void reset(uint64_t now_ms);
+  // Stepped mode: one cadence check; publishes when a window is due and active.
+  void step(uint64_t now_ms);
+  // Sample and publish now, whatever the cadence, and restart it from now
+  // (ChannelCore's test seam).
+  void step_now(uint64_t now_ms);
+  // Threaded mode: one thread, sleep_ms(window_ms) between passes.
+  void start(NowMsFn now_ms, SleepFn sleep_ms);
+  void stop();                            // idempotent; joins
+
+  void publish(WindowRecord r);           // newest wins; a replaced record is counted
+  std::optional<WindowRecord> take();     // core thread
+  uint64_t dropped() const { return dropped_.load(std::memory_order_relaxed); }
+
+ private:
+  std::vector<LinkCard*> cards_;
+  WindowSamplerCfg cfg_;
+  WindowGates gates_;
+  std::vector<NhmWindowTracker> trackers_;   // sampling thread only (after reset_req_)
+  std::atomic<bool> reset_req_{false};
+  uint64_t last_ms_ = 0;                     // stepped cadence (core thread)
+  std::mutex mu_;
+  std::optional<WindowRecord> box_;
+  std::atomic<uint64_t> dropped_{0};
+  std::atomic<bool> run_{false};
+  std::thread th_;
+};
+
+}  // namespace maburgs
