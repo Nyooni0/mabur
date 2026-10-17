@@ -229,12 +229,15 @@ reconn=]` per relay card.
 
 Top level, unconditional (idle defaults while pinned): `hop = {verdict,
 evidence, ref_rung, epoch, state (idle|ordered|verifying|hold), target,
-hops, holds, last_ms, sweep_timeouts}` — `ref_rung` and `target` are
-`null` while unfrozen / before the first-ever order, `last_ms` is `null`
-until any hop event has fired. `sweep_timeouts` counts relay `SCAN`s that
-got no `SCAN_RESULT` before their timeout
+hops, holds, last_ms, sweep_timeouts, sampler_dropped}` — `ref_rung` and
+`target` are `null` while unfrozen / before the first-ever order, `last_ms`
+is `null` until any hop event has fired. `sweep_timeouts` counts relay
+`SCAN`s that got no `SCAN_RESULT` before their timeout
 (`max(1000, passes·n·(observe_ms+40)+300)` ms); 0 on a GS that never sweeps
-a relay. maburtop's header shows `hop <state>/<verdict>`. Full key
+a relay. `sampler_dropped` counts channel-health window records the
+sampler thread published that the core loop never consumed (replaced by
+the next window): 0 unless the core loop fell a whole `hop.window_ms`
+behind. maburtop's header shows `hop <state>/<verdict>`. Full key
 semantics, the OSD `(h)` mark and the `flightreport.py` HOP section:
 `docs/inflight-channel-hop.md`.
 

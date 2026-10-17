@@ -152,6 +152,7 @@ ChannelSnapshot ChannelCore::snapshot(int tx_card) const {
   s.hop.holds = hopc_.holds();
   s.hop.last_ms = last_hop_event_ms_;
   s.hop.sweep_timeouts = sweep_timeouts_;
+  s.hop.sampler_dropped = sampler_dropped();
   s.energy = energy_last_;
   s.dwell = dwell_stats_;
   s.scout_gated_sends = scout_gated_sends_;

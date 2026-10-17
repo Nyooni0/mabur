@@ -1,6 +1,7 @@
 # Why does maburgs's core thread leave a frame body in the RX queue for 8-26 ms, five times a minute?
 
-**Status:** investigation, root cause found, nothing fixed. The latency
+**Status:** investigation, root cause found; fixed by the window sampler
+(`docs/inflight-channel-hop.md`, "Verdict engine"). The latency
 stamps it was read from are `docs/observability.md` (`au.log`
 `t_last`/`t_drain`); the per-window sensor reads belong to the channel
 health check in `docs/inflight-channel-hop.md`; the lock lives in devourer

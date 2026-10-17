@@ -564,6 +564,7 @@ bool StatsExporter::poll(uint64_t now_ms, const StatsInput& in) {
   hop["holds"] = in.hop.holds;
   if (in.hop.last_ms) hop["last_ms"] = *in.hop.last_ms; else hop["last_ms"] = nullptr;
   hop["sweep_timeouts"] = in.hop.sweep_timeouts;
+  hop["sampler_dropped"] = in.hop.sampler_dropped;
 
   if (in.telem) {
     const mabur::rc::Telem& t = *in.telem;

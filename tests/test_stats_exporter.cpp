@@ -1147,6 +1147,7 @@ TEST(exports_hop_block_and_card_dwell) {
   in.hop.holds = 0;
   in.hop.last_ms = 250;
   in.hop.sweep_timeouts = 3;
+  in.hop.sampler_dropped = 4;
   in.cards[0].dwell = StatsDwellIn{12, 13, 9800};
   in.cards.push_back(StatsCardIn{});  // card 1: never scouted -> dwell stays null
   Capture cap;
@@ -1158,6 +1159,7 @@ TEST(exports_hop_block_and_card_dwell) {
   CHECK(j["hop"]["evidence"] == 6);
   CHECK(j["hop"]["ref_rung"] == 3);
   CHECK(j["hop"]["epoch"] == 2);
+  CHECK(j["hop"]["sampler_dropped"] == 4);
   CHECK(j["hop"]["state"] == "ordered");
   CHECK(j["hop"]["target"] == 149);
   CHECK(j["hop"]["hops"] == 1);

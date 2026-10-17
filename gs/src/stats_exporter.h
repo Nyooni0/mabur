@@ -264,6 +264,10 @@ struct StatsHopIn {
   // Relay sweeps (SCANs) that got no SCAN_RESULT before their timeout,
   // cumulative this process (ChannelCore::sweep_timeouts()).
   uint64_t sweep_timeouts = 0;
+  // Window records the sampler published that the core never took
+  // (replaced by the next one): a core loop that fell a whole
+  // hop.window_ms behind. Cumulative this process.
+  uint64_t sampler_dropped = 0;
 };
 
 struct StatsInput {
