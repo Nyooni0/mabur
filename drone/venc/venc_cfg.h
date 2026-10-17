@@ -116,9 +116,12 @@ typedef struct {
 /* GOP frame count the rate attribute carries for venc.gop_s = 0: "never".
  * Not infinite -- the SDK takes a frame count -- but long enough that the
  * stream is refreshed only by IDRs the link asks for (bitrate change,
- * chain break, GS request). The bench pins the largest count the SDK
- * accepts; see docs/findings/2026-10-17-long-gop-spike.md. */
-#define VENC_GOP_NONE 36000u
+ * chain break, GS request): 65535 frames is 18 min at 60 fps. It is the
+ * largest count tried that the star6e SDK accepts; 216000 passes
+ * MI_VENC_CreateChn but StartRecvPic refuses it ("Cbr invalid parameter").
+ * See docs/findings/2026-10-17-sdk-gop-ceiling.md and
+ * docs/findings/2026-10-17-long-gop-spike.md. */
+#define VENC_GOP_NONE 65535u
 
 /* Practical VENC bitrate rails, ported verbatim from
  * waybeam_venc f956a52:include/venc_config.h.  Below ~1 Mbit/s the H.26x
