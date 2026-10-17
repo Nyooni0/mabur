@@ -33,6 +33,8 @@ Bench drone and bench Radxa, rung 4, static night scene, `vsync_lead_ms`
   so each is a step away and a step back.
 - Run C: the phase-lock servo from the previous spike at a 15.5 ms hold
   for 328 s, read with the same per-window script as its run B.
+- Run D: the same 10 s GOP with no servo, 330 s (session 0133), against
+  the last 144 s of session 0130 (`gop_s` 0.5, no servo) as its baseline.
 
 ## Result
 
@@ -50,31 +52,33 @@ seconds), restarting the GOP period each time. The 22 Mbit/s write did not
 raise the delivered rate above 14 Mbit/s; whether the static scene cannot
 fill it or something clipped it was not pursued.
 
-Run C against run B (`gop_s` 0.5, same servo, same target, same scene):
+The four combinations, same scene and rung, lock runs at a 15.5 ms hold:
 
-| | run B, GOP 0.5 s | run C, GOP 10 s |
-|---|---|---|
-| e2e p50 / p90 / p99 | 38.1 / 53.9 / 55.2 ms | 37.3 / 38.2 / 54.0 |
-| e2e p50 range over 10 s buckets | 37 to 53 | 36 to 38 |
-| judder seconds (lat p99 ≥ p50+10) | 66 % | 14 % |
-| refresh pictures | 543 (2/s) | 33 (0.1/s) |
-| refresh pictures late | 39 % | 73 % |
-| displaced frames | 0.88/s | 0.14/s |
-| pts holes from the rate toggles | 0 | 0 |
+| | GOP 0.5 s, no lock | GOP 0.5 s, lock (run B) | GOP 10 s, no lock (run D) | GOP 10 s, lock (run C) |
+|---|---|---|---|---|
+| e2e p50 / p90 / p99 | 45.7 / 51.4 / 54.2 ms | 38.1 / 53.9 / 55.2 | 41.8 / 49.7 / 51.1 | 37.3 / 38.2 / 54.0 |
+| e2e p50 range over 10 s buckets | 37 to 52 (sawtooth) | 37 to 53 | 35 to 51 (sawtooth) | 36 to 38 |
+| judder seconds (lat p99 ≥ p50+10) | 15 % | 66 % | 5 % | 14 % |
+| refresh pictures late | 6 % | 39 % | 15 % | 73 % |
+| displaced frames | 0.07/s | 0.88/s | 0.04/s | 0.14/s |
 
 The refresh picture is larger and later at the long GOP (66 kB, excess
-17 / 21 / 24 ms p50 / p90 / p99 against 15 / 18 / 21), so it misses more
-often, but it comes 20 times less often. The remaining 14 % of judder
-seconds is almost entirely the one miss per 10 s and its displacement.
+17 / 21 / 24 ms p50 / p90 / p99 against 15 / 18 / 21), but it comes 20
+times less often. Without the lock the sawtooth sweeps through phases
+where the refresh picture fits (the chained half of the beat), so only
+one in seven misses; the lock pins the typical frame at the most slack a
+period allows, where a 17 ms excess misses almost every time. The lock's
+remaining 14 % of judder seconds is that one miss per 10 s and its
+displacement; the price of the flat 37 ms is 5 → 14 % judder.
 
 ## Answer
 
 The CBR objection to a long GOP does not reproduce: with a keyframe on
 every bitrate change the rate control settles within a second of a step
-and the ladder climbs exactly as at 0.5 s. A 10 s GOP plus the phase lock
-gives a flat 37 to 38 ms glass latency with judder in 14 % of seconds on a
-clean bench, against 66 % at the shipped GOP and the 38 → 54 ms sawtooth
-today. Taking the GOP longer than the config allows, or replacing the
+and the ladder climbs exactly as at 0.5 s. The long GOP alone cuts
+judder seconds from 15 % to 5 % on the bench and leaves the sawtooth as it
+is; adding the phase lock gives a flat 37 to 38 ms glass latency with
+judder in 14 % of seconds, against 66 % for the lock at the shipped GOP. Taking the GOP longer than the config allows, or replacing the
 periodic refresh with a GS-requested one, would remove the remaining
 hitch on a clean link.
 
