@@ -39,4 +39,25 @@ TEST(client_send_line_reaches_the_refresh_queue) {
   CHECK(ctl.wire() == 0);  // a refresh line never touches the VTX wish
 }
 
+TEST(client_phase_reaches_rec_control_and_times_out) {
+  constexpr int kPort = 18403;
+  maburgs::RecControl ctl;
+  REQUIRE(ctl.open(kPort));
+  maburplay::CoreControlClient cli;
+  REQUIRE(cli.open(kPort));
+  cli.tick_phase(-37, 0);
+  CHECK(cli.sent() == 1);
+  ctl.poll(100);
+  CHECK(ctl.snr_off(100) == -37);
+  cli.tick_phase(-37, 500);            // same value inside the period: quiet
+  CHECK(cli.sent() == 1);
+  cli.tick_phase(-37, 1000);           // period elapsed: re-send
+  CHECK(cli.sent() == 2);
+  cli.tick_phase(12, 1001);            // change: immediate
+  CHECK(cli.sent() == 3);
+  ctl.poll(1100);
+  CHECK(ctl.snr_off(1100) == 12);
+  CHECK(ctl.snr_off(1100 + maburgs::RecControl::kPhaseTimeoutMs + 1) == 0);
+}
+
 MTEST_MAIN

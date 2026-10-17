@@ -1256,8 +1256,9 @@ static int run_radio(const maburgs::Config& cfg) {
     // Compiled into every prod build, unlike loss_ctl above (cal_control.h).
     const auto cal_state_before_poll = cal_session.state();
     cal_ctl.poll(cal_session);
-    rec_ctl.poll();
+    rec_ctl.poll(drained_ms);
     vrx.set_rec_wish(rec_ctl.wire());
+    vrx.set_snr_off(rec_ctl.snr_off(drained_ms));
     for (const std::string& r : rec_ctl.take_refresh()) {
       const auto reason = maburgs::RefreshRequester::reason_from(r);
       if (!reason) {

@@ -46,4 +46,29 @@ TEST(rec_control_refresh_lines) {
   CHECK(c.wire() == (mabur::rc::kRecKnown | mabur::rc::kRecOn));
 }
 
+// `phase <mfps>`: maburplay's phase-lock offset, held until the player goes
+// quiet for kPhaseTimeoutMs, then 0 (the drone falls back to its trim).
+TEST(rec_control_phase_line_held_with_timeout) {
+  RecControl c;
+  CHECK(c.snr_off(0) == 0);                   // nothing heard yet: no steering
+  CHECK(!c.apply("phase -37", 1000));         // never a VTX wish change
+  CHECK(c.snr_off(1000) == -37);
+  CHECK(c.snr_off(1000 + RecControl::kPhaseTimeoutMs) == -37);
+  CHECK(c.snr_off(1001 + RecControl::kPhaseTimeoutMs) == 0);
+  CHECK(!c.apply("phase 200\n", 5000));       // the range edge, newline tolerated
+  CHECK(c.snr_off(5000) == 200);
+  CHECK(c.wire() == 0);                       // the VTX wish is untouched
+}
+
+TEST(rec_control_phase_rejects_bad_values) {
+  RecControl c;
+  c.apply("phase 12", 0);
+  c.apply("phase 201", 10);
+  c.apply("phase -201", 10);
+  c.apply("phase abc", 10);
+  c.apply("phase 5x", 10);
+  CHECK(c.snr_off(10) == 12);   // the last good value stays
+  CHECK(c.phase_rejects() == 4);
+}
+
 MTEST_MAIN

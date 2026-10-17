@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 namespace maburplay {
@@ -15,7 +16,9 @@ namespace maburplay {
 // restarted maburgs converges within a second). send_line() carries one-shot
 // reports ("refresh <reason>": the picture needs a key frame); loopback
 // does not lose datagrams, and the core keeps asking the drone until an
-// IRAP lands, so one send is enough.
+// IRAP lands, so one send is enough. tick_phase() carries the phase lock's
+// sensor-rate offset the same way (on change, re-sent every kPeriodMs, so
+// maburgs' 3 s timeout never fires while the player runs).
 class CoreControlClient {
  public:
   static constexpr uint64_t kPeriodMs = 1000;
@@ -46,6 +49,17 @@ class CoreControlClient {
     ++sent_;
   }
 
+  void tick_phase(int32_t mfps, uint64_t now_ms) {
+    if (fd_ < 0) return;
+    if (phase_sent_ && mfps == last_phase_ && now_ms - phase_ms_ < kPeriodMs) return;
+    char msg[32];
+    std::snprintf(msg, sizeof(msg), "phase %d", static_cast<int>(mfps));
+    send_line(msg);
+    phase_sent_ = true;
+    last_phase_ = mfps;
+    phase_ms_ = now_ms;
+  }
+
   void send_line(const char* line) {
     if (fd_ < 0) return;
     (void)sendto(fd_, line, std::strlen(line), 0, reinterpret_cast<const sockaddr*>(&addr_),
@@ -62,6 +76,9 @@ class CoreControlClient {
   bool last_on_ = false;
   uint64_t last_ms_ = 0;
   uint64_t sent_ = 0;
+  bool phase_sent_ = false;
+  int32_t last_phase_ = 0;
+  uint64_t phase_ms_ = 0;
 };
 
 }  // namespace maburplay
