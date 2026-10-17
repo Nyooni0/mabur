@@ -2011,6 +2011,49 @@ class RefreshReportTest(unittest.TestCase):
             self.assertIn("heal_ms p50/p90/max=120/428/428", text)
             self.assertIn("with demote within 2 s: 1", text)
             self.assertIn("with fec episode within 2 s: 1", text)
+            self.assertNotIn("/min", text)       # no session span given: no rate
+
+    def _report(self, rr, **kw):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            flightreport.print_refresh_report(rr, **kw)
+        return out.getvalue()
+
+    def test_rate_is_per_session_minute(self):
+        rr = {"I": [{"t_ms": 1000.0, "reason": "hole", "epoch": 1},
+                    {"t_ms": 2000.0, "reason": "dvr", "epoch": 2}],
+              "H": [{"t_ms": 1150.0, "heal_ms": 150, "retries": 0},
+                    {"t_ms": 2150.0, "heal_ms": 150, "retries": 0}]}
+        # Two requests one second apart in a two-minute session: 1.0/min,
+        # not the 2-per-1.15 s figure the I/H rows alone would give.
+        self.assertIn("requests=2 (1.0/min)", self._report(rr, span_ms=120000.0))
+
+    def test_single_request_prints_no_rate(self):
+        rr = {"I": [{"t_ms": 1000.0, "reason": "start", "epoch": 1}],
+              "H": [{"t_ms": 1150.0, "heal_ms": 150, "retries": 0}]}
+        text = self._report(rr, span_ms=120000.0)
+        self.assertIn("requests=1 start=1", text)
+        self.assertNotIn("/min", text)        # one request is not a rate
+
+    def test_refresh_span_takes_the_session_extent(self):
+        rr = {"I": [{"t_ms": 5000.0, "reason": "hole", "epoch": 1}],
+              "H": [{"t_ms": 5200.0, "heal_ms": 200, "retries": 0}]}
+        ctl = {"S": [{"t_ms": 0.0}, {"t_ms": 60000.0}], "E": []}
+        self.assertEqual(flightreport.refresh_span_ms(rr, ctl=ctl), 60000.0)
+        fec = [{"t_ms": 1000.0}, {"t_ms": 9000.0}]
+        self.assertEqual(flightreport.refresh_span_ms(rr, fec_rows=fec), 8000.0)
+        # Only the I/H rows themselves: the span is unknown.
+        self.assertIsNone(flightreport.refresh_span_ms(rr))
+
+    def test_bare_feclog_single_request_prints_no_absurd_rate(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "fec.log")
+            open(p, "w").write("feclog 4\nI 1000 hole 1\nH 1150 150 0\n")
+            result = subprocess.run([sys.executable, "tools/flightreport.py", p],
+                                    capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("requests=1 hole=1", result.stdout)
+        self.assertNotIn("/min", result.stdout)
 
 
 if __name__ == "__main__":

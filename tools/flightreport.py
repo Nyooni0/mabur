@@ -881,12 +881,32 @@ def load_refresh_rows(path):
     return {"I": I, "H": H}
 
 
-def print_refresh_report(rr, ctl_E=None, fec_rows=None):
+def refresh_span_ms(rr, ctl=None, fec_rows=None):
+    """The recording's extent for the REFRESH rate: from the first to the
+    last timestamp across the ctl.log S/E rows, the fec.log episode rows and
+    the I/H rows. None when neither ctl.log nor an episode row is there --
+    the I/H rows alone only span the requests themselves, so one request
+    healed in 150 ms would read as 400/min."""
+    ts = []
+    if ctl:
+        ts += [r["t_ms"] for r in ctl.get("S", [])] + [r["t_ms"] for r in ctl.get("E", [])]
+    if fec_rows:
+        ts += [r["t_ms"] for r in fec_rows]
+    if not ts:
+        return None
+    ts += [r["t_ms"] for r in rr["I"]] + [r["t_ms"] for r in rr["H"]]
+    span = max(ts) - min(ts)
+    return span if span > 0 else None
+
+
+def print_refresh_report(rr, ctl_E=None, fec_rows=None, span_ms=None):
     """REFRESH (demand refresh): IDR requests the GS raised because its base
     picture was damaged and nothing periodic would heal it. A request is one
     arming (the first I row of a run); the I rows after it before the next H
     are retries. Each request is lined up against the ladder's demotes and
-    the FEC episodes so the NACK -> IDR -> demote stack reads per episode."""
+    the FEC episodes so the NACK -> IDR -> demote stack reads per episode.
+    The per-minute rate needs the recording's span (refresh_span_ms) and at
+    least two requests; otherwise it is left out."""
     I, H = rr["I"], rr["H"]
     if not I and not H:
         return
@@ -903,9 +923,11 @@ def print_refresh_report(rr, ctl_E=None, fec_rows=None):
             armed = True
             requests.append(r)
             by_reason[r["reason"]] = by_reason.get(r["reason"], 0) + 1
-    span_s = max(1e-9, (events[-1][1]["t_ms"] - events[0][1]["t_ms"]) / 1000.0)
+    rate = ""
+    if span_ms and len(requests) >= 2:
+        rate = f" ({len(requests) / (span_ms / 60000.0):.1f}/min)"
     print("REFRESH (demand refresh, fec.log I/H rows)")
-    print(f"  requests={len(requests)} ({len(requests) / span_s * 60:.1f}/min) "
+    print(f"  requests={len(requests)}{rate} "
           + " ".join(f"{k}={v}" for k, v in sorted(by_reason.items()))
           + f" retries={retries}")
     hm = sorted(h["heal_ms"] for h in H)
@@ -1678,7 +1700,10 @@ def print_hop_report(scanlog, ctllog):
 def main(path, aulog=None, probelog_path=None, scanlog_path=None):
     if sniff_feclog(path):
         print_fec_report(load_feclog(path))
-        print_refresh_report(load_refresh_rows(path), fec_rows=load_feclog(path))
+        fec_rows = load_feclog(path)
+        rr = load_refresh_rows(path)
+        print_refresh_report(rr, fec_rows=fec_rows,
+                             span_ms=refresh_span_ms(rr, fec_rows=fec_rows))
         return
     if sniff_probelog(path):
         # A probe log on its own (bench use): just the per-body report and
@@ -1937,7 +1962,9 @@ if __name__ == "__main__":
         if s.fec:
             fec_rows = load_feclog(s.fec)
             print_fec_report(fec_rows)
-            ctl_E = load_ctllog(s.ctl)["E"] if s.ctl else None
-            print_refresh_report(load_refresh_rows(s.fec), ctl_E=ctl_E, fec_rows=fec_rows)
+            ctl = load_ctllog(s.ctl) if s.ctl else None
+            rr = load_refresh_rows(s.fec)
+            print_refresh_report(rr, ctl_E=ctl["E"] if ctl else None, fec_rows=fec_rows,
+                                 span_ms=refresh_span_ms(rr, ctl=ctl, fec_rows=fec_rows))
     else:
         main(arg, sys.argv[2] if len(sys.argv) > 2 else None)
