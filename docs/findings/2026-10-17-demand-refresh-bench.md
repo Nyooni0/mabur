@@ -5,7 +5,8 @@ described in `docs/fec-nack.md` "Demand refresh"; the `fec.log` I/H rows,
 `link.refresh` and the REFRESH section in `docs/observability.md`. The
 GOP ceiling it runs on is `docs/findings/2026-10-17-sdk-gop-ceiling.md`;
 the 10 s GOP baseline is `docs/findings/2026-10-17-long-gop-spike.md`
-(session 0133).
+(session 0133). A loss-sim rerun on the fixed build follows the
+Answer (session 0139).
 
 ## Question
 
@@ -210,3 +211,108 @@ The `hole` label on salvaged AUs seen here is fixed in code since
 
 The raw-DVR `dvr` trigger and a real radio pull remain untested. The
 flight is pending.
+
+## Loss-sim rerun on the fixed build (session 0139)
+
+**Build.** The GS ran maburgs built from ec9aba5a (GS code as of
+974ffc36, so the whole fix wave is in): the musl `MABUR_LOSS_SIM` build
+with `--loss-sim 8303` for the loss runs, then the normal glibc build for
+the gates. `maburplay` built from ec9aba5a is byte-identical to the one
+already on the GS (the fix wave does not touch the player). The drone ran
+the same maburd as before, `gop_s` 0 (MI proc node `CBR65535`). The
+session directory 0139 was rejoined, so the rerun's rows follow the 8 s
+power-cut rows of the earlier run; everything below is windowed by time
+from the loss-sim commands' `mono=` stamps.
+
+**Profile.** Same dials as 0137 (`s0 eff=3 burst=6` for 117 s,
+`s0 eff=10 burst=8` for 61 s, `s0 loss=100` + `s1 loss=100` for 3 s).
+0137 cleared the loss and let the ladder climb back to rung 4 before each
+phase. The first rerun pass ran the three phases back to back, so its
+10 % phase and its burst started at rung 0. A second pass repeated the
+10 % phase and the burst, each from a settled rung 4, to match 0137. The
+3 % column below is from the first pass, the 10 % and burst columns from
+the second; the back-to-back 10 % phase is the third column. Both
+sessions were scored with the same script (requests = `I` runs closed by
+an `H`, read in file order; rows whose first `I` falls in the phase or
+500 ms after it). It reproduces 0137's table except heal p90 143 against
+144.
+
+| | 0137, 3 % | 0139, 3 % | 0137, 10 % | 0139, 10 % from rung 4 | 0139, 10 % from rung 0 |
+|---|---|---|---|---|---|
+| bodies dropped (s0, loss-sim counter) | 16571 | 16119 | 12833 | 13880 | 12392 |
+| NACK requests / filled / wasted / deadline-dropped | 260 / 1827 / 315 / 0 | 277 / 2151 / 132 / 0 | 279 / 1913 / 251 / 96 | 308 / 2396 / 287 / 104 | 296 / 1913 / 419 / 55 |
+| base AUs incomplete / slice-salvaged | 0 / 0 | 0 / 1 | 6 / 22 | 10 / 32 | 3 / 20 |
+| requests (runs) by reason | 1 `lost` | 2 `lost`, 1 `salvaged` | 27 `lost`, 21 `hole`, 0 `salvaged` | 23 `lost`, 4 `hole`, 21 `salvaged` | 25 `lost`, 2 `hole`, 15 `salvaged` |
+| requests with a retry | 0 | 0 | 1 | 7 | 1 |
+| heal_ms p50 / p90 / max | 71 | 130 / 161 / 161 | 97 / 143 / 423 | 115 / 416 / 454 | 98 / 157 / 693 |
+| most `I` rows in one second | 1 | 1 | 5 (two seconds > 3) | 4 (one second > 3) | 3 |
+
+Bodies dropped is the delta of maburgs' 1 Hz `LOSS-SIM[s0…]` counter
+over the phase. The 10 % figure in 0137's table above (29501) is that
+counter's cumulative value at the end of the phase, 3 % phase included;
+over the 10 % phase alone it read 12833.
+
+**Retries at 10 %.** All 7 retried requests in the rung-4 pass were the
+same case. The IDR the drone served came in damaged: 5 of them ended
+incomplete (no slice salvage on an IRAP), and in the other 2 the base
+AUs around it were lost. So the first heal did not clear, and the 300 ms
+retry's IDR did (heal 398–454 ms, which sets the p90). In that window,
+6 of 56 IRAP-led base AUs were not complete. 0137 had 0 of 51, and the
+back-to-back pass 0 of 42. The fix wave does not touch FEC, the NACK or
+the drone's IDR, so this reads as the loss pattern hitting the IDR, not
+a change in behaviour. A 61 s run is too short to say more.
+
+**3 s full loss, both layers.**
+
+| | 0137 (from rung 4) | 0139 second pass (from rung 4) | 0139 first pass (from rung 0) |
+|---|---|---|---|
+| first `I` | `lost`, 0.40 s into the burst | `hole`, 49 ms into the burst (the in-flight base AU) | none during the burst: no AU arrived and nothing armed |
+| retries | 12, every ~300 ms | 10, every ~300 ms | — |
+| `H` | 3739 ms | 3053 ms, 98 ms after the loss stopped | — |
+| after the heal | one `lost`, healed 85 ms | one `lost` 19 ms after the `H`, healed 86 ms | one `lost` 20 ms after the loss stopped, healed 135 ms |
+| demote | `starved` 4 → 0, 0.67 s after the first `I` | `starved` 4 → 0, 0.33 s after the first `I` (0.38 s into the burst) | none (already at rung 0) |
+| back at rung 4 | 7.5 s after the burst | 7.6 s after the burst | |
+
+The session stayed up through the burst (the RCF uplink and telemetry
+were not dropped), so the in-session retry rule changes nothing here, as
+the earlier section expected. From rung 0 nothing armed until the first
+AU after the loss: the stream force-advanced past the lost ones. That is
+the same shape as the drone power cut.
+
+**Checks.**
+
+- **(a) Salvaged base AUs book as `salvaged`: yes.** Each `I … salvaged`
+  that opens a request sits on a base AU that au.log flags `0x40`. Each
+  `I … hole` sits on a `0x00` AU. No salvaged AU logged `hole`.
+  `link.refresh.by_reason.salvaged` matches au.log's slice-salvaged base
+  count in every window: 1 = 1 at 3 %, 32 = 32 and 20 = 20 at 10 %. 0137
+  had 0 against 22. `by_reason` counts salvaged AUs that land while a
+  request is already armed, so it is higher than the number of
+  `salvaged` runs (21 and 15).
+- **(b) A `lost` arming within 30 ms of the preceding `H`: still open.**
+  5 of 23 `lost` requests in the 10 % rung-4 pass, 5 of 25 in the
+  back-to-back pass, 0 of 2 at 3 %, and the one `lost` after each burst
+  heal. That is 12 of 52 across the loss windows. On 0137 the same windows
+  give 10 of 29 (the earlier section's 11 of 32 counts the whole session).
+  Two of the rerun's pairs share a millisecond (`H 5671093` / `I 5671093`,
+  `H 5913590` / `I 5913590`). So flightreport's REFRESH section still
+  counts them as retries: on 0139 it reads requests=99, retries=22, where
+  the file order gives 101 and 20.
+- **(c) I/H rows out of time order: none** in the rerun's fec.log (0137
+  had one). Nothing in the fix wave touches the ordering, so this is a
+  clean sample, not a fix.
+
+**Standing gate.** After the swap back to the HEAD glibc maburgs and a
+player restart, at rung 4, ausniff passes twice. Pass 1: 1816 AUs, all
+complete, 0 `frame_id_gaps`, 0 resyncs, 60.5 fps. Pass 2: 1815 AUs, all
+complete, 0 gaps, 0 resyncs, 60.5 fps.
+
+**Answer.** On the fixed build, every slice-salvaged base AU arms as
+`salvaged`, and the sideport's count matches au.log. Under 3 % and 10 %
+loss the requester behaves as in 0137: none or one request per damaged
+base AU, heal p50 98–130 ms, and a 3 s blackout retries every 300 ms
+and heals within about 160 ms of the loss ending.
+Still open: about a fifth of `lost` requests arm within 30 ms of a heal,
+and flightreport miscounts same-millisecond H/I pairs. In this sample
+more of the requested IDRs arrived damaged (6 of 56 at 10 %), and those
+requests needed one retry.
