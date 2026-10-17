@@ -7,7 +7,7 @@ TEST(idle_until_a_base_hole) {
   RefreshRequester q;
   q.note_au(0, true, false, 0, 100);     // clean base
   q.note_au(1, false, false, 0, 116);    // truncated enhance: nobody references it
-  q.note_au(1, true, true, 0, 133);      // salvaged enhance
+  q.note_au(1, false, true, 0, 133);     // salvaged enhance
   CHECK(!q.armed());
   CHECK(q.epoch() == 0);
   CHECK(q.counters().requests == 0);
@@ -28,8 +28,10 @@ TEST(truncated_base_arms_and_bumps_at_once) {
 
 TEST(salvaged_base_and_lost_aus_arm_with_their_own_reason) {
   RefreshRequester a;
-  a.note_au(0, true, true, 0, 10);        // salvaged base: still a stale reference
-  CHECK(a.armed() && a.counters().by_reason[static_cast<size_t>(R::kSalvaged)] == 1);
+  a.note_au(0, false, true, 0, 10);       // salvaged base (FrameStream reports it incomplete):
+  CHECK(a.armed());                       // the filled band is still a stale reference
+  CHECK(a.counters().by_reason[static_cast<size_t>(R::kSalvaged)] == 1);
+  CHECK(a.counters().by_reason[static_cast<size_t>(R::kHole)] == 0);
   RefreshRequester b;
   b.note_dropped_total(0, 5);
   CHECK(!b.armed());
@@ -63,6 +65,8 @@ TEST(a_complete_base_irap_clears_and_books_the_heal) {
   CHECK(q.counters().heals == 1 && q.counters().heal_ms_last == 420);
   auto ev = q.take_events();
   REQUIRE(ev.size() == 3);                // I, I(retry), H
+  CHECK(ev[0].kind == 'I' && ev[0].retries == 0);  // the request itself
+  CHECK(ev[1].kind == 'I' && ev[1].retries == 1);  // a retry carries its ordinal
   CHECK(ev[2].kind == 'H' && ev[2].heal_ms == 420 && ev[2].retries == 1 && ev[2].t_ms == 1420);
   q.poll(2000);
   CHECK(q.epoch() == 2);                  // idle: no more bumps
@@ -83,7 +87,9 @@ TEST(every_irap_type_clears_but_a_refresh_start_does_not) {
   CHECK(q.armed());
 }
 
-TEST(irap_that_arrives_truncated_does_not_clear) {                // Review Focus 1
+// The IDR answering a request can itself arrive truncated: that must not
+// clear, and the retry still goes out.
+TEST(irap_that_arrives_truncated_does_not_clear) {
   RefreshRequester q;
   q.note_au(0, false, false, 0, 0);
   q.note_au(0, false, false, 19, 100);    // the IDR itself lost symbols
@@ -115,7 +121,9 @@ TEST(reason_names_round_trip) {
   CHECK(!RefreshRequester::reason_from("").has_value());
 }
 
-TEST(epoch_wraps_without_repeating) {                               // Review Focus 2
+// The epoch is a uint8_t: past 255 it wraps, and every bump must still
+// differ from the one before it, or the drone would read no change.
+TEST(epoch_wraps_without_repeating) {
   RefreshRequester q;
   q.note_au(0, false, false, 0, 0);
   uint8_t prev = q.epoch();
@@ -127,7 +135,9 @@ TEST(epoch_wraps_without_repeating) {                               // Review Fo
   CHECK(q.counters().retries == 300);
 }
 
-TEST(first_bump_at_time_zero) {                                     // Review Focus 3
+// last_bump_ms_ starts at 0: a poll at t=0 while idle must not bump, and
+// arming at t=0 then polling at t=0 must not bump twice.
+TEST(first_bump_at_time_zero) {
   RefreshRequester q;
   q.poll(0);
   CHECK(q.epoch() == 0);

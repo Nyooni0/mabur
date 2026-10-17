@@ -168,8 +168,12 @@ salvaged, lost, start, resync, decoder, dvr}}`: the GS's `RefreshRequester`,
 counters cumulative since the daemon started. `armed` is true while a
 request is outstanding (waiting on a complete base IRAP to clear it);
 `requests` counts arming events, `retries` the repeated asks before each one
-cleared, `heals` completed clears and `heal_ms_last` the most recent
-arm-to-heal span; `by_reason` tallies `requests` by what armed it. maburtop
+cleared (they only accrue while maburgs is in a session), `heals`
+completed clears and `heal_ms_last` the most recent arm-to-heal span —
+counted from arming, so a request armed before the link is up (the
+player's boot `start`) reads as a long heal; `by_reason` tallies every
+arming source as it fires, including ones that land while a request is
+already outstanding. maburtop
 draws a `refresh:` line in the LADDER panel, right after `nack:`, folding
 `start`/`resync`/`decoder`/`dvr` into one `player` figure. Mechanism:
 `docs/fec-nack.md` "Demand refresh"; the per-request/heal trace is
@@ -449,9 +453,11 @@ episodes — drop them by time. Bench record:
 timestamp digit, so an episode row is still distinguishable by its leading
 `t_ms`: `I <t_ms> <reason> <epoch>` logs an IDR request going out (`reason`
 is whatever armed it — `hole`, `salvaged`, `lost`, `start`, `resync`,
-`decoder`, `dvr` — and a retry repeats the same reason), and
+`decoder`, `dvr` — and a retry repeats the same reason; retries only go
+out while maburgs is in a session, so an outage adds no rows), and
 `H <t_ms> <heal_ms> <retries>` logs a complete base IRAP clearing that
-request. `load_feclog()` skips both; they are read by `load_refresh_rows`,
+request (`heal_ms` counts from arming, dead time before the link came up
+included). `load_feclog()` skips both; they are read by `load_refresh_rows`,
 and `flightreport.py`'s REFRESH section (requests by reason, retries,
 heal_ms distribution, and how many requests fall within 2 s of a ladder
 demote / a FEC episode) prints from it — on a bare `fec.log` argument and

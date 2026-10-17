@@ -39,7 +39,7 @@ echo "== clean: all 13 frames recovered NAL-exact, both streams =="
   2> "$TMP/clean.err"
 python3 tests/integration/verify_aus.py "$TMP/aus0.bin" "$FIX" --require-all \
   --min-stream0 1.0 --min-stream1 1.0
-grep -q 'refresh_requests=0' "$TMP/clean.err" || { echo "clean replay must not ask for a refresh"; cat "$TMP/clean.err"; exit 1; }
+grep -qE 'refresh_requests=0$' "$TMP/clean.err" || { echo "clean replay must not ask for a refresh"; cat "$TMP/clean.err"; exit 1; }
 
 echo "== 15% single-card loss: both streams must fully deliver =="
 # Seed pinned to 3: 15% loss lands across the WHOLE 30-body population (IDR

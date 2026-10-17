@@ -385,8 +385,10 @@ then rides `idr_epoch` on every RCF until `RcAgent` serves the IDR and a
 later complete base IRAP clears it: FEC → NACK → request → IDR → clear.
 
 **Arms on:** a base AU (`sid 0`) that finishes incomplete (the NACK's
-repair window has already passed); a base AU rebuilt by slice salvage (a
-filled band is a stale reference); any AU the stream force-advanced past
+repair window has already passed; reason `hole`); a base AU rebuilt by
+slice salvage (a filled band is a stale reference; `FrameStream` reports
+it incomplete with the salvaged flag set, and it books as `salvaged`, not
+`hole`); any AU the stream force-advanced past
 (`FrameStream::frames_dropped()` rising — its layer is unknown, so it
 counts as base); or one of four one-shot reports from `maburplay` over
 the same loopback control socket that carries the record button's VTX
@@ -405,10 +407,14 @@ default anyway. While armed the byte is bumped again every 300 ms
 the IDR's transit, so a retry only means the IDR itself was lost or
 truncated.
 
-**Across an outage.** The requester keeps retrying every 300 ms while the
-link is down — `fec.log`'s `I` rows and the `retries` counter climb
-through the whole outage, and the eventual `H` row's `heal_ms` includes
-that dead time. `RcAgent` only serves a pending GS/chain request while
+**Across an outage.** Retries only run while maburgs is in a session
+(`vrx.link_state() == SESSION`): with no drone to hear them, they would
+only pile up `I` rows. Arming still bumps the epoch at once whatever the
+link state, and the first in-session tick resumes the 300 ms retry clock.
+`heal_ms` counts from arming, though, so a request armed before the link
+is up — the player's boot `start`, which usually lands long before the
+drone powers up, or a hole at the start of an outage — reads as a long
+heal that includes the dead time. `RcAgent` only serves a pending GS/chain request while
 `state_ == LINKED`, so the request just waits; the entering-LINKED IDR it
 serves on reconnect covers whatever broke while unlinked, and that same
 IDR clears the request. A drone restart looks the same from the GS side:

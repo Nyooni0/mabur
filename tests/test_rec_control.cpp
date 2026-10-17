@@ -27,7 +27,9 @@ TEST(rec_control_ignores_garbage) {
   CHECK(c.wire() == 0);
 }
 
-TEST(rec_control_refresh_lines) {                                   // Review Focus 4
+// `refresh <reason>` lines are queued verbatim and never touch the VTX
+// record wish; malformed lines are ignored.
+TEST(rec_control_refresh_lines) {
   maburgs::RecControl c;
   CHECK(!c.apply("refresh start"));         // not a wish change ...
   CHECK(!c.apply("refresh dvr\n"));         // ... trailing newline tolerated

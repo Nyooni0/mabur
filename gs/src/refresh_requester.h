@@ -17,10 +17,12 @@ namespace maburgs {
 // take_events() into fec.log.
 //
 // Arms on: a base AU finished incomplete (the NACK's repair window has
-// already passed by then), a base AU rebuilt by slice salvage (a filled
-// base band is a stale reference), any AU the stream advanced past (its
-// layer is unknown, so it counts as base), or a player report. Never on
-// enhance damage: nothing references an enhance frame.
+// already passed by then; reason hole), a base AU rebuilt by slice
+// salvage (FrameStream reports it incomplete with salvaged set; a filled
+// base band is a stale reference; reason salvaged), any AU the stream
+// advanced past (its layer is unknown, so it counts as base), or a player
+// report. Never on enhance damage: nothing references an enhance frame.
+// A salvaged AU never clears, even if reported complete.
 //
 // Clears on: a COMPLETE base AU whose first slice NAL is an IRAP
 // (16..21), requested or not. A refresh-start picture (TRAIL_R) does not
@@ -41,7 +43,8 @@ class RefreshRequester {
     uint64_t by_reason[kReasons] = {};
   };
   // fec.log rows: 'I' per bump (reason = what armed the request; a retry
-  // repeats it), 'H' per clearing IRAP.
+  // repeats it; retries = 0 for the request, N for its Nth retry), 'H' per
+  // clearing IRAP (retries = how many retries the request took).
   struct Event {
     char kind;
     Reason reason;
@@ -57,7 +60,7 @@ class RefreshRequester {
       if (vcl_nal >= 16 && vcl_nal <= 21) clear_(now_ms);
       return;
     }
-    arm_(salvaged && complete ? Reason::kSalvaged : Reason::kHole, now_ms);
+    arm_(salvaged ? Reason::kSalvaged : Reason::kHole, now_ms);
   }
 
   // Cumulative FrameStream::frames_dropped(); a rise is AUs the stream
@@ -70,12 +73,13 @@ class RefreshRequester {
 
   void request(Reason r, uint64_t now_ms) { arm_(r, now_ms); }
 
-  // Retry cadence; call once per main-loop iteration.
+  // Retry cadence; maburgs calls it once per main-loop iteration while in
+  // a session (no drone to hear a retry otherwise).
   void poll(uint64_t now_ms) {
     if (!armed_ || now_ms < last_bump_ms_ + kRetryMs) return;
-    bump_(now_ms);
     ++c_.retries;
-    ++retries_this_;
+    ++retries_this_;             // before the bump: the 'I' row carries its retry ordinal
+    bump_(now_ms);
   }
 
   uint8_t epoch() const { return epoch_; }

@@ -1253,7 +1253,10 @@ static int run_radio(const maburgs::Config& cfg) {
     vrx.set_rec_wish(rec_ctl.wire());
     for (const std::string& r : rec_ctl.take_refresh()) {
       const auto reason = maburgs::RefreshRequester::reason_from(r);
-      if (!reason) continue;
+      if (!reason) {
+        std::fprintf(stderr, "maburgs: unknown refresh reason from the player: %s\n", r.c_str());
+        continue;
+      }
       std::fprintf(stderr, "maburgs: refresh request from the player: %s\n", r.c_str());
       refresh.request(*reason, drained_ms);
     }
@@ -1336,9 +1339,13 @@ static int run_radio(const maburgs::Config& cfg) {
     // Demand refresh, after every arming source of this tick (the AUs
     // finished in the drain and the poll above, the player's reports) so
     // this tick's RCF already carries the new epoch. Events are taken every
-    // tick whether or not fec.log is open, so they never pile up.
+    // tick whether or not fec.log is open, so they never pile up. Retries
+    // only run in a session: with no drone to hear them (the player's boot
+    // `start` arrives long before the drone powers up, and every outage)
+    // they would only pile up `I` rows; arming still bumps at once, and the
+    // first in-session poll resumes the retry clock.
     refresh.note_dropped_total(fstream.frames_dropped(), drained_ms);
-    refresh.poll(drained_ms);
+    if (in_session) refresh.poll(drained_ms);
     vrx.set_idr_epoch(refresh.epoch());
     for (const auto& e : refresh.take_events()) {
       if (!fec_log) continue;
