@@ -92,8 +92,9 @@ class WindowSampler {
   void start(NowMsFn now_ms, SleepFn sleep_ms);
   void stop();                            // idempotent; joins
 
-  // Newest wins; a replaced record is counted as dropped, but a record
-  // sampled under an epoch reset() has since moved past is discarded silently.
+  // Newest wins; a replaced record is counted as dropped and its FA/CCA
+  // delta folded into the newer one, but a record sampled under an epoch
+  // reset() has since moved past is discarded silently.
   void publish(WindowRecord r);
   std::optional<WindowRecord> take();     // core thread
   uint64_t dropped() const { return dropped_.load(std::memory_order_relaxed); }

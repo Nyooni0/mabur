@@ -1,5 +1,6 @@
 #include "window_sampler.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "hop_burst_gate.h"
@@ -106,7 +107,21 @@ void WindowSampler::publish(WindowRecord r) {
   // core has already been told is clear, and it is not a dropped sample
   // either -- it was never going to be a live window.
   if (r.epoch != epoch_.load(std::memory_order_acquire)) return;
-  if (box_) dropped_.fetch_add(1, std::memory_order_relaxed);
+  if (box_) {
+    dropped_.fetch_add(1, std::memory_order_relaxed);
+    // FA/CCA are deltas since the previous read, so the replaced record's
+    // share would be lost with it; fold it into the newer record (a card
+    // valid in both, on the same channel) so the consumed delta covers the
+    // whole gap, as the cumulative frame counters already do.
+    const size_t n = std::min(box_->cards.size(), r.cards.size());
+    for (size_t i = 0; i < n; ++i) {
+      const CardSample& old = box_->cards[i];
+      CardSample& cur = r.cards[i];
+      if (!old.valid || !cur.valid || old.channel != cur.channel) continue;
+      cur.energy.fa_ofdm += old.energy.fa_ofdm;
+      cur.energy.cca_ofdm += old.energy.cca_ofdm;
+    }
+  }
   box_ = std::move(r);
 }
 

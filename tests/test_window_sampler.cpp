@@ -262,4 +262,23 @@ TEST(hold_card_excludes_a_pass) {
   CHECK(s.take().has_value());
 }
 
+TEST(replaced_record_folds_its_energy_delta_into_the_newer_one) {
+  Rig g(2);
+  auto rec = [](uint64_t t, uint32_t fa0, uint32_t cca0, bool v1, uint32_t fa1) {
+    WindowRecord r;
+    r.t_ms = t;
+    r.cards.resize(2);
+    r.cards[0].valid = true; r.cards[0].energy.fa_ofdm = fa0; r.cards[0].energy.cca_ofdm = cca0;
+    r.cards[1].valid = v1;   r.cards[1].energy.fa_ofdm = fa1;
+    return r;
+  };
+  g.s->publish(rec(1000, 7, 3, false, 50));
+  g.s->publish(rec(1150, 5, 2, true, 4));
+  const auto r = g.s->take();
+  REQUIRE(r.has_value());
+  CHECK(r->t_ms == 1150);
+  CHECK(r->cards[0].energy.fa_ofdm == 12 && r->cards[0].energy.cca_ofdm == 5);   // the gap's whole delta
+  CHECK(r->cards[1].energy.fa_ofdm == 4);   // replaced record had no valid read there: nothing to fold
+  CHECK(g.s->dropped() == 1);
+}
 MTEST_MAIN
