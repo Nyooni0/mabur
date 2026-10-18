@@ -1,6 +1,9 @@
 # Can the GS lock the drone's capture phase to its vblank, and does a GOP-aware target make the lock judder-free?
 
-**Status:** spike, nothing shipped. The regulator, its chain budget and
+**Status:** spike; its servo was throwaway. Demand refresh (`venc.gop_s`
+0) later removed the GOP-start frame that defeated it, and the lock was
+built: `docs/phase-lock.md`, bench `2026-10-18-phase-lock-bench.md`,
+flight `2026-10-18-phase-lock-flight.md`. The regulator, its chain budget and
 the sawtooth it produces are described in `docs/observability.md`
 ("Regulator line") and `docs/findings/2026-10-15-regulator-chain-cuts.md`;
 the sensor-rate trim the lock steers through is

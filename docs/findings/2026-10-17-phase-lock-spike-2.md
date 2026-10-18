@@ -1,6 +1,9 @@
 # With demand refresh, what does the phase lock buy, and what stands between it and a flat ~35 ms?
 
-**Status:** spike, nothing shipped. Follows
+**Status:** spike; its hold-11 + capture-placement arm is the design the
+phase lock was built on (`docs/phase-lock.md`, bench
+`2026-10-18-phase-lock-bench.md`), and the maburgs core-thread stall it
+surfaced is fixed (`2026-10-17-maburgs-core-stall.md`). Follows
 `2026-10-17-phase-lock-spike.md` (the lock mechanism, and the GOP-excess
 verdict that demand refresh has since removed). The regulator's two
 placement modes are described in `docs/observability.md` ("Regulator

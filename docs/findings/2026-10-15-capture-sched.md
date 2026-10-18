@@ -1,7 +1,11 @@
 # Capture-time frame scheduling: judder gone, median +10 ms
 
-**Status:** built, off by default (`display.sched_cap_ms = 0`); behaviour
-and fields in `docs/observability.md` ("Regulator line", `alw=`/`lslot=`).
+**Status:** built; it shipped off, and now runs as the phase lock's
+placement mode: the bundle sets `display.sched_cap_ms = 16`, and with
+`display.phase_lock` on (the bundle default) capture-time placement runs
+only while the lock holds, so an unlocked stream is still timed by arrival
+(`docs/phase-lock.md`). Fields in `docs/observability.md` ("Regulator
+line", `alw=`/`lslot=`).
 
 ## Question
 

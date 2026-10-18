@@ -1,6 +1,11 @@
 # Does demand refresh stay quiet on a clean link and heal a damaged base on the bench?
 
-**Status:** bench record; the flight is pending. The mechanism is
+**Status:** bench record. Both items left open below are fixed: a skipped
+AU is booked on the AU that follows it (no redundant `lost` IDR right
+after a heal), and flightreport walks the REFRESH `I`/`H` rows in file
+order. Flown in sessions 0141/0142 with no post-heal re-arms and no
+retries; those flights are the demand-refresh baseline in
+`docs/findings/2026-10-18-phase-lock-flight.md`. The mechanism is
 described in `docs/fec-nack.md` "Demand refresh"; the `fec.log` I/H rows,
 `link.refresh` and the REFRESH section in `docs/observability.md`. The
 GOP ceiling it runs on is `docs/findings/2026-10-17-sdk-gop-ceiling.md`;

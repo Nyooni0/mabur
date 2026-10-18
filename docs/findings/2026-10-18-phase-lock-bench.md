@@ -2,7 +2,7 @@
 
 **Status:** bench gate for the phase lock as built; the reference page is
 `docs/phase-lock.md`. Follows `2026-10-17-phase-lock-spike-2.md` (the spike
-this productises).
+this productises); flown in `2026-10-18-phase-lock-flight.md`.
 
 ## Setup
 

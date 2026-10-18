@@ -3,9 +3,11 @@
 **Status:** closed on both ends; the slice rule and the GS decoder's
 slice-granular streaming are recorded in `docs/slices.md` ("Known
 limits", both parts), the dead `intra_refresh_qp` in
-`drone/venc/venc_cfg.h` and `docs/airtime-model.md`. The refresh-start
-picture stays one slice at its full size, decoded whole, and
-`intra_refresh_frames` stays 1.
+`drone/venc/venc_cfg.h` and `docs/airtime-model.md`. The bundle has since
+dropped periodic refresh (`venc.gop_s = 0`, `intra_refresh_frames = 0`,
+demand refresh in `docs/fec-nack.md`), so no refresh-start picture is sent
+and the IDR, the only key frame, is split by `slices`; a config that turns
+the GDR sweep back on keeps `intra_refresh_frames = 1`.
 
 ## Question
 

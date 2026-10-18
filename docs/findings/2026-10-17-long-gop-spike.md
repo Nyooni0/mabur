@@ -1,6 +1,9 @@
 # Does a 10 s GOP still break the ladder, and what does the phase lock buy once the refresh picture is rare?
 
-**Status:** spike, nothing shipped. `venc.gop_s` still ships 0.5; the
+**Status:** spike; nothing from it shipped as such, but it led to demand
+refresh: `venc.gop_s` ships 0 (no periodic refresh, the GS asks for an IDR
+when its picture is damaged — `docs/fec-nack.md` "Demand refresh"), and
+RcAgent now defers a refused chain-break IDR instead of dropping it. The
 bitrate-step keyframe and the GOP-length caveat it tests are described in
 `docs/airtime-model.md` ("Why the inputs are fixed", "GOP is not a free
 knob"), the IDR pacer's reliance on the GOP in `docs/link-adaptation.md`
