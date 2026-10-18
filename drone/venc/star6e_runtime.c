@@ -9,6 +9,7 @@
 #include "star6e_ipu.h"
 #include "star6e_pipeline.h"
 #include "sensor_cal.h"
+#include "sensor_steer.h"
 
 #include "h26x_util.h"
 
@@ -33,6 +34,28 @@ static SdkQuietState g_sdk_quiet = SDK_QUIET_STATE_INIT;
 static SensorCal g_sensor_cal;
 static uint32_t g_sensor_mhz;
 static int g_sensor_cal_held;
+
+/* Phase-lock steering (sensor_steer.h). g_sensor_off_req is the GS's latest
+ * offset (any thread writes it through venc_set_sensor_offset);
+ * g_sensor_off_applied is the offset now on the sensor, for the stats line.
+ * The rest belongs to this thread: g_sensor_applied_mfps tracks the request
+ * actually on the sensor, whoever set it. */
+static int32_t g_sensor_off_req;
+static int32_t g_sensor_off_applied;
+static uint32_t g_sensor_applied_mfps;
+static uint32_t g_steer_refused_mfps;
+static int g_steer_clamp_logged;
+static int g_steer_started;
+
+void star6e_runtime_request_sensor_offset(int32_t mfps)
+{
+	__atomic_store_n(&g_sensor_off_req, mfps, __ATOMIC_RELAXED);
+}
+
+int32_t star6e_runtime_sensor_offset(void)
+{
+	return __atomic_load_n(&g_sensor_off_applied, __ATOMIC_RELAXED);
+}
 
 uint32_t star6e_runtime_sensor_mhz(void)
 {
@@ -64,6 +87,7 @@ static void sensor_cal_apply(Star6eRunnerContext *ctx, SensorCalAction act)
 				(unsigned)sensor_cal_request_mfps(&g_sensor_cal), hz);
 			break;
 		}
+		g_sensor_applied_mfps = mfps;
 		if (act == SENSOR_CAL_GAVE_UP)
 			printf("[sensor] cal: no convergence in %d rounds "
 				"(measured %.3f Hz), back to %u mfps\n",
@@ -227,6 +251,45 @@ static int star6e_runtime_apply_startup_controls(Star6eRunnerContext *ctx)
 
 /* ── Encoder loop ─────────────────────────────────────────────────────── */
 
+/* One frame's steering step: apply the trim request plus the GS's offset
+ * when it differs from what the sensor runs. Logs the first steer, clamps
+ * and refusals; the per-second stats line carries the applied offset. */
+static void sensor_steer_step(Star6eRunnerContext *ctx)
+{
+	const int32_t req = __atomic_load_n(&g_sensor_off_req, __ATOMIC_RELAXED);
+	const SensorSteer st = sensor_steer_plan(sensor_cal_state(&g_sensor_cal),
+		sensor_cal_request_mfps(&g_sensor_cal), req,
+		g_sensor_applied_mfps, g_steer_refused_mfps);
+	MI_S32 ret;
+
+	if (st.clamped && !g_steer_clamp_logged) {
+		printf("[sensor] steer: offset %d mfps outside +-%d, clamped\n",
+			(int)req, SENSOR_STEER_RANGE_MFPS);
+		fflush(stdout);
+	}
+	g_steer_clamp_logged = st.clamped;
+	if (!st.request_mfps)
+		return;
+	ret = MI_SNR_SetFps(ctx->ps.sensor.pad_id, st.request_mfps);
+	if (ret != 0) {
+		printf("[sensor] steer: MI_SNR_SetFps(%u mfps) refused %d, "
+			"keeping %u mfps\n", (unsigned)st.request_mfps, (int)ret,
+			(unsigned)g_sensor_applied_mfps);
+		fflush(stdout);
+		g_steer_refused_mfps = st.request_mfps;
+		return;
+	}
+	if (!g_steer_started) {
+		printf("[sensor] steer: first offset %d mfps (request %u mfps)\n",
+			(int)st.offset_mfps, (unsigned)st.request_mfps);
+		fflush(stdout);
+		g_steer_started = 1;
+	}
+	g_sensor_applied_mfps = st.request_mfps;
+	g_steer_refused_mfps = 0;
+	__atomic_store_n(&g_sensor_off_applied, st.offset_mfps, __ATOMIC_RELAXED);
+}
+
 static int star6e_runtime_process_stream(Star6eRunnerContext *ctx,
 	struct timespec *cus3a_ts_last, unsigned int *idle_counter)
 {
@@ -314,6 +377,10 @@ static int star6e_runtime_process_stream(Star6eRunnerContext *ctx,
 		if (act != SENSOR_CAL_NONE)
 			sensor_cal_apply(ctx, act);
 	}
+
+	/* Steering runs in both branches: under low-power decimation the
+	 * sensor still runs at full rate, only the bind drops frames. */
+	sensor_steer_step(ctx);
 
 	/* refPred error-resilience marking — rewrite TRAIL_R → TRAIL_N for
 	 * frames the SDK marked as ENHANCE_P_NOTFORREF.  The encoder's own
@@ -442,6 +509,8 @@ void *star6e_runtime_encoder_loop(void *opaque)
 					sensor_cal_init(&g_sensor_cal,
 						ctx->ps.sensor.fps,
 						ctx->ps.sensor.fps * 1000);
+					g_sensor_applied_mfps =
+						ctx->ps.sensor.fps * 1000;
 					sensor_cal_arm(&g_sensor_cal);
 					printf("[sensor] cal: armed, target %u fps\n",
 						(unsigned)ctx->ps.sensor.fps);

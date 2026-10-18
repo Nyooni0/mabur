@@ -657,6 +657,16 @@ struct RealActuator : mabur::Actuator {
     return true;
   }
 
+  void set_sensor_offset(int mfps) override {
+    if (dry_run) {
+      std::fprintf(stderr, "[dry-run] set_sensor_offset(%d)\n", mfps);
+      return;
+    }
+#ifdef MABUR_HAVE_VENC
+    (void)venc_set_sensor_offset(mfps);
+#endif
+  }
+
   // Auto channel set: RcAgent calls this once per confirmed move, from the
   // agent thread. A failed write is one stderr line, never fatal -- the drone
   // still parks on the right channel this session, it just won't remember it
@@ -2873,18 +2883,20 @@ int run_real_mode(const Config& cfg, uint8_t start_ch, const std::string& cfg_pa
         if (want_stats || now - last_stats_ms >= 1000) {
           last_stats_ms = now;
           unsigned snr_mhz = 0;
+          int snr_off = 0;
 #ifdef MABUR_HAVE_VENC
           {
             VencStats vs{};
             venc_get_stats(&vs);
             snr_mhz = vs.sensor_mhz;
+            snr_off = vs.sensor_off_mfps;
           }
 #endif
           std::fprintf(stderr,
                        "stats: state=%d hot_beat=%llu rx_beat=%llu seq=%u sent=%llu drops=%llu "
                        "txq=%zu txq_drop=%llu "
                        "thermal_delta=%d tx_failed=%llu venc_verb_fail=%llu "
-                       "enc_pk100=%uk lp=%d armed=%d snr_mhz=%u\n",
+                       "enc_pk100=%uk lp=%d armed=%d snr_mhz=%u snr_off=%d\n",
                        static_cast<int>(agent.state()), static_cast<unsigned long long>(hb),
                        static_cast<unsigned long long>(rb), tx.seq(),
                        static_cast<unsigned long long>(tx.sent()),
@@ -2895,7 +2907,7 @@ int run_real_mode(const Config& cfg, uint8_t start_ch, const std::string& cfg_pa
                        static_cast<unsigned long long>(actuator.venc_verb_failures),
                        enc_peak.take_peak_kbps(),
                        static_cast<int>(agent.low_power()), static_cast<int>(agent.armed_latched()),
-                       snr_mhz);
+                       snr_mhz, snr_off);
         }
 
         // Telemetry suppression: non-sweep PPDUs in the airtime a calibration
