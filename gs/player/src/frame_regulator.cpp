@@ -15,6 +15,7 @@ void FrameRegulator::displace(int idx, Displaced* out) {
 bool FrameRegulator::offer(const DmaFrame& f, uint64_t mono_us,
                            Displaced* out) {
   out->n = 0;
+  margin_fresh_ = false;
   if (d_us_ <= 0) return true;
 
   const auto obs = anchor_.observe(f.pts_us, mono_us);
@@ -30,9 +31,16 @@ bool FrameRegulator::offer(const DmaFrame& f, uint64_t mono_us,
   uint64_t release = 0;
   uint64_t target_v = 0;
   servo_now_ = vsync_lock_ && est_.valid(mono_us);
-  const bool by_capture =
-      servo_now_ && sched_cap_us_ > 0 &&
-      place_by_capture(obs.pts64, f.pts_us, mono_us, &release, &target_v, out);
+  bool by_capture = false;
+  if (servo_now_ && sched_cap_us_ > 0) {
+    CaptureSlot slot;
+    if (capture_slot(obs.pts64, f.pts_us, mono_us, &slot)) {
+      margin_us_ = static_cast<double>(static_cast<int64_t>(slot.r.release_us) - slot.want);
+      margin_fresh_ = true;
+      if (!phase_lock_mode_ || capture_on_)
+        by_capture = place_by_capture(slot, mono_us, &release, &target_v, out);
+    }
+  }
   if (servo_now_ && !by_capture) {
     const auto r = est_.next_release(mono_us, lead_us_);
     const uint64_t clamp =
@@ -171,9 +179,8 @@ void FrameRegulator::heal_slip() {
 // later than that slot loses it and goes down the arrival path; the next
 // on-time frame claims the same vblank and wins it (freshest wins), so one
 // late frame costs one hitch and no chain.
-bool FrameRegulator::place_by_capture(uint64_t pts64, uint32_t pts32,
-                                      uint64_t mono_us, uint64_t* release,
-                                      uint64_t* target_v, Displaced* out) {
+bool FrameRegulator::capture_slot(uint64_t pts64, uint32_t pts32, uint64_t mono_us,
+                                  CaptureSlot* s) {
   const int64_t transit = static_cast<int64_t>(mono_us) - static_cast<int64_t>(pts64);
   if (!was_incomplete(pts32)) win_.add(transit);
   if (win_.empty()) return false;
@@ -182,8 +189,15 @@ bool FrameRegulator::place_by_capture(uint64_t pts64, uint32_t pts32,
   if (allow > sched_cap_us_) allow = sched_cap_us_;
   if (allow < 0) allow = 0;
   allowance_us_ = allow;
-  const int64_t want = static_cast<int64_t>(pts64) + floor_us + allow;
-  const auto r = est_.release_at_or_after(want > 0 ? static_cast<uint64_t>(want) : 0, lead_us_);
+  s->want = static_cast<int64_t>(pts64) + floor_us + allow;
+  s->r = est_.release_at_or_after(s->want > 0 ? static_cast<uint64_t>(s->want) : 0, lead_us_);
+  return true;
+}
+
+bool FrameRegulator::place_by_capture(const CaptureSlot& s, uint64_t mono_us,
+                                      uint64_t* release, uint64_t* target_v,
+                                      Displaced* out) {
+  const auto& r = s.r;
   if (r.release_us < mono_us) {
     ++late_slot_;
     return false;

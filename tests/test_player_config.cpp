@@ -289,7 +289,7 @@ TEST(input_rec_rejects_a_missing_pin_bad_bias_and_unknown_keys) {
 TEST(display_vsync_defaults) {
   const auto cfg = maburplay::load_config(write_tmp_play(""));
   CHECK(cfg.display.vsync_lock == true);
-  CHECK(cfg.display.vsync_lead_ms == 6);
+  CHECK(cfg.display.vsync_lead_ms == 5);
 }
 
 TEST(display_vsync_lead_range_enforced) {
@@ -396,7 +396,8 @@ TEST(display_chain_budget_key) {
 
 TEST(display_sched_cap_ms_key) {
   // display.sched_cap_ms: capture-time scheduling's allowance cap. 0 = off
-  // (arrival-based servo) in code and bundle; range [0, 50].
+  // (arrival-based servo) in code; the bundle ships 16, used while the
+  // phase lock holds; range [0, 50].
   const auto bare = maburplay::load_config(write_tmp_play(""));
   CHECK(bare.display.sched_cap_ms == 0);
   const auto cfg = maburplay::load_config(
@@ -523,4 +524,42 @@ TEST(unsupported_on_build_names_available_backends) {
         "backend \"mpp\" is not in this build (Rockchip MPP decoder); this build has: null, v4l2req");
   CHECK(maburplay::unsupported_on_build(c, host) ==
         "backend \"mpp\" is not in this build (Rockchip MPP decoder); this build has: null");
+}
+
+static bool load_throws(const char* text) {
+  try { maburplay::load_config(write_tmp_play(text)); }
+  catch (const std::exception&) { return true; }
+  return false;
+}
+
+TEST(display_phase_lock_keys) {
+  // display.phase_lock / phase_margin_ms: off and 4 in code; the lock needs
+  // the vsync servo, capture-time scheduling and the regulator itself.
+  const auto bare = maburplay::load_config(write_tmp_play(""));
+  CHECK(!bare.display.phase_lock);
+  CHECK(bare.display.phase_margin_ms == 4);
+  const auto on = maburplay::load_config(write_tmp_play(
+      "[display]\nphase_lock = true\nphase_margin_ms = 6\nsched_cap_ms = 16\n"));
+  CHECK(on.display.phase_lock);
+  CHECK(on.display.phase_margin_ms == 6);
+  CHECK(load_throws("[display]\nphase_margin_ms = 0\n"));
+  CHECK(load_throws("[display]\nphase_margin_ms = 11\n"));
+  CHECK(load_throws("[display]\nphase_lock = true\nsched_cap_ms = 0\n"));
+  CHECK(load_throws("[display]\nphase_lock = true\nsched_cap_ms = 16\nvsync_lock = false\n"));
+  CHECK(load_throws("[display]\nphase_lock = true\nsched_cap_ms = 16\nregulate_ms = 0\n"));
+}
+
+TEST(screen_mode_must_parse) {
+  const auto c = maburplay::load_config(write_tmp_play("screen_mode = \"1920x1080@59.94\"\n"));
+  CHECK(c.screen_mode == "1920x1080@59.94");
+  CHECK(load_throws("screen_mode = \"1920x1080@60mhz\"\n"));
+  CHECK(load_throws("screen_mode = \"1080p\"\n"));
+}
+
+TEST(bundle_ships_the_phase_lock_on) {
+  const auto b = maburplay::load_config(
+      std::string(MABUR_PLAY_BUNDLE_DIR) + "/maburplay.default.toml");
+  CHECK(b.display.phase_lock);
+  CHECK(b.display.phase_margin_ms == 4);
+  CHECK(b.display.sched_cap_ms == 16);
 }

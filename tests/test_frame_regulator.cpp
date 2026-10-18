@@ -846,8 +846,11 @@ struct ScreenSim {
 };
 
 ScreenSim run_screen_sim(int sched_cap_ms, double src_period_us, double seconds,
-                         const std::function<double(uint64_t)>& jitter_us) {
+                         const std::function<double(uint64_t)>& jitter_us,
+                         const std::function<void(FrameRegulator&, double)>& on_flip = nullptr,
+                         bool phase_lock_mode = false) {
   FrameRegulator reg(12, true, 3, 3, sched_cap_ms);
+  reg.set_phase_lock_mode(phase_lock_mode);
   const double kPanel = 1e6 / 60.0;
   reg.set_panel_period(kPanel);
   FrameRegulator::Displaced disp;
@@ -898,6 +901,7 @@ ScreenSim run_screen_sim(int sched_cap_ms, double src_period_us, double seconds,
       if (best > shown) shown = best;
       ++s.flips;
       reg.on_flip(static_cast<uint64_t>(flip_t), true);
+      if (on_flip) on_flip(reg, now_s);
       flip_t += kPanel;
     } else {
       DmaFrame f;
@@ -1031,5 +1035,79 @@ TEST(capture_sched_never_shows_a_frame_backwards) {
   };
   const ScreenSim s = run_screen_sim(16, 1e6 / 59.99, 120, rough);
   CHECK(s.late_slot > 0);  // the rough link really did push frames late
+  CHECK(s.backwards == 0);
+}
+
+// ---- phase lock (display.phase_lock) ----
+
+TEST(margin_is_release_minus_capture_want) {
+  // One frame: the window holds its own transit, so floor = transit,
+  // allowance = 0 + 1 ms, want = arrival + 1 ms. Arrival 10 ms before the
+  // vblank at kT0 + 8 periods: want + lead (3 ms) = vblank - 6 ms, so the
+  // release is that vblank - 3 ms and the margin is 6 ms.
+  FrameRegulator reg(12, true, 3, 3, 16);
+  reg.set_phase_lock_mode(true);
+  warm(reg);
+  FrameRegulator::Displaced disp;
+  double m = -1.0;
+  CHECK(!reg.take_margin(&m));                       // nothing offered yet
+  reg.offer(frame(0), kT0 + 8 * kVb - 10'000, &disp);
+  REQUIRE(reg.take_margin(&m));
+  CHECK(m > 5'999.0 && m < 6'001.0);
+  CHECK(!reg.take_margin(&m));                       // once per offer
+  CHECK(reg.panel_period_us() == static_cast<double>(kVb));
+}
+
+TEST(no_margin_without_capture_scheduling) {
+  FrameRegulator reg(12, true, 3, 3, 0);             // sched_cap_ms 0
+  warm(reg);
+  FrameRegulator::Displaced disp;
+  double m = 0.0;
+  reg.offer(frame(0), kT0 + 8 * kVb - 10'000, &disp);
+  CHECK(!reg.take_margin(&m));
+}
+
+TEST(phase_lock_mode_places_by_arrival_until_switched_on) {
+  // Arrival 3.5 ms before the release point of the vblank at kT0 + 8
+  // periods: the arrival path holds it 0.5 ms for that vblank; capture
+  // placement (want = arrival + 1 ms) needs the next one.
+  const uint64_t t = kT0 + 8 * kVb - 3'000 - 500;
+  const uint64_t arrival_release = kT0 + 8 * kVb - 3'000;
+  const uint64_t capture_release = kT0 + 9 * kVb - 3'000;
+  FrameRegulator::Displaced disp;
+  double m = 0.0;
+
+  FrameRegulator off(12, true, 3, 3, 16);            // phase lock mode, not locked
+  off.set_phase_lock_mode(true);
+  warm(off);
+  CHECK(!off.offer(frame(0), t, &disp));
+  CHECK(off.next_release_us() == arrival_release);
+  REQUIRE(off.take_margin(&m));                      // measured in both modes
+  CHECK(m > kVb - 501.0 && m < kVb - 499.0);
+
+  FrameRegulator on(12, true, 3, 3, 16);             // phase lock mode, locked
+  on.set_phase_lock_mode(true);
+  on.set_capture_placement(true);
+  warm(on);
+  CHECK(!on.offer(frame(0), t, &disp));
+  CHECK(on.next_release_us() == capture_release);
+
+  FrameRegulator classic(12, true, 3, 3, 16);        // no phase lock: today's rule
+  warm(classic);
+  CHECK(!classic.offer(frame(0), t, &disp));
+  CHECK(classic.next_release_us() == capture_release);
+}
+
+TEST(phase_lock_mode_switching_placement_never_shows_backwards) {
+  // The lock turns capture placement on and off as it gains and loses the
+  // phase. A switch may cost a hitch, but a frame the arrival path chained to
+  // a later slot must never be shown after a newer one.
+  const ScreenSim s = run_screen_sim(
+      16, 1e6 / 59.99, 60, clean_jitter,
+      [](FrameRegulator& r, double t) {
+        r.set_capture_placement(static_cast<int>(t / 2.0) % 2 == 0);
+      },
+      /*phase_lock_mode=*/true);
+  CHECK(s.offered > 3000);
   CHECK(s.backwards == 0);
 }

@@ -4,6 +4,7 @@
 #include <stdexcept>
 
 #include "mabur/toml.h"
+#include "mode_pick.h"
 
 namespace maburplay {
 namespace {
@@ -112,6 +113,8 @@ Config load_config(const std::string& path, std::vector<std::string>* defaulted)
   }
 
   c.screen_mode = get_str(j, "screen_mode", "1920x1080@60", "");
+  if (!parse_screen_want(c.screen_mode).ok)
+    fail("screen_mode", "must be WIDTHxHEIGHT@RATE, e.g. 1920x1080@60 or 1920x1080@59.94");
 
   if (j.contains("dvr")) {
     const Value& r = j["dvr"];
@@ -200,7 +203,7 @@ Config load_config(const std::string& path, std::vector<std::string>* defaulted)
     const Value& d = j["display"];
     check_keys(d, "display",
                {"regulate_ms", "vsync_lock", "vsync_lead_ms", "chain_budget",
-                "sched_cap_ms"});
+                "sched_cap_ms", "phase_lock", "phase_margin_ms"});
     c.display.regulate_ms =
         static_cast<int>(get_int(d, "regulate_ms", 12, 0, 100, "display"));
     c.display.vsync_lock = get_bool(d, "vsync_lock", c.display.vsync_lock, "display");
@@ -210,7 +213,15 @@ Config load_config(const std::string& path, std::vector<std::string>* defaulted)
         static_cast<int>(get_int(d, "chain_budget", 0, 0, 60, "display"));
     c.display.sched_cap_ms =
         static_cast<int>(get_int(d, "sched_cap_ms", 0, 0, 50, "display"));
+    c.display.phase_lock = get_bool(d, "phase_lock", c.display.phase_lock, "display");
+    c.display.phase_margin_ms =
+        static_cast<int>(get_int(d, "phase_margin_ms", 4, 1, 10, "display"));
   }
+
+  if (c.display.phase_lock &&
+      (!c.display.vsync_lock || c.display.sched_cap_ms <= 0 || c.display.regulate_ms <= 0))
+    fail("display.phase_lock",
+         "needs display.vsync_lock = true, sched_cap_ms > 0 and regulate_ms > 0");
 
   if (j.contains("colortrans")) {
     const Value& ct = j["colortrans"];

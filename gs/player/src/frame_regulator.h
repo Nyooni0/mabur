@@ -128,11 +128,33 @@ class FrameRegulator {
     incomplete_head_ = (incomplete_head_ + 1) % kIncomplete;
   }
   // Current allowance (ms): how late past the fast path a frame may be
-  // and still keep its capture-time slot. 0 when the mode is off.
+  // and still keep its capture-time slot. Measured whenever sched_cap_ms
+  // > 0, including in phase-lock mode while frames are placed by arrival
+  // (lock not yet held) -- the margin needs it to judge the lock before
+  // capture placement engages. 0 only when sched_cap_ms itself is 0.
   double allowance_ms() const { return static_cast<double>(allowance_us_) / 1000.0; }
   // Frames that missed their capture-time slot and were placed by arrival.
   uint64_t late_slot_count() const { return late_slot_; }
   bool servo_locked() const { return servo_now_; }
+
+  // Phase lock (display.phase_lock). In phase-lock mode capture-time
+  // placement runs only while set_capture_placement(true) -- the lock holds
+  // -- and arrival placement otherwise; the margin is measured in both, so
+  // the lock can steer before the screen changes behaviour. Off, the
+  // sched_cap_ms > 0 rule alone decides, as before.
+  void set_phase_lock_mode(bool on) { phase_lock_mode_ = on; }
+  void set_capture_placement(bool on) { capture_on_ = on; }
+  // The last offered frame's margin: µs from its capture-time `want` (pts +
+  // delivery floor + allowance) to the release point of the vblank it would
+  // take. Available once per offer that had one (vsync servo valid and
+  // sched_cap_ms > 0).
+  bool take_margin(double* margin_us) {
+    if (!margin_fresh_) return false;
+    margin_fresh_ = false;
+    *margin_us = margin_us_;
+    return true;
+  }
+  double panel_period_us() const { return est_.period_us(); }
 
   // Chain-break heal (hw): a single missed latch puts the
   // display into a stable one-vsync-late mode -- every present then
@@ -162,10 +184,18 @@ class FrameRegulator {
     uint64_t target_v = 0;  // 0 = untargeted (fallback rule)
   };
   void displace(int idx, Displaced* out);
+  // Capture-time slot for a frame: feeds the lateness window and computes
+  // want = pts64 + floor + allowance and the release it lands on. False
+  // while the window is empty.
+  struct CaptureSlot {
+    int64_t want = 0;
+    VblankEstimator::Release r{};
+  };
+  bool capture_slot(uint64_t pts64, uint32_t pts32, uint64_t mono_us, CaptureSlot* s);
   // Capture-time placement. True when the frame got its capture slot
   // (release/target filled in); false sends it down the arrival path.
-  bool place_by_capture(uint64_t pts64, uint32_t pts32, uint64_t mono_us,
-                        uint64_t* release, uint64_t* target_v, Displaced* out);
+  bool place_by_capture(const CaptureSlot& s, uint64_t mono_us, uint64_t* release,
+                        uint64_t* target_v, Displaced* out);
   bool was_incomplete(uint32_t pts_us) const {
     for (uint32_t p : incomplete_) if (p == pts_us) return true;
     return false;
@@ -203,6 +233,11 @@ class FrameRegulator {
   uint64_t late_slot_ = 0;
   uint32_t incomplete_[kIncomplete] = {1, 1, 1, 1, 1, 1, 1, 1};  // odd: no real pts match at start
   int incomplete_head_ = 0;
+
+  bool phase_lock_mode_ = false;
+  bool capture_on_ = false;
+  double margin_us_ = 0.0;
+  bool margin_fresh_ = false;
 };
 
 }  // namespace maburplay

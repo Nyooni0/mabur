@@ -3,6 +3,8 @@
 **Status:** root-caused and fixed — the sensor-rate trim and the src:src
 full-rate bind shipped in `drone/venc/sensor_cal.[ch]`; reference:
 `docs/airtime-model.md` §3 ("The sensor does not run at `venc.fps`").
+The phase lock steers the rate on top of this trim, which stays its base
+and fallback: `docs/phase-lock.md`.
 
 Bench, 2026-10-14. Started from two flights, 0090 (6 slices) and 0091
 (1 slice), flown to compare slice counts: both felt slightly juddery with

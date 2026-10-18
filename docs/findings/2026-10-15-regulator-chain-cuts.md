@@ -3,7 +3,8 @@
 **Status:** `display.chain_budget` ships 0 and maburplay polls the decoder
 through the pre-release wait (`gs/player/src/release_wait.h`); both are
 described in `docs/observability.md` ("Regulator line", `frame.log`). The
-remaining lever for latency is a sensor/panel phase lock, not built.
+sensor/panel phase lock this pointed to as the remaining lever is built:
+`docs/phase-lock.md`.
 
 ## Question
 

@@ -1,6 +1,6 @@
 # Orange Pi Zero 2W GS bring-up (Cedrus via libav v4l2request) — findings 2026-10-12
 
-**Status:** built and running on the bench board; latency parity against the Radxa not yet measured. Current: docs/opi-zero2w.md.
+**Status:** built and running on the bench board; latency against the Radxa measured later on the phase-lock bench (`2026-10-18-opi-phase-lock-bench.md`: ~2 ms under it unlocked, 33 vs 35 ms locked). Current: docs/opi-zero2w.md.
 
 **Question.** Does the `v4l2req` maburplay build (Allwinner H618, Cedrus
 HEVC decode through the jernejsk FFmpeg 7.1 v4l2request hwaccel, DRM-PRIME

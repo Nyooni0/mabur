@@ -1,6 +1,12 @@
 #include "drm_presenter.h"
 
+#include <algorithm>
+#include <vector>
+
+#include "fb_cache.h"
+
 #include "in_formats.h"  // in_formats_has_linear: the IN_FORMATS parser, unit-tested
+#include "mode_pick.h"  // ModeCand, pick_mode, parse_screen_want, mode_hz
 #include "osd_layout.h"  // plan_zpos: the plane stacking policy, unit-tested
 #include "osd_surface.h"
 #include "vblank_estimator.h"  // mode_period_us: pure timing math, unit-tested
@@ -398,6 +404,11 @@ struct DrmPresenter::Impl {
   // completion instead of resubmitted -- see the on_flip mailbox block.
   bool paced = false;
   uint64_t mailbox_dropped_paced = 0;
+  DrmPresenter::CommitInfo last_commit;  // what the last present() did
+  // Per-stage present() durations since the last present_timing() call.
+  static constexpr int kTimingWindow = 256;
+  uint32_t stage_us[3][kTimingWindow] = {};
+  int stage_n = 0;
 
   // Vsync timestamp capture (LatTracker's dsp segment).
   // ts_exact is latched once at init() from DRM_CAP_TIMESTAMP_MONOTONIC;
@@ -419,6 +430,16 @@ struct DrmPresenter::Impl {
   // the raw DmaFrame only (fb_id 0 -- no FB created until submission);
   // submitted by on_flip() the moment the outstanding flip lands.
   Slot mailbox;
+
+  // Imported GEM handles + framebuffers of the decoder's buffer pool, kept
+  // across flips (fb_cache.h: the per-frame import was the latch miss).
+  static constexpr size_t kFbCacheMax = 32;
+  FbCache fbs{fb_ops(), kFbCacheMax};
+  FbCache::Ops fb_ops();
+  bool slot_pins(uint32_t handle) const {
+    return (on_screen.valid && on_screen.gem_handle == handle) ||
+           (pending.valid && pending.gem_handle == handle);
+  }
 
   ~Impl();
 
@@ -444,12 +465,40 @@ struct DrmPresenter::Impl {
 
 void DrmPresenter::Impl::release_slot(Slot& s) {
   if (!s.valid) return;
-  if (fd >= 0) {
-    if (s.fb_id) drmModeRmFB(fd, s.fb_id);  // mailbox slots have no FB yet
-    close_gem_handle(fd, s.gem_handle);
-  }
+  // The framebuffer and GEM handle stay in `fbs` for the buffer's next
+  // turn through the pool; only the decoder's frame goes back.
   if (release) release(s.frame);
   s = Slot{};
+}
+
+FbCache::Ops DrmPresenter::Impl::fb_ops() {
+  FbCache::Ops o;
+  o.import = [this](int dmabuf_fd, uint32_t* handle) {
+    if (fd < 0) return false;
+    if (drmPrimeFDToHandle(fd, dmabuf_fd, handle) != 0) {
+      std::fprintf(stderr, "DrmPresenter: drmPrimeFDToHandle failed: %s\n", std::strerror(errno));
+      return false;
+    }
+    return true;
+  };
+  o.add_fb = [this](uint32_t handle, const FbCache::Geom& g, uint32_t* fb_id) {
+    if (fd < 0) return false;
+    const uint32_t handles[4] = {handle, handle, 0, 0};
+    const uint32_t pitches[4] = {static_cast<uint32_t>(g.stride),
+                                 static_cast<uint32_t>(g.stride), 0, 0};
+    const uint32_t offsets[4] = {0, static_cast<uint32_t>(g.stride * g.vstride), 0, 0};
+    if (drmModeAddFB2(fd, static_cast<uint32_t>(g.width), static_cast<uint32_t>(g.height),
+                      g.fourcc, handles, pitches, offsets, fb_id, 0) != 0) {
+      std::fprintf(stderr, "DrmPresenter: drmModeAddFB2 failed: %s\n", std::strerror(errno));
+      return false;
+    }
+    return true;
+  };
+  o.rm_fb = [this](uint32_t fb_id) {
+    if (fd >= 0 && fb_id) drmModeRmFB(fd, fb_id);
+  };
+  o.close_handle = [this](uint32_t handle) { close_gem_handle(fd, handle); };
+  return o;
 }
 
 void DrmPresenter::Impl::on_flip(bool real_event) {
@@ -707,38 +756,36 @@ bool DrmPresenter::Impl::init(const std::string& screen_mode, bool want_osd, Rel
   }
   connector_id = chosen->connector_id;
 
-  // Mode select: "WIDTHxHEIGHT@FPS" against the connector's mode list;
-  // fall back to the connector's DRM_MODE_TYPE_PREFERRED mode (or its
-  // first mode if none is flagged preferred) with a warning.
-  int want_w = 0, want_h = 0, want_fps = 0;
-  const bool have_want =
-      std::sscanf(screen_mode.c_str(), "%dx%d@%d", &want_w, &want_h, &want_fps) == 3;
-  const drmModeModeInfo* selected = nullptr;
-  const drmModeModeInfo* preferred = nullptr;
+  // Mode select (mode_pick.h): the closest exact rate among modes of the
+  // wanted size; the preferred mode (or the first) when none fits.
+  std::vector<ModeCand> cands;
+  cands.reserve(static_cast<size_t>(chosen->count_modes));
   for (int i = 0; i < chosen->count_modes; ++i) {
     const drmModeModeInfo* m = &chosen->modes[i];
-    // Interlaced modes are never acceptable for this player (progressive
-    // 60 fps content on a 1080i mode = combing artifacts at half the
-    // temporal rate). The connector lists 1080i@60 AFTER 1080p@60, and an
-    // early version of this loop kept overwriting `selected` with later
-    // matches -- shipping the interlaced mode. Skip them entirely, and
-    // take the FIRST acceptable match.
-    if (m->flags & DRM_MODE_FLAG_INTERLACE) continue;
-    if (!preferred && (m->type & DRM_MODE_TYPE_PREFERRED)) preferred = m;
-    if (!selected && have_want && static_cast<int>(m->hdisplay) == want_w &&
-        static_cast<int>(m->vdisplay) == want_h && static_cast<int>(m->vrefresh) == want_fps) {
-      selected = m;
-    }
+    ModeCand c;
+    c.w = m->hdisplay;
+    c.h = m->vdisplay;
+    c.clock_khz = static_cast<int>(m->clock);
+    c.htotal = m->htotal;
+    c.vtotal = m->vtotal;
+    c.interlaced = (m->flags & DRM_MODE_FLAG_INTERLACE) != 0;
+    c.preferred = (m->type & DRM_MODE_TYPE_PREFERRED) != 0;
+    cands.push_back(c);
   }
-  if (!selected) {
-    selected = preferred ? preferred : (chosen->count_modes > 0 ? &chosen->modes[0] : nullptr);
-    if (selected) {
+  bool matched = false;
+  const int pick = pick_mode(cands, parse_screen_want(screen_mode), &matched);
+  const drmModeModeInfo* selected = pick >= 0 ? &chosen->modes[pick] : nullptr;
+  if (selected) {
+    if (!matched) {
       std::fprintf(stderr,
                    "DrmPresenter: warning: screen_mode \"%s\" not offered by connector %u; "
                    "falling back to %ux%u@%u\n",
                    screen_mode.c_str(), connector_id, selected->hdisplay, selected->vdisplay,
                    selected->vrefresh);
     }
+    std::fprintf(stderr, "DrmPresenter: mode %ux%u @%.3f Hz (requested %s)\n",
+                 selected->hdisplay, selected->vdisplay, mode_hz(cands[static_cast<size_t>(pick)]),
+                 screen_mode.c_str());
   }
   if (!selected) {
     if (log_init_failures)
@@ -1352,31 +1399,27 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
     m.gem_handle = 0;
     m.frame = frame;
     mailbox = m;
+    last_commit = DrmPresenter::CommitInfo{0, DrmPresenter::kCommitParked};
     return true;
   }
+  last_commit = DrmPresenter::CommitInfo{};
 
+  const uint64_t ts0 = mono_us();
   uint32_t handle = 0;
-  if (drmPrimeFDToHandle(fd, frame.dmabuf_fd, &handle) != 0) {
-    std::fprintf(stderr, "DrmPresenter: drmPrimeFDToHandle failed: %s\n", std::strerror(errno));
+  FbCache::Geom geom;
+  geom.width = frame.width;
+  geom.height = frame.height;
+  geom.stride = frame.stride;
+  geom.vstride = frame.vstride;
+  geom.fourcc = DRM_FORMAT_NV12;
+  const uint32_t fb_id =
+      fbs.acquire(frame.dmabuf_fd, geom, ts0, [this](uint32_t h) { return slot_pins(h); }, &handle);
+  if (fb_id == 0) {
     ++commit_errors;
     if (release) release(frame);
     return false;
   }
-
-  const uint32_t handles[4] = {handle, handle, 0, 0};
-  const uint32_t pitches[4] = {static_cast<uint32_t>(frame.stride),
-                               static_cast<uint32_t>(frame.stride), 0, 0};
-  const uint32_t offsets[4] = {0, static_cast<uint32_t>(frame.stride * frame.vstride), 0, 0};
-  uint32_t fb_id = 0;
-  if (drmModeAddFB2(fd, static_cast<uint32_t>(frame.width), static_cast<uint32_t>(frame.height),
-                    DRM_FORMAT_NV12, handles, pitches, offsets, &fb_id, 0) != 0) {
-    std::fprintf(stderr, "DrmPresenter: drmModeAddFB2 failed: %s\n", std::strerror(errno));
-    ++commit_errors;
-    close_gem_handle(fd, handle);
-    if (release) release(frame);
-    return false;
-  }
-
+  const uint64_t ts1 = mono_us();
   const bool do_modeset = needs_modeset;
 
   // Splash handoff. splash_show() already consumed the modeset, so this is a
@@ -1478,8 +1521,6 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
   drmModeAtomicReqPtr req = build_req(attach_osd, ctm_value);
   if (!req) {
     ++commit_errors;
-    drmModeRmFB(fd, fb_id);
-    close_gem_handle(fd, handle);
     if (release) release(frame);
     return false;
   }
@@ -1501,6 +1542,7 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
   if (!do_modeset && !attach_osd && (probing_async || async_active))
     flags |= DRM_MODE_PAGE_FLIP_ASYNC;
 
+  const uint64_t ts2 = mono_us();
   int rc = drmModeAtomicCommit(fd, req, flags, this);
   if (rc != 0 && probing_async && rc == -EINVAL) {
     async_probed = true;
@@ -1572,6 +1614,20 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
 
   if (req) drmModeAtomicFree(req);
 
+  const uint64_t ts3 = mono_us();
+  if (stage_n < kTimingWindow) {
+    stage_us[0][stage_n] = static_cast<uint32_t>(ts1 - ts0);
+    stage_us[1][stage_n] = static_cast<uint32_t>(ts2 - ts1);
+    stage_us[2][stage_n] = static_cast<uint32_t>(ts3 - ts2);
+    ++stage_n;
+  }
+  last_commit.t_commit_us = rc == 0 ? ts3 : 0;
+  last_commit.bits = static_cast<uint8_t>(
+      (attach_osd ? DrmPresenter::kCommitOsd : 0) |
+      ((flags & DRM_MODE_PAGE_FLIP_ASYNC) ? DrmPresenter::kCommitAsync : 0) |
+      (do_modeset ? DrmPresenter::kCommitModeset : 0) |
+      (rc != 0 ? DrmPresenter::kCommitFailed : 0));
+
   if (rc != 0) {
     const int err = rc < 0 ? -rc : errno;
     std::fprintf(stderr, "DrmPresenter: drmModeAtomicCommit failed (modeset=%d): %s\n", do_modeset,
@@ -1602,8 +1658,6 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
         }
       }
     }
-    drmModeRmFB(fd, fb_id);
-    close_gem_handle(fd, handle);
     if (release) release(frame);
     return false;
   }
@@ -1732,6 +1786,9 @@ void DrmPresenter::Impl::drop_all() {
   if (mailbox.valid) release_slot(mailbox);
   if (pending.valid) release_slot(pending);
   if (on_screen.valid) release_slot(on_screen);
+  // The caller is about to flush/reset the backend, whose pool may come
+  // back as different buffers: let the imports go with the frames.
+  fbs.flush();
   if (flip_pending) ++events_to_swallow;  // the kernel still owes this event
   flip_pending = false;
   needs_modeset = true;  // plane content is gone; next present() must redo the full commit
@@ -1747,6 +1804,7 @@ DrmPresenter::Impl::~Impl() {
   if (mailbox.valid) release_slot(mailbox);
   if (pending.valid) release_slot(pending);
   if (on_screen.valid) release_slot(on_screen);
+  fbs.flush();  // before close(fd): its ops still need the descriptor
   if (video_in_fence_fd >= 0) close(video_in_fence_fd);
   video_in_fence_fd = -1;
   if (fd >= 0) {
@@ -1795,6 +1853,22 @@ uint64_t DrmPresenter::busy_replaced() const { return impl_->frames_dropped_busy
 uint64_t DrmPresenter::mailbox_engagements() const { return impl_->mailbox_engagements; }
 
 void DrmPresenter::set_paced(bool paced) { impl_->paced = paced; }
+
+DrmPresenter::CommitInfo DrmPresenter::last_commit() const { return impl_->last_commit; }
+
+DrmPresenter::PresentTiming DrmPresenter::present_timing() {
+  PresentTiming t;
+  Impl& im = *impl_;
+  t.n = static_cast<uint32_t>(im.stage_n);
+  for (int k = 0; k < 3 && im.stage_n > 0; ++k) {
+    std::vector<uint32_t> v(im.stage_us[k], im.stage_us[k] + im.stage_n);
+    std::nth_element(v.begin(), v.begin() + static_cast<long>(v.size() / 2), v.end());
+    t.p50[k] = v[v.size() / 2];
+    t.max[k] = *std::max_element(v.begin(), v.end());
+  }
+  im.stage_n = 0;
+  return t;
+}
 
 uint64_t DrmPresenter::mailbox_dropped_paced() const {
   return impl_->mailbox_dropped_paced;
