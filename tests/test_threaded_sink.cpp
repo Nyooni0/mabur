@@ -209,6 +209,93 @@ TEST(threaded_sink_mux_file_matches_direct_file) {
   CHECK(d == t);
 }
 
+// A fragment reaches the card as a trickle, not a burst: the writer hands
+// the inner sink at most pacing.slice_bytes per call, in order, so one
+// fragment is many short syscalls instead of one ~22 ms stretch of kernel
+// work.
+TEST(threaded_sink_writes_in_slices) {
+  struct ChunkSink final : DvrSink {
+    std::vector<size_t>* sizes;
+    std::string* bytes;
+    ChunkSink(std::vector<size_t>* s, std::string* b) : sizes(s), bytes(b) {}
+    bool write(const uint8_t* p, size_t n) override {
+      sizes->push_back(n);
+      bytes->append(reinterpret_cast<const char*>(p), n);
+      return true;
+    }
+    bool flush() override { return true; }
+  };
+  std::vector<size_t> sizes;
+  std::string got;
+  ThreadedSink::Pacing pacing;
+  pacing.slice_bytes = 300;
+  pacing.slice_gap = 0ms;
+  {
+    ThreadedSink ts(std::make_unique<ChunkSink>(&sizes, &got), ThreadedSink::kDefaultMaxQueuedBytes,
+                    pacing);
+    std::string frag(1000, 'f');
+    for (size_t i = 0; i < frag.size(); ++i) frag[i] = static_cast<char>('a' + i % 26);
+    CHECK(ts.write(u8(frag), frag.size()));
+    CHECK(ts.sync());
+    CHECK(got == frag);
+  }
+  CHECK(sizes == (std::vector<size_t>{300, 300, 300, 100}));
+}
+
+// Between slices the writer pauses pacing.slice_gap, so the fragment's
+// kernel work is spread over the second instead of landing in one burst --
+// but only while the queue holds less than pacing.backlog_bytes: a backlog
+// means the card is slower than the trickle and the writer must catch up.
+TEST(threaded_sink_paces_slices_until_a_backlog_builds) {
+  struct NullSink final : DvrSink {
+    bool write(const uint8_t*, size_t) override { return true; }
+    bool flush() override { return true; }
+  };
+  ThreadedSink::Pacing paced;
+  paced.slice_bytes = 10;
+  paced.slice_gap = 20ms;
+  paced.backlog_bytes = 1 << 20;  // 50 queued bytes is far below it: pace
+  const std::string fifty(50, 'x');
+  {
+    ThreadedSink ts(std::make_unique<NullSink>(), ThreadedSink::kDefaultMaxQueuedBytes, paced);
+    const auto t0 = std::chrono::steady_clock::now();
+    CHECK(ts.write(u8(fifty), fifty.size()));
+    CHECK(ts.sync());
+    const auto took = std::chrono::steady_clock::now() - t0;
+    CHECK(took >= 4 * 20ms);  // five slices, four gaps
+  }
+  ThreadedSink::Pacing flat = paced;
+  flat.backlog_bytes = 0;  // every queue is a backlog: never pause
+  {
+    ThreadedSink ts(std::make_unique<NullSink>(), ThreadedSink::kDefaultMaxQueuedBytes, flat);
+    const auto t0 = std::chrono::steady_clock::now();
+    CHECK(ts.write(u8(fifty), fifty.size()));
+    CHECK(ts.sync());
+    CHECK(std::chrono::steady_clock::now() - t0 < 40ms);
+  }
+}
+
+// Record stop destroys the sink on the main loop: the drain must not pay
+// the trickle's gaps, or every stop would freeze the picture for the length
+// of the open fragment's trickle.
+TEST(threaded_sink_destructor_drains_without_pacing) {
+  struct NullSink final : DvrSink {
+    bool write(const uint8_t*, size_t) override { return true; }
+    bool flush() override { return true; }
+  };
+  ThreadedSink::Pacing pacing;
+  pacing.slice_bytes = 10;
+  pacing.slice_gap = 50ms;
+  pacing.backlog_bytes = 1 << 20;
+  const std::string hundred(100, 'x');  // ten slices: 450 ms if paced
+  const auto t0 = std::chrono::steady_clock::now();
+  {
+    ThreadedSink ts(std::make_unique<NullSink>(), ThreadedSink::kDefaultMaxQueuedBytes, pacing);
+    CHECK(ts.write(u8(hundred), hundred.size()));
+  }
+  CHECK(std::chrono::steady_clock::now() - t0 < 250ms);
+}
+
 // The writer is background work: it runs ThreadedSink::kWriterNiceStep nice
 // steps below the thread that created the sink, so the scheduler gives a
 // display loop that wakes during a fragment write its CPU first.

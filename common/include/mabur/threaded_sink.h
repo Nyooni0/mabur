@@ -1,6 +1,7 @@
 #ifndef MABUR_THREADED_SINK_H_
 #define MABUR_THREADED_SINK_H_
 
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -13,6 +14,13 @@
 #include "mabur/dvr_mux.h"
 
 namespace mabur {
+
+// How ThreadedSink's writer trickles a queued write to the inner sink.
+struct ThreadedSinkPacing {
+  size_t slice_bytes = 64u << 10;             // one inner write
+  std::chrono::microseconds slice_gap{8000};  // sleep after a slice
+  size_t backlog_bytes = 4u << 20;            // queued >= this: no gaps
+};
 
 // A DvrSink that moves the I/O of another sink onto its own writer thread.
 //
@@ -38,18 +46,29 @@ namespace mabur {
 // accepted once the queue is empty.
 //
 // The writer thread ("mbr-dvrw") runs kWriterNiceStep nice steps below the
-// thread that created the sink. Writing a fragment is CPU work too (the copy
-// into the page cache, the FAT updates), and at equal priority it competes
-// with the GS's display loop, which then wakes a few ms late and misses a
-// vblank. The writer has no deadline; the queue absorbs its delays.
+// thread that created the sink, and it trickles: each queued write reaches
+// the inner sink in slices of Pacing::slice_bytes with Pacing::slice_gap of
+// sleep between them. Writing a fragment is CPU and memory work (the copy
+// into the page cache, a FAT buffer head per 512-byte sector), and done in
+// one ~22 ms burst while the recorder's encoder, GPU stage and the decoder
+// all run, it is the moment the GS's display loop wakes a few ms late and
+// misses a vblank -- a lower nice alone does not prevent that, because a
+// thread that just woke from a long sleep is not preempted on the loop's
+// wake-up. Spread over the second, the same work never saturates the
+// machine. The writer has no deadline; the queue absorbs its delays.
+// Pacing stops when the queue holds Pacing::backlog_bytes or more (the card
+// is slower than the trickle, catch up) and during the destructor's drain
+// (record stop runs it on the display loop).
 //
 // One producer: DvrMux calls it from a single thread.
 class ThreadedSink final : public DvrSink {
  public:
   static constexpr size_t kDefaultMaxQueuedBytes = 32u << 20;  // ~13 s at 20 Mbit/s
   static constexpr int kWriterNiceStep = 10;
+  using Pacing = ThreadedSinkPacing;
   explicit ThreadedSink(std::unique_ptr<DvrSink> inner,
-                        size_t max_queued_bytes = kDefaultMaxQueuedBytes);
+                        size_t max_queued_bytes = kDefaultMaxQueuedBytes,
+                        Pacing pacing = Pacing{});
   ~ThreadedSink() override;
   ThreadedSink(const ThreadedSink&) = delete;
   ThreadedSink& operator=(const ThreadedSink&) = delete;
@@ -66,10 +85,12 @@ class ThreadedSink final : public DvrSink {
   };
 
   void run();
+  bool write_sliced(const std::vector<uint8_t>& data);
   bool enqueue(Item item, size_t bytes, uint64_t* seq);
 
   std::unique_ptr<DvrSink> inner_;
   const size_t max_queued_bytes_;
+  const Pacing pacing_;
 
   std::mutex mu_;
   std::condition_variable work_cv_;  // writer thread: an item or stop

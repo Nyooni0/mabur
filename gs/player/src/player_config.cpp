@@ -202,13 +202,15 @@ Config load_config(const std::string& path, std::vector<std::string>* defaulted)
   if (j.contains("display")) {
     const Value& d = j["display"];
     check_keys(d, "display",
-               {"regulate_ms", "vsync_lock", "vsync_lead_ms", "chain_budget",
-                "sched_cap_ms", "phase_lock", "phase_margin_ms"});
+               {"regulate_ms", "vsync_lock", "vsync_lead_ms", "rec_vsync_lead_ms",
+                "chain_budget", "sched_cap_ms", "phase_lock", "phase_margin_ms"});
     c.display.regulate_ms =
         static_cast<int>(get_int(d, "regulate_ms", 12, 0, 100, "display"));
     c.display.vsync_lock = get_bool(d, "vsync_lock", c.display.vsync_lock, "display");
     c.display.vsync_lead_ms =
         static_cast<int>(get_int(d, "vsync_lead_ms", 6, 1, 10, "display"));
+    c.display.rec_vsync_lead_ms =
+        static_cast<int>(get_int(d, "rec_vsync_lead_ms", 8, 1, 10, "display"));
     c.display.chain_budget =
         static_cast<int>(get_int(d, "chain_budget", 0, 0, 60, "display"));
     c.display.sched_cap_ms =

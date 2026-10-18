@@ -2,7 +2,9 @@
 
 **Status:** fix built (branch `burn-async-sink`, `mabur::ThreadedSink`); the
 reference page is `docs/colortrans.md` ("Keeping the burned stage off the
-display path", "Not done / follow-ups"). Follow-ups below are open.
+display path", "Not done / follow-ups"). Follow-up 1 is closed by
+`docs/findings/2026-10-19-burned-dvr-live-repeat.md` (the trickle write);
+follow-ups 2-5 are open.
 
 ## Question
 
