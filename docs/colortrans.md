@@ -168,6 +168,15 @@ A recording must not cost the live picture a vsync. What makes that hold:
   `test_fps_cap`): a frame is admitted when its slot is due and slots
   advance one interval per admit, so a source at or under the cap passes
   whole even though decoded frames arrive in pairs.
+- **File I/O off the encode thread.** The mux writes through
+  `mabur::ThreadedSink` (`common/include/mabur/threaded_sink.h`,
+  `test_threaded_sink`). A closing fragment is ~2.5 MB at 20 Mbit/s and
+  takes ~22 ms to write to the GS's vfat card. The encode thread's budget at
+  60 fps is 16.7 ms with ~14 ms of encode, so written in line it would
+  displace the next frame at the `ct_out` handoff, once per fragment. The
+  writer thread (`mbr-dvrw`) runs 10 nice steps below the player, because
+  its fragment write competes with the main loop for the CPU. That halves,
+  but does not remove, the live-picture cost below.
 
 `BurnRecorder: stopped` reports `ct_ms=mean/max enc_ms=mean/max`; the ct
 thread logs `colortrans stage mean per frame ...: import, draw+finish, rga`
@@ -180,6 +189,16 @@ Bench record of the three fixes and their numbers:
 
 ## Not done / follow-ups
 
+- While recording, a fragment write still costs the live picture about one
+  one-vblank repeat per 90 s (no frame lost). The main loop releases a frame
+  ~5 ms late, 53-72 ms after a fragment cut, while `mbr-dvrw` writes the
+  ~2.5 MB fragment in one burst. The untested next step is to write it in
+  small slices spread over the second. Record:
+  `docs/findings/2026-10-18-burned-dvr-fragment-write.md`.
+- A record start or stop blocks the main loop for 70-180 ms:
+  `BurnRecorder::start()` (encoder init, palette upload) and `stop()`
+  (thread joins, encoder teardown, mux close) run synchronously from
+  `rec_start`/`rec_stop`.
 - Live retune (config + restart is the loop).
 - EGL YUV colour-space / range hints on the dmabuf import (none are passed;
   a mismatch is a slight tint between the display and the DVR).
