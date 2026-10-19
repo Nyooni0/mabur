@@ -740,8 +740,8 @@ Config load_config(const std::string& path, std::vector<std::string>* defaulted)
       fail("record.size", "must have venc.size's aspect ratio");
     if (rw % 2 || rh % 2 || rw < 320 || rh < 180 || rw > 3840 || rh > 2160)
       fail("record.size", "must be even and within 320x180..3840x2160");
-    // Above 1080p only the sensor's 3840x2160@30 mode can feed it
-    // (star6e_pipeline.c STAR6E_SENSOR_MODE_4K), and that caps the link too.
+    // Above 1080p only the sensor's 3840x2160 mode can feed it
+    // (camera_mode_for in drone/venc/camera_modes.c), and that caps the link too.
     if ((rw > 1920 || rh > 1080) && cfg.venc.core.fps > 30)
       fail("record.size", "above 1920x1080 needs the 30 fps sensor mode: set venc.fps <= 30");
   }

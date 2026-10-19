@@ -230,17 +230,16 @@ their variance into jitter. Knobs, in order of proven usefulness:
      GS panel (60.000 Hz nominal): one panel repeat per ~100 s, the floor
      without genlock. Bench record:
      `docs/findings/2026-10-14-sensor-rate-trim.md`.
-- **Sensor mode and the shutter cap follow `venc.fps`.** Up to 90 fps the
-  pipeline pins the IMX415's 1920x1080@90 mode (2x2 binned, full FOV);
-  above 90 it takes the driver's 1472x816@120 mode
-  (`STAR6E_SENSOR_MODE_HIGH_FPS`), and the loader then requires
-  `venc.size` to keep 1472:816 — a keep-aspect crop of that mode (e.g. to
-  1280x720) makes the VPE drop every frame and the encoder sit at 0 fps.
-  The AE shutter ceiling (`sensor_cal_shutter_cap_us`) is the whole frame
+- **Sensor mode and the shutter cap follow `venc.fps`.** The pipeline asks
+  the driver for the mode `camera_mode_for` names (`drone/venc/camera_modes.c`):
+  1920x1080@90 (2x2 binned, full view) up to 90 fps, 1728x972@100 up to
+  100, 1728x816@120 above. It finds that mode in the driver's list by size
+  and ceiling and fails boot if the driver lacks it; modes, views and size
+  rules are in `docs/camera-modes.md`. The AE shutter ceiling (`sensor_cal_shutter_cap_us`) is the whole frame
   period up to 90 fps and 90 % of it above: in a dim scene the sensor's
   frame is the shutter plus ~22 lines, which at a full 10 ms cap holds
-  mode 3 at 98.94 Hz whatever is requested, out of the trim's and the
-  phase lock's reach. Bench record: `docs/findings/2026-10-19-100fps.md`.
+  a 100 fps mode at 98.94 Hz whatever is requested, out of the trim's and
+  the phase lock's reach. Bench record: `docs/findings/2026-10-19-100fps.md`.
 
 ## 4. Measuring it — rigs and gotchas
 

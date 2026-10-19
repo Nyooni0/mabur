@@ -88,10 +88,11 @@ size. The SigmaStar encoder cannot scale, so the sizes decide the port:
   `[record] no frame 2000 ms after start` if none arrive. An idle port 1
   reads `Pixel MAX, OutputW 0` in `/proc/mi_modules/mi_vpe/mi_vpe0` until
   ch1 starts; that is not a failure.
-- **Above 1920x1080** neither link sensor mode (mode 2, 1080p binned, up
-  to 90 fps; mode 3, 1472x816, above) can feed it: the pipeline switches to mode 0, 3840x2160@30 (full FOV, not binned,
-  `STAR6E_SENSOR_MODE_4K`), and the loader requires `venc.fps <= 30`. The
-  link then also runs at 30 fps from a downscaled 4K capture.
+- **Above 1920x1080** none of the link's sensor modes (1920x1080 binned up
+  to 90 fps, 1728x972 / 1728x816 above; `docs/camera-modes.md`) can feed
+  it: the pipeline switches to the 3840x2160@33 mode (full view, not
+  binned), and the loader requires `venc.fps <= 30`. The link then also
+  runs at 30 fps from a downscaled 4K capture.
 
 4K is not usable next to the link: the SigmaStar H.265 engine runs one
 encode at a time, and a 4K encode (~30 ms) fills the 31 ms frame period, so
