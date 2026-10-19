@@ -313,6 +313,12 @@ void parse_venc(const Value& j, VencSectionCfg& v) {
   } else {
     note_default("venc", "fps", to_text(kDef.core.fps));
   }
+  // Above 90 fps the pipeline captures the sensor's 1472x816@120 mode
+  // (star6e_pipeline.c STAR6E_SENSOR_MODE_HIGH_FPS). A keep-aspect crop of
+  // it makes the VPE drop every frame, so only its own aspect is usable.
+  if (v.core.fps > 90 &&
+      static_cast<long>(v.core.width) * 816 != static_cast<long>(v.core.height) * 1472)
+    fail("venc.size", "above 90 fps must have the 1472x816 sensor mode's aspect ratio (e.g. 1472x816)");
 
   if (j.contains("gop_s")) {
     assign_if_present(j, "gop_s", v.core.gop_s, "venc");

@@ -1,5 +1,6 @@
 /* ported from waybeam_venc f956a52:src/pipeline_common.c */
 #include "pipeline_common.h"
+#include "sensor_cal.h"
 #include "venc_cfg.h"
 
 #include <ctype.h>
@@ -169,7 +170,8 @@ int pipeline_common_cap_exposure_for_fps(uint32_t fps,
 	}
 
 	divisor = shutter_rule_180 ? fps * 2 : fps;
-	target_us = 1000000 / divisor;
+	target_us = shutter_rule_180 ? 1000000 / divisor :
+		sensor_cal_shutter_cap_us(fps);
 	if (config.maxShutterUs <= target_us) {
 		printf("> Exposure %s: maxShutter %uus (already <= %uus for %u fps%s), enforcing\n",
 			shutter_rule_180 ? "pin" : "cap",

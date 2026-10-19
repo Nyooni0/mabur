@@ -59,6 +59,12 @@
  * same table's 3840x2160@30 (full array, full FOV, not binned). Everything
  * then runs at <= 30 fps -- the config loader requires venc.fps <= 30. */
 #define STAR6E_SENSOR_MODE_4K       0
+/* A venc.fps above mode 2's 90 fps ceiling needs the same table's
+ * 1472x816@120 mode.  A keep-aspect precrop of it (to 16:9) makes the VPE
+ * drop every frame, so the config loader requires venc.size to keep
+ * 1472:816 above 90 fps and the VPE only scales. */
+#define STAR6E_SENSOR_MODE_HIGH_FPS  3
+#define STAR6E_SENSOR_MODE_2_MAX_FPS 90
 /* MJPEG snapshot channel; 7 is well clear of the encoder's ch0. */
 #define STAR6E_SNAPSHOT_CHANNEL     7
 /* Video codec is always H.265 and rate control is always CBR — the
@@ -994,11 +1000,10 @@ static int prepare_pipeline_config(const VencCfg *cfg,
 	 * and RcAgent programs the real rate on its first tick. */
 	pconf->venc_max_rate   = VENC_BOOT_BITRATE_KBPS;
 
-	/* Auto-cap exposure to frame period so the AE shutter never exceeds
-	 * the frame period.  Without this, the AE converges on a long
-	 * exposure that locks fps below the target. */
-	pconf->exposure_cap_us = (pconf->sensor_framerate > 0) ?
-		1000000 / pconf->sensor_framerate : 0;
+	/* Auto-cap exposure under the frame period (sensor_cal_shutter_cap_us)
+	 * so the AE shutter never stretches the frame.  Without this, the AE
+	 * converges on a long exposure that locks fps below the target. */
+	pconf->exposure_cap_us = sensor_cal_shutter_cap_us(pconf->sensor_framerate);
 	/* isp_bin_path is resolved later in bind_and_finalize_pipeline() once
 	 * the live sensor name is known.  Leave empty here. */
 	pconf->isp_bin_path[0] = '\0';
@@ -1009,6 +1014,8 @@ static int prepare_pipeline_config(const VencCfg *cfg,
 		venc_record_size(&rec_w, &rec_h);
 		if (rec_w > 1920 || rec_h > 1080)
 			mode = STAR6E_SENSOR_MODE_4K;
+		else if (pconf->sensor_framerate > STAR6E_SENSOR_MODE_2_MAX_FPS)
+			mode = STAR6E_SENSOR_MODE_HIGH_FPS;
 		pconf->sensor_cfg = pipeline_common_build_sensor_select_config(
 			STAR6E_SENSOR_FORCED_PAD, mode, pconf->sensor_width,
 			pconf->sensor_height, pconf->sensor_framerate);

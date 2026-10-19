@@ -213,7 +213,11 @@ their variance into jitter. Knobs, in order of proven usefulness:
      re-requests the sensor in milli-fps (the driver accepts
      `[min*1000, max*1000]`) until the real rate sits in
      `[fps − 0.030, fps − 0.004]` Hz, just under the configured rate; one
-     VMAX line is 0.018 Hz at 60. Locks in 2–3 rounds (`[sensor] cal:`
+     VMAX line is 0.018 Hz at 60. A line is fps² / line rate (the IMX415
+     modes share ~202.5k lines/s), so above 60 fps the band and the
+     one-line nudge grow by (fps/60)²: at 100 fps a line is 0.049 Hz and
+     the band is `[fps − 0.083, fps − 0.011]`; a band narrower than a line
+     would be straddled forever. Locks in 2–3 rounds (`[sensor] cal:`
      lines, `snr_mhz=` on the stats line, `sensor_mhz` on `GET /venc`);
      after 8 rounds without convergence, or a driver that refuses
      milli-fps, it restores the integer boot request and stops. It only
@@ -226,6 +230,17 @@ their variance into jitter. Knobs, in order of proven usefulness:
      GS panel (60.000 Hz nominal): one panel repeat per ~100 s, the floor
      without genlock. Bench record:
      `docs/findings/2026-10-14-sensor-rate-trim.md`.
+- **Sensor mode and the shutter cap follow `venc.fps`.** Up to 90 fps the
+  pipeline pins the IMX415's 1920x1080@90 mode (2x2 binned, full FOV);
+  above 90 it takes the driver's 1472x816@120 mode
+  (`STAR6E_SENSOR_MODE_HIGH_FPS`), and the loader then requires
+  `venc.size` to keep 1472:816 — a keep-aspect crop of that mode (e.g. to
+  1280x720) makes the VPE drop every frame and the encoder sit at 0 fps.
+  The AE shutter ceiling (`sensor_cal_shutter_cap_us`) is the whole frame
+  period up to 90 fps and 90 % of it above: in a dim scene the sensor's
+  frame is the shutter plus ~22 lines, which at a full 10 ms cap holds
+  mode 3 at 98.94 Hz whatever is requested, out of the trim's and the
+  phase lock's reach. Bench record: `docs/findings/2026-10-19-100fps.md`.
 
 ## 4. Measuring it — rigs and gotchas
 

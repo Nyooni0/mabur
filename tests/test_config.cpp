@@ -1595,6 +1595,24 @@ TEST(record_ranges_are_checked) {
             "[record]\nenable = true\nfps = 30\nsize = \"3840x2160\"\n", "record.size"));
 }
 
+// Above 90 fps the pipeline captures the sensor's 1472x816@120 mode, and a
+// keep-aspect crop of it (any other aspect) makes the VPE drop every frame:
+// the loader refuses such a size instead of booting to 0 fps.
+TEST(venc_size_above_90fps_must_keep_the_high_fps_mode_aspect) {
+  auto bad = [](const char* body) {
+    auto path = write_temp_toml(body);
+    std::string msg = what_of([&] { (void)load_config(path.string()); });
+    std::filesystem::remove(path);
+    return msg.find("venc.size") != std::string::npos;
+  };
+  CHECK(bad("[venc]\nsensor_bin = \"/etc/sensors/x.bin\"\nsize = \"1280x720\"\nfps = 100\n"
+            "[record]\nenable = false\n"));
+  CHECK(!bad("[venc]\nsensor_bin = \"/etc/sensors/x.bin\"\nsize = \"1472x816\"\nfps = 100\n"
+             "[record]\nenable = false\n"));
+  CHECK(!bad("[venc]\nsensor_bin = \"/etc/sensors/x.bin\"\nsize = \"1280x720\"\nfps = 90\n"
+             "[record]\nenable = false\n"));
+}
+
 TEST(record_size_parses) {
   auto path = write_temp_toml(
       "[venc]\nsensor_bin = \"/etc/sensors/x.bin\"\nsize = \"1920x1080\"\nfps = 30\n"

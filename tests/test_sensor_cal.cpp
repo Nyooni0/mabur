@@ -16,16 +16,22 @@ constexpr double kPixClk = 74.247e6;
 constexpr double kHmax = 365.0;
 constexpr double kVtsBase = 2250.0 * 90.0 * 1000.0;  // vts_30fps * max_fps * 1000
 
+// The 1472x816@120 mode (mode 3) runs the same line rate with VMAX 1696
+// at its 120 fps maximum, so one line at 100 fps is ~49 mHz.
+constexpr double kVtsBaseMode3 = 1696.0 * 120.0 * 1000.0;
+
 struct SimSensor {
+  double vts_base = kVtsBase;   // the mode's vts_30fps * max_fps * 1000
   uint32_t vmax_floor = 0;      // AE stretch: VMAX never below this
   bool ignore_requests = false; // a driver that cannot change timing
+  uint32_t jitter_us = 40;      // spread of the per-frame ISR latency
   uint32_t vmax = 3375;
   double ideal_us = 1e6;        // true capture instant
   uint32_t rng = 0x9e3779b9u;
 
   void request(uint32_t mfps) {
     if (ignore_requests) return;
-    uint32_t v = static_cast<uint32_t>((kVtsBase + mfps / 2) / mfps);
+    uint32_t v = static_cast<uint32_t>((vts_base + mfps / 2) / mfps);
     vmax = v > vmax_floor ? v : vmax_floor;
   }
   double hz() const { return kPixClk / (vmax * kHmax); }
@@ -34,7 +40,7 @@ struct SimSensor {
   uint64_t next() {
     ideal_us += 1e6 / hz();
     rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;  // xorshift32
-    const double latency = 5.0 + (rng % 40);                // 5..44 us
+    const double latency = 5.0 + (rng % jitter_us);         // 5..44 us by default
     return static_cast<uint64_t>(ideal_us + latency);
   }
 };
@@ -169,6 +175,50 @@ TEST(cal_lands_on_the_line_nearest_the_target_from_below) {
   sensor_cal_arm(&c);
   CHECK(run(&c, &s, 60 * 60) == SENSOR_CAL_LOCKED);
   CHECK(s.vmax == 3391);
+}
+
+// At 100 fps on mode 3 one line is ~49 mHz, wider than the 60 fps band:
+// the rate flips between 99.960 Hz (VMAX 2035) and 100.009 Hz (2034) and
+// never lands in a band sized for 18 mHz lines. The band scales with the
+// line step, so the line just under the target locks.
+TEST(cal_locks_at_100fps_where_one_line_is_wider_than_the_60fps_band) {
+  SimSensor s;
+  s.vts_base = kVtsBaseMode3;
+  s.jitter_us = 4;  // the bench's medians sat on the true period every round
+  s.request(100000);
+  REQUIRE(s.vmax == 2035);
+  SensorCal c;
+  sensor_cal_init(&c, 100, 100000);
+  sensor_cal_arm(&c);
+  CHECK(run(&c, &s, 100 * 60) == SENSOR_CAL_LOCKED);
+  CHECK(s.vmax == 2035);
+  CHECK(s.hz() < 100.0);
+}
+
+// A dim scene pins the AE shutter at its ceiling, and the sensor's frame
+// is then the shutter plus ~22 lines of overhead (bench: a 10000 us cap
+// at 100 fps held mode 3 at VMAX 2056, 98.94 Hz, whatever was requested).
+// Above 90 fps the ceiling leaves that overhead inside the frame, so the
+// stretch stays under the line the trim wants and the trim still locks.
+TEST(cal_locks_at_100fps_in_a_dim_scene_under_the_shutter_cap) {
+  SimSensor s;
+  s.vts_base = kVtsBaseMode3;
+  s.jitter_us = 4;
+  const double line_us = kHmax / kPixClk * 1e6;
+  s.vmax_floor = static_cast<uint32_t>(sensor_cal_shutter_cap_us(100) / line_us) + 22;
+  s.request(100000);
+  SensorCal c;
+  sensor_cal_init(&c, 100, 100000);
+  sensor_cal_arm(&c);
+  CHECK(run(&c, &s, 100 * 60) == SENSOR_CAL_LOCKED);
+  CHECK(s.vmax == 2035);
+}
+
+// Up to 90 fps the ceiling is the whole frame period, as it always was.
+TEST(shutter_cap_is_the_frame_period_up_to_90fps) {
+  CHECK(sensor_cal_shutter_cap_us(60) == 16666);
+  CHECK(sensor_cal_shutter_cap_us(90) == 11111);
+  CHECK(sensor_cal_shutter_cap_us(0) == 0);
 }
 
 // While the bind decimates (low-power 30 fps) the encoded stream does not

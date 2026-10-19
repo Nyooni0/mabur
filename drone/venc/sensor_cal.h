@@ -86,6 +86,9 @@ SensorCalState sensor_cal_state(const SensorCal *c);
 uint32_t sensor_cal_bind_dst_fps(uint32_t requested_fps, uint32_t full_fps,
 	uint32_t src_fps);
 
+/* The AE shutter ceiling, in microseconds, for a sensor running at fps. */
+uint32_t sensor_cal_shutter_cap_us(uint32_t fps);
+
 #ifdef __cplusplus
 }
 #endif
