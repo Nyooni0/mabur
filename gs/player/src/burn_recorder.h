@@ -31,9 +31,10 @@ class ColorTrans;
 //
 // They ALSO set the recording's picture size whenever they are nonzero: the
 // encoder lays the map 1:1 from the picture's top-left, while the display
-// stretches the video under an OSD drawn at the panel's size, so a decoded
+// scales the video under an OSD drawn at the panel's size, so a decoded
 // frame of any other size (a 720p drone on a 1080p panel) is scaled to the
-// OSD surface first -- the recording is what was on the glass. Zero records
+// OSD surface first, letterboxed if its aspect differs -- the recording is
+// what was on the glass. Zero records
 // at the decoded size. The scale is part of the stage thread, so it needs a
 // MABUR_PLAYER_GPU build; without one a mismatched picture records its OSD
 // misplaced (logged at start()).

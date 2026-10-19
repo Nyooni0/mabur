@@ -1,5 +1,7 @@
 #include "drm_presenter.h"
 
+#include "fit_rect.h"
+
 #include <algorithm>
 #include <vector>
 
@@ -1476,10 +1478,14 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
                              static_cast<uint64_t>(frame.width) << 16);
     drmModeAtomicAddProperty(r, plane_id, video_props.src_h,
                              static_cast<uint64_t>(frame.height) << 16);
-    drmModeAtomicAddProperty(r, plane_id, video_props.crtc_x, 0);
-    drmModeAtomicAddProperty(r, plane_id, video_props.crtc_y, 0);
-    drmModeAtomicAddProperty(r, plane_id, video_props.crtc_w, mode.hdisplay);
-    drmModeAtomicAddProperty(r, plane_id, video_props.crtc_h, mode.vdisplay);
+    // The picture at its own aspect ratio inside the mode, black around it
+    // (fit_rect.h): a 1728x816 drone on a 16:9 panel is letterboxed, not
+    // squashed; a 16:9 picture fills the panel as before.
+    const Rect fit = fit_rect(frame.width, frame.height, mode.hdisplay, mode.vdisplay);
+    drmModeAtomicAddProperty(r, plane_id, video_props.crtc_x, fit.x);
+    drmModeAtomicAddProperty(r, plane_id, video_props.crtc_y, fit.y);
+    drmModeAtomicAddProperty(r, plane_id, video_props.crtc_w, fit.w);
+    drmModeAtomicAddProperty(r, plane_id, video_props.crtc_h, fit.h);
     // Every video commit, not just the ones during a recording: it is free,
     // and a recording can start between any two frames.
     if (prop_video_in_fence_fd && video_in_fence_fd >= 0)

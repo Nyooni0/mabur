@@ -28,12 +28,15 @@ H618 flat (logged).
 
 The ct thread also SCALES: the burned DVR's picture is the OSD surface's
 size, not the decoded size, because the encoder lays the OSD 1:1 from the
-top-left while the panel stretches the video under it — recording at the
+top-left while the panel scales the video under it — recording at the
 decoded size would put the OSD offset and clipped on a 720p drone with a
 1080p panel. With colortrans the shader draw scales (target = OSD size,
 LINEAR sampler); without it, one RGA NV12 resize. So the ct thread runs
 whenever there is an OSD region, colortrans or not, and a 720p drone
-records a 1080p file.
+records a 1080p file. A picture of another aspect ratio than the panel
+(1728x816 on 16:9) is letterboxed like the screen shows it (`fit_rect.h`):
+the shader clears to black and draws into the centred sub-rectangle; the
+RGA path fills the bars once per destination buffer and scales into it.
 
 ## Kernel facts — RK3566 (GS kernel 6.1.84, `rockchip_drm_vop2.c`)
 

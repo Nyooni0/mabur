@@ -1,5 +1,7 @@
 #include "burn_recorder.h"
 
+#include "fit_rect.h"
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -172,8 +174,9 @@ struct BurnRecorder::Impl {
   //                      into ct_dst[k]
   //
   // SCALE: the encoder lays the OSD index map 1:1 from the picture's top-left
-  // and cannot scale either input, while the display stretches the video
-  // plane to the full mode under an OSD drawn at the mode's size. So a
+  // and cannot scale either input, while the display scales the video
+  // plane to the mode (letterboxed, fit_rect.h) under an OSD drawn at the
+  // mode's size. So a
   // picture smaller than the OSD surface (a 720p drone on a 1080p panel)
   // recorded the 1080p OSD offset toward the bottom-right and clipped. The
   // stage therefore scales every frame to the OSD SURFACE's size (out_w x
@@ -230,6 +233,9 @@ struct BurnRecorder::Impl {
   uint64_t scale_fail_logs = 0;
   MppBufferGroup ct_grp = nullptr;      // private DRM group for the destinations
   MppBuffer ct_dst[kCtDst] = {};
+  // The letterbox geometry whose black bars ct_dst[k] already holds (0 =
+  // none): rga_scale fills them once, not every frame.
+  uint64_t ct_dst_box[kCtDst] = {};
   size_t ct_dst_size = 0;
   int ct_w = 0, ct_h = 0;
 
@@ -273,12 +279,33 @@ struct BurnRecorder::Impl {
     return true;
   }
 
-  // ct thread. NV12 -> NV12 resize on RGA, synchronous.
-  bool rga_scale(int src_fd, const Mail& m, int dst_fd, int ow, int oh, int ohs, int ovs) {
+  // ct thread. NV12 -> NV12 resize on RGA, synchronous. box: scale into
+  // that sub-rectangle with black bars around it (a letterbox); the bars
+  // are filled once per destination buffer and geometry, since nothing else
+  // writes them.
+  bool rga_scale(int src_fd, const Mail& m, int dst_fd, int ow, int oh, int ohs, int ovs,
+                 int k, const maburplay::Rect* box) {
     rga_buffer_t s = wrapbuffer_fd_t(src_fd, m.w, m.h, m.stride, m.vstride,
                                      RK_FORMAT_YCbCr_420_SP);
     rga_buffer_t d = wrapbuffer_fd_t(dst_fd, ow, oh, ohs, ovs, RK_FORMAT_YCbCr_420_SP);
-    if (imresize(s, d, 0, 0, INTER_LINEAR) == IM_STATUS_SUCCESS) return true;
+    if (box) {
+      const uint64_t key = (uint64_t)box->x << 48 | (uint64_t)box->y << 32 |
+                           (uint64_t)box->w << 16 | (uint64_t)box->h;
+      if (ct_dst_box[k] != key) {
+        if (imfill(d, im_rect{0, 0, ow, oh}, 0xff000000) != IM_STATUS_SUCCESS) {
+          if (scale_fail_logs++ % 300 == 0)
+            std::fprintf(stderr, "BurnRecorder: RGA letterbox fill %dx%d failed\n", ow, oh);
+          return false;
+        }
+        ct_dst_box[k] = key;
+      }
+      rga_buffer_t pat{};
+      if (improcess(s, d, pat, im_rect{0, 0, m.w, m.h}, im_rect{box->x, box->y, box->w, box->h},
+                    im_rect{}, -1, nullptr, nullptr, IM_SYNC) == IM_STATUS_SUCCESS)
+        return true;
+    } else if (imresize(s, d, 0, 0, INTER_LINEAR) == IM_STATUS_SUCCESS) {
+      return true;
+    }
     if (scale_fail_logs++ % 300 == 0)
       std::fprintf(stderr, "BurnRecorder: RGA resize %dx%d -> %dx%d failed (%llu so far)\n", m.w,
                    m.h, ow, oh, static_cast<unsigned long long>(scale_fail_logs));
@@ -291,6 +318,7 @@ struct BurnRecorder::Impl {
       if (ct_dst[i]) mpp_buffer_put(ct_dst[i]);
       ct_dst[i] = nullptr;
       ct_dst_busy[i] = false;
+      ct_dst_box[i] = 0;
     }
     ct_dst_size = 0;
     if (ct_grp) mpp_buffer_group_put(ct_grp);
@@ -327,6 +355,10 @@ struct BurnRecorder::Impl {
       // frame's own (colortrans only, same size and strides as before).
       const bool scale = out_w > 0 && (m.w != out_w || m.h != out_h);
       const int ow = scale ? out_w : m.w, oh = scale ? out_h : m.h;
+      // A picture of another aspect than the OSD surface is letterboxed,
+      // as the display shows it, never stretched.
+      const maburplay::Rect fit = maburplay::fit_rect(m.w, m.h, ow, oh);
+      const maburplay::Rect* box = (scale && (fit.w != ow || fit.h != oh)) ? &fit : nullptr;
       const int ohs = scale ? out_hs : m.stride, ovs = scale ? out_vs : m.vstride;
       const bool want_ct = cfg.colortrans != nullptr;
 
@@ -347,11 +379,11 @@ struct BurnRecorder::Impl {
           const int dst_fd = mpp_buffer_get_fd(ct_dst[k]);
           if (want_ct && ct_ready(ow, oh))
             ct_done = ct->process(src_fd, (uint32_t)m.w, (uint32_t)m.h, (uint32_t)m.stride,
-                                  (uint32_t)m.vstride, dst_fd, (uint32_t)ohs, (uint32_t)ovs);
+                                  (uint32_t)m.vstride, dst_fd, (uint32_t)ohs, (uint32_t)ovs, box);
           // Without the GPU pass (off, or failed) a mismatched frame is still
           // scaled: a flat recording with the OSD in place beats a corrected
           // one with it misplaced.
-          done = ct_done || (scale && rga_scale(src_fd, m, dst_fd, ow, oh, ohs, ovs));
+          done = ct_done || (scale && rga_scale(src_fd, m, dst_fd, ow, oh, ohs, ovs, k, box));
           if (done) {
             account(ct_n, ct_sum_us, ct_max_us, t_ct);
             // REF-ENCODE, early: the GPU and RGA are done with the source
