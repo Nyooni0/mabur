@@ -261,12 +261,15 @@ static void sensor_steer_step(Star6eRunnerContext *ctx)
 	const int32_t req = __atomic_load_n(&g_sensor_off_req, __ATOMIC_RELAXED);
 	const SensorSteer st = sensor_steer_plan(sensor_cal_state(&g_sensor_cal),
 		sensor_cal_request_mfps(&g_sensor_cal), req,
-		g_sensor_applied_mfps, g_steer_refused_mfps);
+		g_sensor_applied_mfps, g_steer_refused_mfps,
+		ctx->ps.sensor.mode.maxFps * 1000);
 	MI_S32 ret;
 
 	if (st.clamped && !g_steer_clamp_logged) {
-		printf("[sensor] steer: offset %d mfps outside +-%d, clamped\n",
-			(int)req, SENSOR_STEER_RANGE_MFPS);
+		printf("[sensor] steer: offset %d mfps clamped to %d "
+			"(range +-%d, mode ceiling %u mfps)\n",
+			(int)req, (int)st.offset_mfps, SENSOR_STEER_RANGE_MFPS,
+			(unsigned)(ctx->ps.sensor.mode.maxFps * 1000));
 		fflush(stdout);
 	}
 	g_steer_clamp_logged = st.clamped;

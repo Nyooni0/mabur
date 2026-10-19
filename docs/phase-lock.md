@@ -37,8 +37,10 @@ slot. The evidence is `docs/findings/2026-10-17-phase-lock-spike.md` and
    in every RCF; after 3 s without a `phase` line it sends 0.
 4. **The drone applies.** `RcAgent` hands each new `snr_off` to venc. The
    encoder thread sets the sensor to the trim request plus the offset,
-   clamped to ±200 mfps, once the boot trim has locked (or given up): one
-   sensor writer. 0 restores the trim's own request. Link loss keeps the
+   clamped to ±200 mfps and never above the sensor mode's ceiling (maxFps
+   × 1000: a mode whose maximum is its nominal rate, like 1728x972@100,
+   has the driver refuse anything faster), once the boot trim has locked
+   (or given up): one sensor writer. 0 restores the trim's own request. Link loss keeps the
    last value. A refused value is not retried until another request succeeds.
 
 ## States
