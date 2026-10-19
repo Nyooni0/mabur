@@ -762,7 +762,7 @@ with the REC indicator alone in the top-right corner
 | thermometer | drone SoC temperature, °C | `drone.sys.soc_temp_c` |
 | speedometer | video bitrate, Mb/s | player-measured |
 | aspect-ratio | decoded picture height + `p` (1440×1080 reads `1080p`) | player-measured |
-| filmstrip | fps on screen | player-measured |
+| filmstrip | fps on screen; `src/panel` (drone fps / panel Hz) in caution on a rate mismatch | player-measured |
 | pulse | frame-interval jitter, ms | player-measured |
 | timer-outline | latency p50/p99, ms | player-measured |
 | link-variant-off | loss before/after FEC, % | `link.pre_fec_loss` / `link.residual_loss` |
@@ -780,7 +780,13 @@ per-segment breakdown is not on the glass (the `lat:` line, `lat.log` and
 `flightreport.py` carry it). No meters or bars. Two colour exceptions,
 both single-threshold: the fps item turns caution while `drone.low_power`
 is set, and temperature turns caution from 70 °C; both tints drop while
-the sideport is stale. An icon takes its item's colour. The REC indicator
+the sideport is stale. The fps item also turns caution, and reads
+`src/panel` (e.g. `100/60`; a decimal on the source when both round alike
+and it fits, `59.7/60`), while the drone's measured frame rate and the
+panel's refresh are too far apart for the phase lock (`docs/phase-lock.md`,
+"Rate mismatch"). Both rates are player-measured, so that tint holds while
+the sideport is stale; it is never raised while the drone reports
+low-power. An icon takes its item's colour. The REC indicator
 is a red dot, `REC` and an mm:ss clock (`REC FAULT` in amber), with a VTX
 leg sized by `dvr.target` (`docs/vtx-recorder.md`); armed draws nothing.
 It sits in the corner because in a row it would eat into the bar's width

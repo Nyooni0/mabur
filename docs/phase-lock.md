@@ -56,6 +56,21 @@ lock → acq after 2 windows with \|e\| > 3 ms or incoherent. oor → wait
 after 60 s. An unreachable panel (50 Hz, 59 Hz) never produces a coherent
 window and ends in oor.
 
+## Rate mismatch
+
+The player measures the drone's frame rate (median pts step over 1 s,
+`SourceRate`) and compares it with the panel's refresh (`RateMatch`,
+`gs/player/src/rate_match.h`). More than 0.25 Hz apart (the steer reaches
+±0.2 fps) for 3 consecutive seconds is a mismatch: a drone `venc.fps` that
+does not match `screen_mode`, or a display that fell back to another mode
+because the sink does not offer the requested one. While it lasts the lock
+is held in wait and sends nothing (maburgs' RCF `snr_off` falls to 0 after
+its 3 s timeout, so the drone runs on its trim), capture-time placement is
+off, the OSD fps cell reads `src/panel` in caution, and the player logs
+`maburplay: rate mismatch: source X Hz, panel Y Hz -- phase lock paused`
+(and `... cleared` once 3 matched seconds follow). A drone reporting
+low-power is never a mismatch: its rate is low on purpose.
+
 A sensor that refuses every `SetFps` (or a drone build with no venc
 steering at all) never moves, so the centre walks to the range limit
 without ever producing a coherent window: the lock unlocks, goes oor

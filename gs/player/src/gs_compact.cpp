@@ -155,7 +155,9 @@ std::string GsCompactBar::worst_case(GsBarField id, int n_cards,
     case GsBarField::kBitrate: return tag(gs_icon::kBitrate) + "999.9";
     // The decoded height plus "p", clamped to four digits.
     case GsBarField::kRes:     return tag(gs_icon::kRes) + "9999p";
-    case GsBarField::kFps:     return tag(gs_icon::kFps) + "999";
+    // "999/999": a drone-fps / panel-Hz mismatch reads source/panel. Any
+    // wider and the grid outgrows the sizing reference, shrinking the type.
+    case GsBarField::kFps:     return tag(gs_icon::kFps) + "999/999";
     case GsBarField::kJit:     return tag(gs_icon::kJit) + "999.9";
     case GsBarField::kLat:     return tag(gs_icon::kLat) + "999/999";
     case GsBarField::kLoss:    return tag(gs_icon::kLoss) + "100.0/100.0";
@@ -423,6 +425,24 @@ GsCompactBar::FieldState GsCompactBar::state_of_(const GsSnapshot& snap,
                      : "--");
       break;
     case GsBarField::kFps:
+      if (ps.rate_mismatch) {
+        // The drone's rate and the panel's are too far apart for the phase
+        // lock (rate_match.h): source/panel in caution. Both are
+        // player-measured, so the warning holds while the sideport is stale.
+        const double src = std::clamp(ps.src_hz, 0.0, 999.0);
+        const double pan = std::clamp(ps.panel_hz, 0.0, 999.0);
+        // Rates that round alike get a decimal on the source when it still
+        // fits the cell's 7 characters (59.7/60); at three digits it does
+        // not, and the tint alone says they differ (120/120).
+        std::string txt = fmt_int(src) + "/" + fmt_int(pan);
+        if (std::lround(src) == std::lround(pan)) {
+          const std::string dp = fmt_one_dp(src) + "/" + fmt_int(pan);
+          if (dp.size() <= 7) txt = dp;
+        }
+        st.text = tag(gs_icon::kFps) + txt;
+        st.rgb = tok::kStatusCaution;
+        break;
+      }
       st.text = tag(gs_icon::kFps) + fmt_int(std::clamp(ps.fps, 0.0, 999.0));
       // Low-power (pre-arm) mode: the rate is low on purpose. Caution
       // tint, same text. The CELL is player-measured and so never dims --

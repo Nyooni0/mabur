@@ -51,6 +51,7 @@
 #include "drm_presenter.h"  // KMS atomic NV12 presenter, the default display path
 #include "frame_regulator.h"  // phase-aware pts+D display release
 #include "phase_lock.h"  // PhaseLock, the sensor-rate controller for the phase lock
+#include "rate_match.h"  // SourceRate, RateMatch: is the panel within the phase lock's reach
 #include "release_wait.h"  // the pre-release wait that keeps collecting decoded frames
 #include "gs_draw.h"         // set_colour_inverse() for the GS overlay pre-invert
 #include "lat_tracker.h"    // tail latency segments + 1 Hz lat line
@@ -660,6 +661,10 @@ int main(int argc, char** argv) {
     regulator.set_phase_lock_mode(true);
   }
   uint64_t phase_disconts_seen = 0;
+  // The drone's measured frame rate against the panel's: a pair too far
+  // apart for the phase lock pauses it and warns on the OSD fps cell.
+  maburplay::SourceRate source_rate;
+  maburplay::RateMatch rate_match;
   maburplay::LatLog lat_log;
   // Per-frame rows of the same window as the lat: line (docs/observability.md
   // "frame.log"), written in the same idle-gated 1 Hz burst so a stalled
@@ -1139,6 +1144,9 @@ int main(int argc, char** argv) {
     lat.on_decoded(f.pts_us, mono_us());
 #endif
     ++frame_count;
+#ifdef MABUR_PLAYER_HW
+    source_rate.on_pts(f.pts_us, mono_us());
+#endif
     have_decoded_pts = true;
     last_decoded_pts = f.pts_us;
     // The DECODED picture size, which is what the OSD's res: field means --
@@ -1167,7 +1175,7 @@ int main(int argc, char** argv) {
       if (regulator.offer(f, mono_us(), &disp))
         present_now(f);
       double margin_us = 0.0;
-      if (phase_lock && regulator.take_margin(&margin_us))
+      if (phase_lock && !rate_match.mismatch() && regulator.take_margin(&margin_us))
         phase_lock->on_margin(margin_us, regulator.panel_period_us(), mono_us());
       for (int i = 0; i < disp.n; ++i) {
         lat.on_drop(disp.f[i].pts_us);
@@ -1687,15 +1695,24 @@ int main(int argc, char** argv) {
         phase_disconts_seen = regulator.discont_count();
         phase_lock->on_discontinuity(now);
       }
-      phase_lock->tick(now);
+      if (rate_match.mismatch()) {
+        // Out of the steer's reach: no offsets at all, so maburgs' RCF
+        // snr_off falls back to 0 and the drone runs on its trim. Reset to
+        // Waiting so a later match acquires from scratch.
+        if (phase_lock->state() != maburplay::PhaseLock::State::Waiting)
+          phase_lock->on_discontinuity(now);
+        regulator.set_capture_placement(false);
+      } else {
+        phase_lock->tick(now);
+        regulator.set_capture_placement(phase_lock->locked());
+        core_ctl.tick_phase(phase_lock->offset_mfps(), now / 1000);
+      }
       if (phase_lock->state() != before) {
         std::fprintf(stderr, "phase-lock: %s err=%.2fms off=%d centre=%.1f\n",
                      maburplay::phase_lock_state_name(phase_lock->state()),
                      phase_lock->error_ms(), static_cast<int>(phase_lock->offset_mfps()),
                      phase_lock->centre_mfps());
       }
-      regulator.set_capture_placement(phase_lock->locked());
-      core_ctl.tick_phase(phase_lock->offset_mfps(), now / 1000);
     }
 #endif
     if (ring.resyncs() != resyncs_seen) {
@@ -1891,6 +1908,27 @@ int main(int argc, char** argv) {
         gs_video_mark_ms = now_ms;
         gs_jitter.on_tick(now_ms);  // an outage must not leave a stale figure
         gs_ps.jitter_ms = gs_jitter.ms();
+#ifdef MABUR_PLAYER_HW
+        {
+          // Drone fps vs panel Hz. low_power is link-sourced, so only a
+          // fresh report counts: a quiet sideport is no claim either way.
+          const bool lp = gs_src && gs_src->have_any() && !gs_src->stale(now_ms) &&
+                          gs_src->snapshot().low_power;
+          const double panel_hz =
+              regulator.panel_period_us() > 0 ? 1e6 / regulator.panel_period_us() : 0.0;
+          const bool was = rate_match.mismatch();
+          rate_match.on_window(source_rate.hz(), panel_hz, lp);
+          gs_ps.rate_mismatch = rate_match.mismatch();
+          gs_ps.src_hz = source_rate.hz();
+          gs_ps.panel_hz = panel_hz;
+          if (rate_match.mismatch() != was)
+            std::fprintf(stderr,
+                         rate_match.mismatch()
+                             ? "maburplay: rate mismatch: source %.2f Hz, panel %.3f Hz -- phase lock paused\n"
+                             : "maburplay: rate mismatch cleared: source %.2f Hz, panel %.3f Hz\n",
+                         source_rate.hz(), panel_hz);
+        }
+#endif
         gs_needs_render = true;
 
         // Recording state. Both the samples and the thing that would make
