@@ -69,7 +69,13 @@ its 3 s timeout, so the drone runs on its trim), capture-time placement is
 off, the OSD fps cell reads `src/panel` in caution, and the player logs
 `maburplay: rate mismatch: source X Hz, panel Y Hz -- phase lock paused`
 (and `... cleared` once 3 matched seconds follow). A drone reporting
-low-power is never a mismatch: its rate is low on purpose.
+low-power is never a mismatch: its rate is low on purpose. The check runs
+whether or not the GS OSD is up; the low-power flag comes from its sideport
+reader and counts only while fresh. With the reader up but the sideport
+quiet the check holds its last decision; with no reader at all the drone is
+taken as armed. A pair close enough to call a match that the lock still
+gives up on (out of range: the steer cannot reach the panel, e.g. a mode
+whose ceiling sits just under it) tints the OSD fps cell caution too.
 
 A sensor that refuses every `SetFps` (or a drone build with no venc
 steering at all) never moves, so the centre walks to the range limit

@@ -11,7 +11,8 @@ using maburplay::SourceRate;
 
 namespace {
 
-void windows(RateMatch* m, int n, double src, double panel, bool lp = false) {
+void windows(RateMatch* m, int n, double src, double panel,
+             RateMatch::LowPower lp = RateMatch::LowPower::kNo) {
   for (int i = 0; i < n; ++i) m->on_window(src, panel, lp);
 }
 
@@ -59,21 +60,21 @@ TEST(rate_match_flags_a_ceiling_short_of_the_panel) {
 
 TEST(rate_match_is_silent_in_low_power) {
   RateMatch m;
-  windows(&m, 10, 30.0, 100.0, true);
+  windows(&m, 10, 30.0, 100.0, RateMatch::LowPower::kYes);
   CHECK(!m.mismatch());
   // A mismatch already raised clears once low-power reports in.
   RateMatch n;
   windows(&n, 3, 99.96, 60.0);
   REQUIRE(n.mismatch());
-  windows(&n, 1, 30.0, 60.0, true);
+  windows(&n, 1, 30.0, 60.0, RateMatch::LowPower::kYes);
   CHECK(!n.mismatch());
 }
 
 TEST(rate_match_needs_consecutive_windows_to_flip) {
   RateMatch m;
   for (int i = 0; i < 10; ++i) {
-    m.on_window(99.96, 60.0, false);
-    m.on_window(99.96, 99.946, false);
+    m.on_window(99.96, 60.0, RateMatch::LowPower::kNo);
+    m.on_window(99.96, 99.946, RateMatch::LowPower::kNo);
   }
   CHECK(!m.mismatch());
   windows(&m, 2, 99.96, 60.0);
@@ -92,6 +93,32 @@ TEST(rate_match_ignores_an_unmeasured_side) {
   CHECK(!m.mismatch());
   windows(&m, 5, 99.96, 0.0);  // no panel rate yet
   CHECK(!m.mismatch());
+}
+
+// A quiet sideport says nothing about low-power: a disarmed drone whose
+// stats went silent must not be judged at its (deliberately low) rate, and
+// a mismatch already raised is not cleared on no evidence either.
+TEST(rate_match_holds_while_low_power_is_unknown) {
+  RateMatch m;
+  windows(&m, 10, 30.0, 100.0, RateMatch::LowPower::kUnknown);
+  CHECK(!m.mismatch());
+  windows(&m, 3, 99.96, 60.0);
+  REQUIRE(m.mismatch());
+  windows(&m, 10, 99.96, 99.946, RateMatch::LowPower::kUnknown);
+  CHECK(m.mismatch());
+}
+
+// What the player knows about low-power: no sideport reader at all (GS OSD
+// stats off) means no report will ever come, so the drone is taken as
+// armed and the warning still works; a reader whose sideport went quiet
+// knows nothing.
+TEST(low_power_report_from_the_sideport) {
+  using LP = RateMatch::LowPower;
+  CHECK(maburplay::low_power_report(false, false, false) == LP::kNo);
+  CHECK(maburplay::low_power_report(true, true, true) == LP::kYes);
+  CHECK(maburplay::low_power_report(true, true, false) == LP::kNo);
+  CHECK(maburplay::low_power_report(true, false, true) == LP::kUnknown);
+  CHECK(maburplay::low_power_report(true, false, false) == LP::kUnknown);
 }
 
 MTEST_MAIN

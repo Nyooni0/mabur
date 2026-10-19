@@ -51,21 +51,27 @@ class SourceRate {
 // rate. The steer moves the sensor at most +-0.2 fps around its trim, so a
 // source further than kReachHz from the panel can never lock: a drone fps
 // that does not match the display (or a display that fell back to another
-// rate). It flips only after kFlipWindows consecutive windows agree, and a
-// drone in low-power (lower fps on purpose) is never a mismatch.
+// rate). It flips only after kFlipWindows consecutive windows agree, a
+// drone in low-power (lower fps on purpose) is never a mismatch, and with
+// no current low-power report it holds whatever it last decided.
 class RateMatch {
  public:
   static constexpr double kReachHz = 0.25;
   static constexpr int kFlipWindows = 3;
 
+  // The drone's low-power report: kUnknown when its sideport is quiet.
+  enum class LowPower { kNo, kYes, kUnknown };
+
   // Once per second; 0 for a side not measured yet.
-  void on_window(double src_hz, double panel_hz, bool low_power) {
-    if (low_power) {
+  void on_window(double src_hz, double panel_hz, LowPower low_power) {
+    if (low_power == LowPower::kYes) {
       mismatch_ = false;
       run_ = 0;
       return;
     }
-    if (src_hz <= 0.0 || panel_hz <= 0.0) {
+    // No fresh low-power report, or a side not measured yet: no evidence
+    // either way, so hold the current state.
+    if (low_power == LowPower::kUnknown || src_hz <= 0.0 || panel_hz <= 0.0) {
       run_ = 0;
       return;
     }
@@ -85,6 +91,17 @@ class RateMatch {
   bool mismatch_ = false;
   int run_ = 0;
 };
+
+// What the player knows about the drone's low-power state. reader: a
+// sideport reader exists (the GS OSD's stats source); fresh: it heard the
+// drone recently; low_power: the flag it last heard. Without any reader no
+// report can ever arrive, so the drone is taken as armed and the mismatch
+// check still runs; a reader gone quiet knows nothing.
+inline RateMatch::LowPower low_power_report(bool reader, bool fresh, bool low_power) {
+  if (!reader) return RateMatch::LowPower::kNo;
+  if (!fresh) return RateMatch::LowPower::kUnknown;
+  return low_power ? RateMatch::LowPower::kYes : RateMatch::LowPower::kNo;
+}
 
 }  // namespace maburplay
 

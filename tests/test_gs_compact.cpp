@@ -1108,6 +1108,23 @@ TEST(rate_mismatch_keeps_a_decimal_when_rates_round_equal) {
   CHECK(bar.debug_field_rgb(s, false, ps, GsBarField::kFps) == tok::kStatusCaution);
 }
 
+// Rates close enough to call a match, but the phase lock gave up (out of
+// range): the steer cannot reach the panel, e.g. a mode whose ceiling sits
+// just under it. Same text, caution tint, so the failure is not silent.
+TEST(phase_lock_out_of_range_tints_the_fps_cell) {
+  GsFont f;
+  std::string err;
+  REQUIRE(f.load(GSFONT_SCALED, &err));
+  GsCompactBar bar(f);
+  REQUIRE(bar.layout(1920, 1080, &err));
+  GsSnapshot s = nominal();
+  GsPlayerState ps = player_nominal();
+  ps.phase_oor = true;
+  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kFps) == ic("fps:60"));
+  CHECK(bar.debug_field_rgb(s, false, ps, GsBarField::kFps) == tok::kStatusCaution);
+  CHECK(bar.debug_field_rgb(s, true, ps, GsBarField::kFps) == tok::kStatusCaution);
+}
+
 TEST(matched_fps_cell_is_unchanged) {
   GsFont f;
   std::string err;

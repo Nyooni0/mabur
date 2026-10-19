@@ -452,6 +452,9 @@ GsCompactBar::FieldState GsCompactBar::state_of_(const GsSnapshot& snap,
       // from a frozen flag is exactly the "looks live" failure the
       // staleness rule exists to prevent. Quiet sideport = no claim.
       if (snap.low_power && !stale) st.rgb = tok::kStatusCaution;
+      // The phase lock gave up on a pair close enough to call a match (the
+      // steer cannot reach the panel): player-measured, so never gated.
+      if (ps.phase_oor) st.rgb = tok::kStatusCaution;
       break;
     case GsBarField::kJit:
       st.text = tag(gs_icon::kJit) + fmt_one_dp(std::clamp(ps.jitter_ms, 0.0, 999.9));

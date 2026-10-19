@@ -58,6 +58,9 @@ struct GsPlayerState {
   bool rate_mismatch = false;
   double src_hz = 0.0;
   double panel_hz = 0.0;
+  // The phase lock gave up (out of range) on a pair that otherwise matches:
+  // the steer cannot reach the panel. Caution tint on the fps cell.
+  bool phase_oor = false;
   double jitter_ms = 0.0;
   double mbps = 0.0;
   RecState rec;

@@ -292,7 +292,9 @@ struct BurnRecorder::Impl {
       const uint64_t key = (uint64_t)box->x << 48 | (uint64_t)box->y << 32 |
                            (uint64_t)box->w << 16 | (uint64_t)box->h;
       if (ct_dst_box[k] != key) {
-        if (imfill(d, im_rect{0, 0, ow, oh}, 0xff000000) != IM_STATUS_SUCCESS) {
+        // 0: black whatever byte order librga reads the colour in (its
+        // RGBA order puts red in the top byte, so 0xff000000 is red).
+        if (imfill(d, im_rect{0, 0, ow, oh}, 0x00000000) != IM_STATUS_SUCCESS) {
           if (scale_fail_logs++ % 300 == 0)
             std::fprintf(stderr, "BurnRecorder: RGA letterbox fill %dx%d failed\n", ow, oh);
           return false;

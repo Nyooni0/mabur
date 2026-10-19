@@ -786,7 +786,8 @@ and it fits, `59.7/60`), while the drone's measured frame rate and the
 panel's refresh are too far apart for the phase lock (`docs/phase-lock.md`,
 "Rate mismatch"). Both rates are player-measured, so that tint holds while
 the sideport is stale; it is never raised while the drone reports
-low-power. An icon takes its item's colour. The REC indicator
+low-power. The fps item is also tinted caution (text unchanged) while the
+phase lock is out of range on a pair that otherwise matches. An icon takes its item's colour. The REC indicator
 is a red dot, `REC` and an mm:ss clock (`REC FAULT` in amber), with a VTX
 leg sized by `dvr.target` (`docs/vtx-recorder.md`); armed draws nothing.
 It sits in the corner because in a row it would eat into the bar's width

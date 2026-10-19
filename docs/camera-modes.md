@@ -85,7 +85,10 @@ When the drone's measured rate and the panel's refresh are too far apart
 for the phase lock (more than 0.25 Hz: a wrong `venc.fps`, or a sink that
 fell back), the OSD fps cell reads `source/panel` in caution (`100/60`),
 the phase lock pauses and sends nothing, and the player logs
-`maburplay: rate mismatch`. A drone in low-power is never a mismatch.
+`maburplay: rate mismatch`. A drone in low-power is never a mismatch. If
+the rates match but the lock still gives up (the steer cannot reach the
+panel, e.g. a panel a hair faster than a mode's ceiling) the fps cell turns
+caution without the `/`.
 
 A picture whose aspect differs from the panel (mode 4 on 16:9) is
 letterboxed with black bars on the screen and in the burned DVR, never
