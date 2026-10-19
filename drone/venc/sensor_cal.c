@@ -47,9 +47,11 @@ static void start_window(SensorCal *c, uint32_t pts, int settle)
 	c->settle_left = settle;
 }
 
-void sensor_cal_init(SensorCal *c, uint32_t target_fps, uint32_t initial_mfps)
+void sensor_cal_init(SensorCal *c, uint32_t target_fps, uint32_t initial_mfps,
+	uint32_t max_mfps)
 {
 	memset(c, 0, sizeof(*c));
+	c->max_mfps = max_mfps;
 	c->target_fps = target_fps;
 	c->request_mfps = initial_mfps;
 	c->prev_request_mfps = initial_mfps;
@@ -118,6 +120,13 @@ SensorCalAction sensor_cal_feed(SensorCal *c, uint32_t pts_us)
 	}
 	const double aim = target - BAND_AIM_MHZ * scale / 1000.0;
 	const double err = hz - aim;
+	/* Below the band with the request already at the mode's ceiling: this
+	 * mode cannot run faster (its fastest line sits under the target), so
+	 * its fastest rate is the trim's answer. */
+	if (err < 0 && c->max_mfps && c->request_mfps >= c->max_mfps) {
+		c->state = SENSOR_CAL_STATE_LOCKED;
+		return SENSOR_CAL_LOCKED;
+	}
 	/* Not converging means the driver does not answer the request the
 	 * way this model expects: leave the sensor exactly as the integer
 	 * boot request set it rather than at some half-trimmed point. */
@@ -135,7 +144,10 @@ SensorCalAction sensor_cal_feed(SensorCal *c, uint32_t pts_us)
 		const uint32_t nudge = (uint32_t)(NUDGE_MFPS * scale + 0.5);
 		next += err > 0 ? -nudge : nudge;
 	}
-	const uint32_t floor_mfps = c->target_fps * 950, ceil_mfps = c->target_fps * 1050;
+	const uint32_t floor_mfps = c->target_fps * 950;
+	uint32_t ceil_mfps = c->target_fps * 1050;
+	if (c->max_mfps && c->max_mfps < ceil_mfps)
+		ceil_mfps = c->max_mfps;
 	if (next < floor_mfps) next = floor_mfps;
 	if (next > ceil_mfps) next = ceil_mfps;
 	c->prev_request_mfps = c->request_mfps;

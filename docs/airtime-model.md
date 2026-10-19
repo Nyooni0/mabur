@@ -218,8 +218,11 @@ their variance into jitter. Knobs, in order of proven usefulness:
      one-line nudge grow by (fps/60)²: at 100 fps a line is 0.049 Hz and
      the band is `[fps − 0.083, fps − 0.011]`; a band narrower than a line
      would be straddled forever. Locks in 2–3 rounds (`[sensor] cal:`
-     lines, `snr_mhz=` on the stats line, `sensor_mhz` on `GET /venc`);
-     after 8 rounds without convergence, or a driver that refuses
+     lines, `snr_mhz=` on the stats line, `sensor_mhz` on `GET /venc`).
+     The request never exceeds the sensor mode's ceiling (maxFps × 1000,
+     which the driver refuses above); a mode whose fastest line sits under
+     the band (1728x816@120 tops out at 119.660 Hz) locks at that ceiling
+     (`locked at the mode's ceiling`). After 8 rounds without convergence, or a driver that refuses
      milli-fps, it restores the integer boot request and stops. It only
      measures a full-rate stream: while the bind decimates (a drone that
      boots disarmed into low-power 30 fps) it holds, and resumes with a

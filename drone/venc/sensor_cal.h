@@ -45,6 +45,7 @@ typedef struct {
 	uint32_t request_mfps;   /* the request currently applied to the sensor */
 	uint32_t prev_request_mfps;
 	uint32_t initial_mfps;   /* the boot request, restored on give-up */
+	uint32_t max_mfps;       /* the mode's ceiling; 0 = none */
 	SensorCalState state;
 	int rounds;
 	double measured_hz;
@@ -57,8 +58,11 @@ typedef struct {
 } SensorCal;
 
 /* target_fps = venc.fps; initial_mfps = the request already applied to
- * the sensor (normally target_fps * 1000). Leaves the controller idle. */
-void sensor_cal_init(SensorCal *c, uint32_t target_fps, uint32_t initial_mfps);
+ * the sensor (normally target_fps * 1000); max_mfps = the sensor mode's
+ * ceiling (maxFps * 1000; 0 = none), above which the driver refuses a
+ * request. Leaves the controller idle. */
+void sensor_cal_init(SensorCal *c, uint32_t target_fps, uint32_t initial_mfps,
+	uint32_t max_mfps);
 /* Start (or restart) measuring from the current request. */
 void sensor_cal_arm(SensorCal *c);
 /* One encoded frame's pts (microseconds, wraps freely). */
