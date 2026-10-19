@@ -1595,22 +1595,29 @@ TEST(record_ranges_are_checked) {
             "[record]\nenable = true\nfps = 30\nsize = \"3840x2160\"\n", "record.size"));
 }
 
-// Above 90 fps the pipeline captures the sensor's 1472x816@120 mode, and a
-// keep-aspect crop of it (any other aspect) makes the VPE drop every frame:
-// the loader refuses such a size instead of booting to 0 fps.
-TEST(venc_size_above_90fps_must_keep_the_high_fps_mode_aspect) {
-  auto bad = [](const char* body) {
-    auto path = write_temp_toml(body);
+// venc.fps selects a sensor mode (drone/venc/camera_modes.c); venc.size
+// must have that mode's aspect ratio and fit inside it, or the loader
+// refuses it rather than booting into a crop the VPE cannot serve.
+TEST(venc_size_must_fit_the_mode_for_its_fps) {
+  auto bad = [](const char* size, int fps) {
+    const std::string body = std::string("[venc]\nsensor_bin = \"/etc/sensors/x.bin\"\nsize = \"") +
+                             size + "\"\nfps = " + std::to_string(fps) +
+                             "\n[record]\nenable = false\n";
+    auto path = write_temp_toml(body.c_str());
     std::string msg = what_of([&] { (void)load_config(path.string()); });
     std::filesystem::remove(path);
     return msg.find("venc.size") != std::string::npos;
   };
-  CHECK(bad("[venc]\nsensor_bin = \"/etc/sensors/x.bin\"\nsize = \"1280x720\"\nfps = 100\n"
-            "[record]\nenable = false\n"));
-  CHECK(!bad("[venc]\nsensor_bin = \"/etc/sensors/x.bin\"\nsize = \"1472x816\"\nfps = 100\n"
-             "[record]\nenable = false\n"));
-  CHECK(!bad("[venc]\nsensor_bin = \"/etc/sensors/x.bin\"\nsize = \"1280x720\"\nfps = 90\n"
-             "[record]\nenable = false\n"));
+  CHECK(bad("1920x1080", 100));  // larger than 1728x972
+  CHECK(bad("1472x816", 100));   // the old high-fps mode's aspect
+  CHECK(bad("1280x720", 120));   // 16:9 on the 1728x816 mode
+  CHECK(bad("1920x1080", 91));
+  CHECK(!bad("1280x720", 100));
+  CHECK(!bad("1728x972", 100));
+  CHECK(!bad("1728x816", 120));
+  CHECK(!bad("1152x544", 110));
+  CHECK(!bad("1280x720", 90));
+  CHECK(!bad("1920x1080", 60));
 }
 
 TEST(record_size_parses) {

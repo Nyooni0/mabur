@@ -234,8 +234,10 @@ their variance into jitter. Knobs, in order of proven usefulness:
   the driver for the mode `camera_mode_for` names (`drone/venc/camera_modes.c`):
   1920x1080@90 (2x2 binned, full view) up to 90 fps, 1728x972@100 up to
   100, 1728x816@120 above. It finds that mode in the driver's list by size
-  and ceiling and fails boot if the driver lacks it; modes, views and size
-  rules are in `docs/camera-modes.md`. The AE shutter ceiling (`sensor_cal_shutter_cap_us`) is the whole frame
+  and ceiling and fails boot if the driver lacks it. The VPE only scales
+  that mode down, so the loader requires `venc.size` to keep the mode's
+  aspect ratio and fit inside it; modes, views and size rules are in
+  `docs/camera-modes.md`. The AE shutter ceiling (`sensor_cal_shutter_cap_us`) is the whole frame
   period up to 90 fps and 90 % of it above: in a dim scene the sensor's
   frame is the shutter plus ~22 lines, which at a full 10 ms cap holds
   a 100 fps mode at 98.94 Hz whatever is requested, out of the trim's and
