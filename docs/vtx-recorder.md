@@ -100,6 +100,15 @@ the link queues behind it and the recorder drops frames. A 720p link with a
 1080p port-1 recording costs the link nothing. Measurements:
 `docs/findings/2026-09-26-vtx-recorder-bench.md`.
 
+Above 90 fps the link runs a binned crop mode (1728x972 to 100 fps,
+1728x816 above; `docs/camera-modes.md`) and the recorder's rules stay as
+they are, which carries three risks: a `record.size` larger than the mode
+(the bundle's 1920x1080 against 1728x972) is an upscale on port 1; a
+`record.fps` that does not divide `venc.fps` (60 from 100) records uneven
+frame spacing, since the bind's frame-rate limiter passes 60 of every 100;
+and the live 1728x972@100 encode alone is past the engine's rated rate, so
+recording adds encode time to the link.
+
 Switching `venc.size` needs no other key change: the rolling-refresh key
 is `venc.intra_refresh_frames` (sweep length), whose rows per P the
 pipeline derives from the encoded height.
