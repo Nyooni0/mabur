@@ -506,8 +506,8 @@ re-read every 5 s; a missing session or failed open (DVR not mounted yet)
 never blocks and never spams, and the stderr line keeps going regardless.
 
 The player's three session files (`lat.log`, `frame.log`, `reg.log`) are
-each written by their own writer thread: the main loop, which also drives
-decode and display, only queues a row. Every marker read, open, write and
+each written by their own writer thread: the housekeeping loop, which also
+runs the OSD, the phase lock and the decode watchdog, only queues a row. Every marker read, open, write and
 flush happens on that thread, so an SD card that stalls on writeback (the
 burned DVR streams to the same card) delays the log, never the picture. The
 queue holds 256 KiB, about 20 s of `frame.log`; a row that does not fit is
@@ -535,7 +535,8 @@ columns:
 `t_flip` is the frame's scanout-start stamp (mono µs); `t_submit` is when
 the player handed the AU (or its first slice) to the decoder, `t_complete`
 the ring's finish stamp (as `au.log`), `t_decoded` when the decoded picture
-came back, `t_release` when the regulator released it. `enc dq air fec dec
+came back, `t_release` when the release thread released it (its stamp,
+taken just before the frame goes to the display). `enc dq air fec dec
 reg dsp e2e` are the frame's own segments (µs, `dec = t_decoded −
 t_complete`, `e2e` the sum); `exact` is 1 when `t_flip` came from a real
 vblank event. `pts` joins the row to `au.log` (same value), which carries
@@ -555,16 +556,18 @@ vsync-paced two-plane commit), `0x02` `PAGE_FLIP_ASYNC` was set, `0x04`
 parked, `0x08` the commit failed, `0x10` a blocking modeset commit.
 `framelog 2` and earlier rows end at `exact`.
 
-### `reg.log` (`# reglog 2`)
+### `reg.log` (`# reglog 3`)
 
 The 1 Hz `regulator:` line ("Regulator line" below), written by the same
 follow-the-marker writer as `lat.log`: `<mono_us> regulator: held= ...`.
 Its counters are cumulative since maburplay started; difference adjacent
-rows for the per-second rate. It exists because `pend`/`pdrop`/`heals` are
-the presenter's side of a missed latch, and `/tmp/maburplay.log` does not
-outlive a power-off. reglog 2 adds the phase-lock fields `lock= lerr=
-loff= lctr=` (docs/phase-lock.md); reglog 1 rows end at `lslot=` before
-`present=`.
+rows for the per-second rate (the `present=`, `rlate=` and `hand=` windows
+are per line already). It exists because `pend`/`pdrop`/`heals` are the
+presenter's side of a missed latch, and `/tmp/maburplay.log` does not
+outlive a power-off. reglog 3 appends the release thread's fields `rlate=
+hand= rt=`; reglog 2 rows end at `ioctl=` and carry the phase-lock fields
+`lock= lerr= loff= lctr=` (docs/phase-lock.md); reglog 1 rows end at
+`lslot=` before `present=`.
 
 ### `cal.log` (`callog 3`)
 
@@ -625,21 +628,46 @@ The 1 Hz `regulator:` line (stderr, and `reg.log` in the session
 directory): `held= late= replaced= disconts= hold_ema=
 present_jitter= vsync= skips= fallback= pend= heals= pdrop= chained= chain=
 chain_max= chains= cuts= alw= lslot= lock= lerr= loff= lctr= present= acq=
-req= ioctl=`.
+req= ioctl= rlate= hand= rt=` (`regulator: off present_jitter= rlate= hand=
+rt=` with `display.regulate_ms = 0`; `present=` through `ioctl=` only with a
+display).
+
+The release thread (docs/phase-lock.md "Threads") makes every release
+decision and every present() call, so the timing fields below all read
+against it, not against the housekeeping loop that prints the line.
 
 - `present=N acq=p50/max req=p50/max ioctl=p50/max` — the N present()
   calls since the previous line, split into the framebuffer acquire (the
   dma-buf import plus `drmModeAddFB2`, served from the presenter's
   framebuffer cache, `gs/player/src/fb_cache.h`: a pool buffer seen again
-  is a lookup, a new one an import of ~3 ms), the atomic request build and
-  the commit ioctl, µs. `display.vsync_lead_ms` has to cover their sum: a
-  frame whose present() path runs past the lead latches a vblank late and
-  the frame behind it is a `pdrop` (`frame.log`'s `t_commit` shows it per
-  frame).
+  is a lookup, a new one an import of ~3 ms; the decode-output thread
+  primes the cache as each frame is decoded), the atomic request build and
+  the commit ioctl, µs. `display.vsync_lead_ms` has to cover the release
+  thread's own lateness (`rlate=`) plus their sum: a frame whose release
+  and present() path run past the lead latches a vblank late and the frame
+  behind it is a `pdrop` (`frame.log`'s `t_commit` shows it per frame).
+- `rlate=p99/max` — µs from a held frame's scheduled release to the moment
+  the release thread released it, over the frames released since the
+  previous line (a frame presented at once on arrival is not in it; it
+  counts in `late=`). The thread sleeps on an absolute timer armed to the
+  release, so this is its wake-up lateness.
+- `hand=p99/max` — µs from a frame's decode stamp (`t_decoded`) to the
+  release thread's offer of it to the regulator: the hand-over between the
+  decode-output thread and the release thread.
+- `rt=1|0` — whether the release thread runs `SCHED_FIFO`
+  (`display.rt_priority`; 0 when the priority is 0 or the kernel refused
+  it, which maburplay also logs once at start).
+- `present_jitter=` — |Δ present interval| EMA, ms, on the release
+  thread's submission clock.
 - `late=` — frames whose release had already passed when they were
   offered, presented at once. Every frame still held then is older and is
   displaced (counted in `replaced=`), including one already due but not
-  yet drained, so nothing shows after a newer frame.
+  yet released, so nothing shows after a newer frame.
+- `replaced=` — held frames displaced and never shown: a newer frame took
+  their vblank slot, a full queue evicted its oldest, a chain cut, or the
+  release order had to be kept — a frame due to release after a newer one
+  that releases earlier, or every held frame when a late frame is
+  presented at once.
 - `vsync=locked|fallback` — whether the vblank estimator is locked (servo
   release) or has fallen back to the `anchor_floor(pts) + regulate_ms`
   rule.
@@ -656,9 +684,9 @@ req= ioctl=`.
   flip).
 - `pend=` — the presenter's present()-while-flip-in-flight mailbox
   engagements, 0 with no presenter.
-- `heals=` — chain-break slips: pending releases pushed one slot after two
-  mailbox engagements within 100 ms (a backstop that fires ~only at
-  startup).
+- `heals=` — chain-break slips: the release thread pushes the pending
+  releases one slot after two mailbox engagements within 100 ms (a
+  backstop that fires ~only at startup).
 - `pdrop=` — paced-mode mailbox drops: with the servo locked, a parked
   frame is a missed latch and is dropped at flip completion instead of
   resubmitted a period late, which keeps a single miss from becoming a

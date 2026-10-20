@@ -2122,6 +2122,51 @@ class PhaseLockReportTest(unittest.TestCase):
         self.assertEqual(out.getvalue(), "")
 
 
+class ReleaseReportTest(unittest.TestCase):
+    REG3 = (
+        "# reglog 3\n"
+        "1000000 regulator: held=1 alw=2.0ms lslot=0 lock=lock lerr=0.10ms loff=8 lctr=7.0 "
+        "present=60 acq=1/2 req=1/2 ioctl=300/900 rlate=120/400 hand=80/250 rt=1\n"
+        "2000000 regulator: held=2 alw=2.0ms lslot=0 lock=lock lerr=0.20ms loff=8 lctr=7.0 "
+        "present=60 acq=1/2 req=1/2 ioctl=300/900 rlate=150/2100 hand=90/300 rt=1\n"
+        "3000000 regulator: off present_jitter=0.40ms rlate=0/0 hand=70/200 rt=1\n"
+    )
+
+    def test_reglog_3_rows_and_report(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "reg.log")
+            with open(p, "w") as f:
+                f.write(self.REG3)
+            rows = flightreport.load_reglog_release(p)
+            lock_rows = flightreport.load_reglog_lock(p)
+        # The lock parser reads the same rows past the new trailing fields.
+        self.assertEqual(len(lock_rows), 2)
+        self.assertEqual(lock_rows[1]["loff"], 8)
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[1]["rlate_max"], 2100)
+        self.assertEqual(rows[2]["hand_p99"], 70)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            flightreport.print_release_report(rows)
+        text = out.getvalue()
+        self.assertIn("RELEASE", text)
+        self.assertIn("rows=3 rt=SCHED_FIFO", text)
+        self.assertIn("rlate p99 per s p50/p90/max=120/150/150 us, worst frame=2100 us", text)
+        self.assertIn("hand p99 per s p50/p90/max=80/90/90 us, worst frame=300 us", text)
+
+    def test_reglog_2_prints_no_release_section(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "reg.log")
+            with open(p, "w") as f:
+                f.write(PhaseLockReportTest.REG)
+            rows = flightreport.load_reglog_release(p)
+        self.assertEqual(rows, [])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            flightreport.print_release_report(rows)
+        self.assertEqual(out.getvalue(), "")
+
+
 if __name__ == "__main__":
     test_fec_section_counterfactual_overhead_per_sid_and_rung()
     test_session_dir_mode_prints_fec_section()

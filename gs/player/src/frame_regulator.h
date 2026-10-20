@@ -61,10 +61,9 @@ namespace maburplay {
 // of collapsing every arrival onto a single held frame; in fallback mode
 // (no vsync lock) all entries share target_v == 0, so the same-target
 // displacement rule below reproduces the old single-slot mailbox
-// exactly. Depth 4 (was 2) covers the post-stall backlog: the decode
-// sink offers before the main loop drains overdue releases, so a stall
-// spanning a release deadline plus a decode burst legitimately wants 3+
-// distinct vsync targets in hold — at 120 Hz (8.3 ms periods) with
+// exactly. Depth 4 covers the post-stall backlog: a stall spanning a
+// release deadline plus a decode burst legitimately wants 3+ distinct
+// vsync targets in hold — at 120 Hz (8.3 ms periods) with
 // D=12–16 that window doubles relative to the 60 Hz bench. A full queue
 // still evicts the oldest (most-overdue) head: latency-first.
 class FrameRegulator {
@@ -173,7 +172,7 @@ class FrameRegulator {
   // display into a stable one-vsync-late mode -- every present then
   // arrives while the previous flip is in flight, parks in the
   // presenter's mailbox, and latches a period late, indefinitely. The
-  // main loop detects the chain from the presenter's engagement-counter
+  // release thread detects the chain from the presenter's engagement-counter
   // rate and calls this: every pending servo release slips one slot, so
   // one vblank goes unfilled (a single repeated frame), the flip
   // pipeline drains, and the phase re-aligns. No-op when the queue is
@@ -181,11 +180,8 @@ class FrameRegulator {
   void heal_slip();
   uint64_t heals() const;
 
-  // Earliest pending release (0 = nothing held). The main loop uses this
-  // to schedule its heavy 1 Hz work (OSD compose, stats, statvfs) into
-  // the gap between releases: a stall that overlaps a release deadline
-  // makes the frame miss its latch and start a one-vsync-late chain
-  // (hw), so heavy work defers when a release is imminent.
+  // Earliest pending release (0 = nothing held). The release thread arms
+  // its timer to it.
   uint64_t next_release_us() const;
 
  private:

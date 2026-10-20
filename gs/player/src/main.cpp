@@ -3,7 +3,6 @@
 // DrmPresenter are cross-only (MABUR_PLAYER_HW).
 #include <sys/statvfs.h>  // DVR free-space check behind the GS recording block
 
-#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -48,11 +47,13 @@
 
 #ifdef MABUR_PLAYER_HW
 #include "burn_recorder.h"  // dvr.mode "burned": re-encode with the OSD burnt in
+#include "decode_pump.h"    // the decode-output thread: drives backend->poll(), hands frames over
 #include "drm_presenter.h"  // KMS atomic NV12 presenter, the default display path
 #include "frame_regulator.h"  // phase-aware pts+D display release
 #include "phase_lock.h"  // PhaseLock, the sensor-rate controller for the phase lock
-#include "rate_match.h"  // SourceRate, RateMatch: is the panel within the phase lock's reach
-#include "release_wait.h"  // the pre-release wait that keeps collecting decoded frames
+#include "rate_match.h"  // RateMatch: is the panel within the phase lock's reach
+#include "release_loop.h"  // the release thread: regulator decisions and every present()
+#include "wake_queue.h"    // the hand-over and release queues between the threads
 #include "gs_draw.h"         // set_colour_inverse() for the GS overlay pre-invert
 #include "lat_tracker.h"    // tail latency segments + 1 Hz lat line
 #include "lat_log.h"        // lat.log (1 Hz lat: line) and frame.log (per frame) in the session dir
@@ -84,9 +85,8 @@ uint64_t mono_ms() {
           .count());
 }
 
-// Microsecond twin for the frame regulator's release math: a 2 ms main-loop
-// tick already quantizes release, so ms resolution would stack a second
-// quantizer on top.
+// Microsecond twin, for the stamps and marks that feed microsecond
+// consumers (the session logs, the phase lock, the rate-match window).
 uint64_t mono_us() {
   return static_cast<uint64_t>(
       std::chrono::duration_cast<std::chrono::microseconds>(
@@ -643,10 +643,10 @@ int main(int argc, char** argv) {
   maburplay::LatTracker lat;
   // Phase-aware display release (display.regulate_ms; frame_regulator.h).
   // The regulator is a THIRD holder of decoder buffers next to the
-  // presenter and the burn recorder, so every drop_all() flush point below
-  // flushes it too. Declared here (ahead of the presenter) so both
-  // set_flip_sink closures below -- startup and hotplug reacquire -- can
-  // capture it by reference.
+  // presenter and the burn recorder; the release thread owns its decisions
+  // and returns what it holds whenever it parks (every flush point below).
+  // Declared here (ahead of the presenter) so both set_flip_sink closures
+  // below -- startup and hotplug reacquire -- can capture it by reference.
   maburplay::FrameRegulator regulator(cfg.display.regulate_ms,
                                       cfg.display.vsync_lock,
                                       cfg.display.vsync_lead_ms,
@@ -661,9 +661,9 @@ int main(int argc, char** argv) {
     regulator.set_phase_lock_mode(true);
   }
   uint64_t phase_disconts_seen = 0;
-  // The drone's measured frame rate against the panel's: a pair too far
-  // apart for the phase lock pauses it and warns on the OSD fps cell.
-  maburplay::SourceRate source_rate;
+  // The drone's measured frame rate (the decode pump's) against the
+  // panel's: a pair too far apart for the phase lock pauses it and warns on
+  // the OSD fps cell.
   maburplay::RateMatch rate_match;
   uint64_t rate_match_mark_us = 0;
   maburplay::LatLog lat_log;
@@ -676,7 +676,18 @@ int main(int argc, char** argv) {
   // The 1 Hz regulator: line, into the session too (docs/observability.md
   // "reg.log"): its pend/pdrop/heals counters are the presenter's side of
   // a missed latch, and /tmp/maburplay.log does not outlive a power-off.
-  maburplay::LatLog reg_log(maburplay::kSessionMarker, "reg.log", "# reglog 2");
+  maburplay::LatLog reg_log(maburplay::kSessionMarker, "reg.log", maburplay::kRegLogHeader);
+  // The two queues between the threads. Declared ahead of the presenter so
+  // they outlive it: its ReleaseFn pushes into `releases`, up to and
+  // including its own destructor.
+  //  - handover: decode-output thread -> release thread, every decoded frame
+  //    with its decode stamp;
+  //  - releases: any thread -> decode-output thread, every frame given back
+  //    to the decoder (displaced, off screen, dropped). Only the thread that
+  //    owns the decoder's output side drains it: the decode pump, or
+  //    housekeeping while the pump is parked.
+  maburplay::WakeQueue<maburplay::HandedFrame> handover;
+  maburplay::WakeQueue<maburplay::DmaFrame> releases;
   // Installs the display stage: the CUBIC_LUT (always a table on a LUT
   // CRTC, identity when off) or the video-plane CTM, and pre-inverts both
   // overlays only for the LUT. Runs once per presenter acquire, BEFORE
@@ -727,18 +738,14 @@ int main(int argc, char** argv) {
   std::unique_ptr<maburplay::DrmPresenter> presenter;
   if (!decode_only) {
     presenter = std::make_unique<maburplay::DrmPresenter>();
-    // Declaration order is load-bearing: `backend` is declared before
-    // `presenter`, so the presenter (and any frames it still holds) is
-    // destroyed FIRST on unwind, releasing into a live backend. The null
-    // guard covers the watchdog's recreation-failed exit path, where
-    // drop_all() has already emptied the presenter.
+    // Frames the presenter is done with go to the release queue, never
+    // straight into the decoder: the presenter runs on the release thread,
+    // and only the decode-output side may call release_frame().
     if (!presenter->init(cfg.screen_mode, want_osd,
-                         [&backend](const maburplay::DmaFrame& f) {
-                           if (backend) backend->release_frame(f);
-                         })) {
+                         [&releases](const maburplay::DmaFrame& f) { releases.push(f); })) {
       std::fprintf(stderr,
                    "maburplay: DrmPresenter init failed -- no display; frames will be "
-                   "decoded and released immediately\n");
+                   "decoded and dropped\n");
       presenter.reset();
     } else {
       install_colortrans(presenter.get());
@@ -780,94 +787,9 @@ int main(int argc, char** argv) {
     p->splash_show();
   };
   if (presenter) show_splash(presenter.get());
-  // Present-submission jitter, |Δ interval| EMA in ms — the player-side
-  // smoothness number the regulator A/B compares. Submission clock, not
-  // vsync, but a straddle shows up in it either way. Hoisted above
-  // log_regulator_line (which captures present_jitter_ema_ms by reference)
-  // rather than left at present_now's declaration site further down --
-  // present_now itself stays there, it only WRITES these, and that's later
-  // in the same scope so it still sees them.
-  uint64_t last_present_us = 0;
-  int64_t prev_present_iv = -1;
-  double present_jitter_ema_ms = 0.0;
-  // Chain-break detector state (frame_regulator.h heal_slip; the per-tick
-  // block next to the release poll below): engagement count last seen,
-  // the time of the last unpaired engagement, and the last heal firing.
-  uint64_t pend_prev = 0;
-  uint64_t last_engage_ms = 0;
-  uint64_t last_heal_ms = 0;
-  // 1 Hz mark for the lat/regulator observability block in the main loop
-  // (independent of the GS-OSD block).
+  // 1 Hz mark for the lat/regulator observability block in the housekeeping
+  // loop (independent of the GS-OSD block).
   uint64_t lat_mark_ms = 0;
-  // Regulator stderr line: printed both at 1 Hz from the main loop's stats
-  // block (below) and once more at exit as the final tally -- same format
-  // either way, factored here so the two call sites can't drift. pend= is
-  // the DrmPresenter's mailbox engagement count (frame parked, or displacing
-  // one already parked because a flip was in flight) -- 0 when there is no
-  // presenter (decode-only, or init failed).
-  auto log_regulator_line = [&regulator, &presenter, &present_jitter_ema_ms, &reg_log,
-                             &phase_lock]() {
-    char line[512];
-    if (regulator.enabled()) {
-      const uint64_t pend = presenter ? presenter->mailbox_engagements() : 0;
-      std::snprintf(line, sizeof(line),
-                   "regulator: held=%llu late=%llu replaced=%llu disconts=%llu "
-                   "hold_ema=%.2fms present_jitter=%.2fms vsync=%s skips=%llu "
-                   "fallback=%llu pend=%llu heals=%llu pdrop=%llu "
-                   "chained=%llu chain=%llu chain_max=%llu chains=%llu cuts=%llu "
-                   "alw=%.1fms lslot=%llu",
-                   static_cast<unsigned long long>(regulator.held_count()),
-                   static_cast<unsigned long long>(regulator.late_count()),
-                   static_cast<unsigned long long>(regulator.replaced_count()),
-                   static_cast<unsigned long long>(regulator.discont_count()),
-                   regulator.hold_ema_ms(), present_jitter_ema_ms,
-                   regulator.servo_locked() ? "locked" : "fallback",
-                   static_cast<unsigned long long>(regulator.vsync_skips()),
-                   static_cast<unsigned long long>(regulator.fallback_frames()),
-                   static_cast<unsigned long long>(pend),
-                   static_cast<unsigned long long>(regulator.heals()),
-                   static_cast<unsigned long long>(
-                       presenter ? presenter->mailbox_dropped_paced() : 0),
-                   static_cast<unsigned long long>(regulator.chained_count()),
-                   static_cast<unsigned long long>(regulator.chain_run()),
-                   static_cast<unsigned long long>(regulator.chain_max()),
-                   static_cast<unsigned long long>(regulator.chains_count()),
-                   static_cast<unsigned long long>(regulator.chain_cuts()),
-                   regulator.allowance_ms(),
-                   static_cast<unsigned long long>(regulator.late_slot_count()));
-      {
-        const size_t used = std::strlen(line);
-        if (phase_lock) {
-          std::snprintf(line + used, sizeof(line) - used,
-                        " lock=%s lerr=%.2fms loff=%d lctr=%.1f",
-                        maburplay::phase_lock_state_name(phase_lock->state()),
-                        phase_lock->error_ms(), static_cast<int>(phase_lock->offset_mfps()),
-                        phase_lock->centre_mfps());
-        } else {
-          std::snprintf(line + used, sizeof(line) - used,
-                        " lock=off lerr=0.00ms loff=0 lctr=0.0");
-        }
-      }
-      if (presenter) {
-        // present() stage cost over the last window (µs p50/max):
-        // framebuffer acquire (cached dma-buf import + AddFB2), request
-        // build, atomic commit ioctl. The lead (display.vsync_lead_ms) has
-        // to cover their sum; a frame whose sum exceeds it misses its latch
-        // and the next one is pdropped.
-        const auto pt = presenter->present_timing();
-        const size_t used = std::strlen(line);
-        std::snprintf(line + used, sizeof(line) - used,
-                      " present=%u acq=%u/%u req=%u/%u ioctl=%u/%u",
-                      pt.n, pt.p50[0], pt.max[0], pt.p50[1], pt.max[1],
-                      pt.p50[2], pt.max[2]);
-      }
-    } else {
-      std::snprintf(line, sizeof(line), "regulator: off present_jitter=%.2fms",
-                    present_jitter_ema_ms);
-    }
-    std::fprintf(stderr, "%s\n", line);
-    reg_log.write(mono_us(), line);
-  };
 #endif
 
   // MSP DisplayPort OSD: network intake + raster, gated on want_msp_osd (the
@@ -926,11 +848,12 @@ int main(int argc, char** argv) {
   }
 
   // Player-measured half of the GS overlay's inputs, recomputed once a
-  // second in the main loop. maburgs cannot supply these: its fps counts AUs
-  // published to the ring and still reads 60 while a wedged decoder shows a
-  // frozen picture -- the exact failure the pilot has to be able to see.
+  // second in the housekeeping loop. maburgs cannot supply these: its fps
+  // counts AUs published to the ring and still reads 60 while a wedged
+  // decoder shows a frozen picture -- the exact failure the pilot has to be
+  // able to see.
   maburplay::GsPlayerState gs_ps;
-  uint64_t gs_frames_at_mark = 0;  // frame_count at the last 1 Hz mark
+  uint64_t gs_frames_at_mark = 0;  // decoded-frame count at the last 1 Hz mark
   uint64_t gs_bytes_at_mark = 0;   // gs_bytes_total at the last 1 Hz mark
   uint64_t gs_bytes_total = 0;     // running AU byte total, summed at delivery
   uint64_t gs_video_mark_ms = 0;   // 0 = no mark yet, so the first tick only seeds
@@ -970,6 +893,97 @@ int main(int argc, char** argv) {
   // unwind: stop() joins the encode thread and releases the decoder buffers
   // it still holds while the decoder that owns them is still alive.
   std::unique_ptr<maburplay::BurnRecorder> burn;
+  // The decode-output thread and the release thread (decode_pump.h,
+  // release_loop.h). Declared AFTER `burn`, `presenter` and `backend` so
+  // they are destroyed FIRST on unwind (each destructor stops and joins):
+  // neither may outlive the recorder the pump's submit hook calls, the
+  // presenter the release thread presents to and the pump primes, or the
+  // decoder the pump polls. Both exist in every hardware run but start only
+  // in the display run below: --decode-only keeps its one-thread loop and
+  // inline sink, and --oneshot never decodes.
+  maburplay::DecodePump pump(lat, regulator, handover, releases);
+  maburplay::ReleaseLoop release(regulator, lat, handover, releases, presenter.get(),
+                                 maburplay::ReleaseLoop::Cfg{cfg.display.rt_priority});
+  // Regulator stderr line: printed both at 1 Hz from the housekeeping loop's
+  // stats block (below) and once more at exit as the final tally -- same
+  // format either way, factored here so the two call sites can't drift.
+  // pend= is the DrmPresenter's mailbox engagement count (frame parked, or
+  // displacing one already parked because a flip was in flight) -- 0 when
+  // there is no presenter (decode-only, or init failed). Every call closes
+  // the release thread's stats window (rlate=, hand=, present_jitter=).
+  auto log_regulator_line = [&regulator, &presenter, &release, &reg_log, &phase_lock]() {
+    char line[768];
+    const maburplay::ReleaseLoop::Stats st = release.take_stats();
+    if (regulator.enabled()) {
+      const uint64_t pend = presenter ? presenter->mailbox_engagements() : 0;
+      std::snprintf(line, sizeof(line),
+                   "regulator: held=%llu late=%llu replaced=%llu disconts=%llu "
+                   "hold_ema=%.2fms present_jitter=%.2fms vsync=%s skips=%llu "
+                   "fallback=%llu pend=%llu heals=%llu pdrop=%llu "
+                   "chained=%llu chain=%llu chain_max=%llu chains=%llu cuts=%llu "
+                   "alw=%.1fms lslot=%llu",
+                   static_cast<unsigned long long>(regulator.held_count()),
+                   static_cast<unsigned long long>(regulator.late_count()),
+                   static_cast<unsigned long long>(regulator.replaced_count()),
+                   static_cast<unsigned long long>(regulator.discont_count()),
+                   regulator.hold_ema_ms(), st.present_jitter_ema_ms,
+                   regulator.servo_locked() ? "locked" : "fallback",
+                   static_cast<unsigned long long>(regulator.vsync_skips()),
+                   static_cast<unsigned long long>(regulator.fallback_frames()),
+                   static_cast<unsigned long long>(pend),
+                   static_cast<unsigned long long>(regulator.heals()),
+                   static_cast<unsigned long long>(
+                       presenter ? presenter->mailbox_dropped_paced() : 0),
+                   static_cast<unsigned long long>(regulator.chained_count()),
+                   static_cast<unsigned long long>(regulator.chain_run()),
+                   static_cast<unsigned long long>(regulator.chain_max()),
+                   static_cast<unsigned long long>(regulator.chains_count()),
+                   static_cast<unsigned long long>(regulator.chain_cuts()),
+                   regulator.allowance_ms(),
+                   static_cast<unsigned long long>(regulator.late_slot_count()));
+      {
+        const size_t used = std::strlen(line);
+        if (phase_lock) {
+          std::snprintf(line + used, sizeof(line) - used,
+                        " lock=%s lerr=%.2fms loff=%d lctr=%.1f",
+                        maburplay::phase_lock_state_name(phase_lock->state()),
+                        phase_lock->error_ms(), static_cast<int>(phase_lock->offset_mfps()),
+                        phase_lock->centre_mfps());
+        } else {
+          std::snprintf(line + used, sizeof(line) - used,
+                        " lock=off lerr=0.00ms loff=0 lctr=0.0");
+        }
+      }
+      if (presenter) {
+        // present() stage cost over the last window (µs p50/max), on the
+        // release thread: framebuffer acquire (cached dma-buf import +
+        // AddFB2), request build, atomic commit ioctl. The lead
+        // (display.vsync_lead_ms) has to cover the release thread's own
+        // wake lateness (rlate= below) plus their sum; a frame past it
+        // misses its latch and the next one is pdropped.
+        const auto pt = presenter->present_timing();
+        const size_t used = std::strlen(line);
+        std::snprintf(line + used, sizeof(line) - used,
+                      " present=%u acq=%u/%u req=%u/%u ioctl=%u/%u",
+                      pt.n, pt.p50[0], pt.max[0], pt.p50[1], pt.max[1],
+                      pt.p50[2], pt.max[2]);
+      }
+    } else {
+      std::snprintf(line, sizeof(line), "regulator: off present_jitter=%.2fms",
+                    st.present_jitter_ema_ms);
+    }
+    {
+      // The release thread over the same window (µs p99/max): rlate = a held
+      // frame's release behind its schedule, hand = decode stamp to offer;
+      // rt = 1 when it runs SCHED_FIFO.
+      const size_t used = std::strlen(line);
+      std::snprintf(line + used, sizeof(line) - used, " rlate=%u/%u hand=%u/%u rt=%d",
+                    st.rlate_p99_us, st.rlate_max_us, st.hand_p99_us, st.hand_max_us,
+                    release.rt_applied() ? 1 : 0);
+    }
+    std::fprintf(stderr, "%s\n", line);
+    reg_log.write(mono_us(), line);
+  };
   // Idempotent, and deliberately callable more than once: the display may be
   // acquired late (see the hotplug retry in the run loop), and the recorder
   // is sized from presenter->osd_back_surface(), so it cannot be built before
@@ -977,10 +991,9 @@ int main(int argc, char** argv) {
   // screen, playing video, and nothing recorded.
   // The encoder-side OSD palette, built once per input set and memoised.
   // build_palette() histograms the whole MSP atlas (~2 M px through a hash
-  // map) and runs a 255-step median cut: ~150 ms on the A55, and on the main
-  // loop that was most of the ~200 ms display stall every record start used
-  // to cost (bench). Its inputs -- the atlas, the
-  // GS seeds, the forward map -- are fixed for a run, so the first build is
+  // map) and runs a 255-step median cut: ~150 ms on the A55, all of it on
+  // the housekeeping loop (OSD, stats) at a record start. Its inputs -- the
+  // atlas, the GS seeds, the forward map -- are fixed for a run, so the first build is
   // done at startup below, before video flows; a later key change (a
   // presenter acquired after startup flipping colour_inverse()) rebuilds
   // once, logged.
@@ -1060,17 +1073,20 @@ int main(int argc, char** argv) {
     if (!burn) return;
     // Raw pointer, not a reference to the unique_ptr. `burn` IS reset --
     // rec_stop() tears the recorder down on a button press -- so the
-    // safety comes from ordering instead: rec_stop() clears the sink
-    // BEFORE it destroys the recorder, so the composer can never call
-    // through a dangling pointer. Both happen on the main loop thread,
-    // and MppBackend has no threads (frame_sink runs inside
-    // backend->poll()), so there is nothing to synchronise against.
+    // safety comes from ordering instead: rec_stop() removes both hooks
+    // BEFORE it stops and destroys the recorder. The composer runs on this
+    // (housekeeping) thread; the submit hook runs on the decode-output
+    // thread, and set_recorder_submit() is the fence against it: the pump
+    // calls the hook under the lock that call takes, so the hook goes in
+    // only after start() returned and, once removed, no submit() is in
+    // flight (burn_recorder.h THREADING).
     maburplay::BurnRecorder* b = burn.get();
     composer.set_burn_sink([b](const maburplay::Surface& s, const maburplay::DirtyRect* r,
                                size_t n) { b->set_osd(s, r, n); });
+    pump.set_recorder_submit([b](const maburplay::DmaFrame& f) { b->submit(f); });
   };
   // Warm the palette memo now, while nothing is on screen yet, so the
-  // first record start does not pay for it on the main loop.
+  // first record start does not pay for it on the housekeeping loop.
   if (burned_mode && presenter && (osd_raster || composer.gs_present())) burn_palette();
   start_burn_if_needed();
   // rec_gs: with dvr.target "vtx" the GS recorder is never started, so
@@ -1096,55 +1112,23 @@ int main(int argc, char** argv) {
   }
 #endif
 
-  // Counted unconditionally (cheap, backend-agnostic): --decode-only reads
-  // frame_count/first-last frame timestamps directly; the normal run loop
-  // just carries the extra bookkeeping for free.
+  // The inline frame sink: what the backend calls from inside poll() when
+  // no decode pump runs -- the host build, and --decode-only on hardware
+  // (the hardware decode gate keeps its one-thread loop). It counts the
+  // frame and gives it straight back. The display run on hardware hands
+  // the decoder pump.sink() instead, and these stay untouched there.
   uint64_t frame_count = 0;
   bool have_first_frame = false;
   bool have_decoded_pts = false;  // shutdown waits for the drained picture's frame
   uint32_t last_decoded_pts = 0;
   std::chrono::steady_clock::time_point t_first_frame, t_last_frame;
-  // Named so the watchdog's backend-recreation path can re-wire the same
-  // sink into the fresh decoder instance.
-#ifdef MABUR_PLAYER_HW
-  // regulator is declared earlier (next to `lat`, above the presenter
-  // block) so both set_flip_sink closures can capture it by reference.
-  const auto present_now = [&](const maburplay::DmaFrame& f) {
-    const uint64_t t = mono_us();
-    if (last_present_us != 0) {
-      const int64_t iv = static_cast<int64_t>(t - last_present_us);
-      if (prev_present_iv >= 0) {
-        const int64_t dj = iv > prev_present_iv ? iv - prev_present_iv
-                                                : prev_present_iv - iv;
-        present_jitter_ema_ms +=
-            (static_cast<double>(dj) / 1000.0 - present_jitter_ema_ms) / 16.0;
-      }
-      prev_present_iv = iv;
-    }
-    last_present_us = t;
-    lat.on_present(f.pts_us, t);  // t_release
-    presenter->present(f);
-    const auto ci = presenter->last_commit();
-    lat.on_commit(f.pts_us, ci.t_commit_us, ci.bits);
-  };
-#endif
-  std::function<void()> drain_notes_fn;  // set once a FeedLoop exists; run before lat.on_decoded
   const maburplay::VideoBackend::FrameSink frame_sink = [&](const maburplay::DmaFrame& f) {
-    if (drain_notes_fn) drain_notes_fn();  // on_submit for this pts is out before its frame
-#ifdef MABUR_PLAYER_HW
-    lat.on_decoded(f.pts_us, mono_us());
-#endif
     ++frame_count;
-#ifdef MABUR_PLAYER_HW
-    source_rate.on_pts(f.pts_us, mono_us());
-#endif
     have_decoded_pts = true;
     last_decoded_pts = f.pts_us;
     // The DECODED picture size, which is what the OSD's res: field means --
     // not screen_mode (the panel) and not bcfg (the burn encoder), both of
-    // which stay at 1080p while the drone streams 720p. Latched here rather
-    // than sampled at the 1 Hz mark because the sink is the only place the
-    // real dimensions exist, and it costs two stores.
+    // which stay at 1080p while the drone streams 720p.
     gs_ps.vid_w = f.width;
     gs_ps.vid_h = f.height;
     const auto now = std::chrono::steady_clock::now();
@@ -1153,41 +1137,31 @@ int main(int argc, char** argv) {
       have_first_frame = true;
     }
     t_last_frame = now;
-#ifdef MABUR_PLAYER_HW
-    if (presenter) {
-      // Burned DVR, BEFORE present(): submit() only takes an MPP buffer
-      // reference (O(1), no copy, no ownership), but present() hands the
-      // DmaFrame to the presenter and the frame must not be read through
-      // afterwards -- so the second reader goes first, where the rule is
-      // obvious. The two holders are decoupled by MPP's own refcount; the
-      // presenter's ownership contract is unchanged.
-      if (burn) burn->submit(f);
-      maburplay::FrameRegulator::Displaced disp;
-      const uint64_t t_now = mono_us();
-      if (regulator.offer(f, t_now, t_now, &disp))
-        present_now(f);
-      double margin_us = 0.0;
-      if (phase_lock && !rate_match.mismatch() && regulator.take_margin(&margin_us))
-        phase_lock->on_margin(margin_us, regulator.panel_period_us(), mono_us());
-      for (int i = 0; i < disp.n; ++i) {
-        lat.on_drop(disp.f[i].pts_us);
-        backend->release_frame(disp.f[i]);
-      }
-      return;
-    }
-#endif
     backend->release_frame(f);
   };
+  // The sink the backend is initialised with -- here and in the watchdog's
+  // decoder re-creation, which must wire the fresh instance the same way.
+#ifdef MABUR_PLAYER_HW
+  const maburplay::VideoBackend::FrameSink decoder_sink = decode_only ? frame_sink : pump.sink();
+#else
+  const maburplay::VideoBackend::FrameSink& decoder_sink = frame_sink;
+#endif
 #ifdef MABUR_PLAYER_MPP
   // [decoder] stream: MppBackend sets its parser up for streaming at init.
   if (auto* mpp = dynamic_cast<maburplay::MppBackend*>(backend.get()))
     mpp->set_stream(cfg.decoder.stream);
 #endif
-  const bool init_ok = backend->init(bcfg, frame_sink);
+  const bool init_ok = backend->init(bcfg, decoder_sink);
   if (!init_ok) {
     std::fprintf(stderr, "maburplay: backend \"%s\" init failed\n", cfg.backend.c_str());
     return 2;
   }
+#ifdef MABUR_PLAYER_HW
+  // After init(): MppBackend takes the pump's blocking poll timeout only
+  // once initialised. Not in --decode-only, whose loop polls the backend
+  // itself and must not block in it.
+  if (!decode_only) pump.set_backend(backend.get());
+#endif
   // Streamed decode: split AUs go to the
   // decoder slice by slice as ring v4 publishes them. The VideoBackend seam
   // stays frozen; a backend that can stream also implements StreamDecoder
@@ -1268,12 +1242,16 @@ int main(int argc, char** argv) {
     }
 #ifdef MABUR_PLAYER_HW
     if (burn) {
+      // Both hooks hold a RAW pointer to the recorder (see
+      // start_burn_if_needed), so they go first: the submit hook before
+      // stop() (submit() is legal only between start() and stop(), and once
+      // set_recorder_submit({}) returns none is in flight on the
+      // decode-output thread), then the composer's, both while the object
+      // they point at is still alive.
+      pump.set_recorder_submit({});
+      composer.set_burn_sink({});
       const uint64_t n = burn->frames_encoded();
       burn->stop();
-      // MUST precede burn.reset(): the composer holds a RAW pointer to the
-      // recorder (see start_burn_if_needed), so the sink has to be dropped
-      // while the object it points at is still alive.
-      composer.set_burn_sink({});
       burn.reset();
       std::fprintf(stderr, "maburplay: rec: STOP (%llu frames)\n",
                    static_cast<unsigned long long>(n));
@@ -1293,17 +1271,12 @@ int main(int argc, char** argv) {
   // ~2 s parameter-set sid0 refresh as its cut point), the decodable gate,
   // whole and streamed submits. What it hands back is processed here.
   maburplay::AuRouter router(feeder, backend);
+  // Delivery notes only. Submit notes (lat submit stamps, incomplete-AU
+  // flags) belong to the decode pump, which takes them from the feed ahead
+  // of each decoded frame; one reaching this hook comes from a run with no
+  // pump (--decode-only, --oneshot) and has nobody to stamp it for.
   auto process_note = [&](maburplay::FeedNote&& n) {
-    if (n.kind == maburplay::FeedNote::Kind::kSubmit) {
-#ifdef MABUR_PLAYER_HW
-      lat.on_submit(n.meta, n.t_us);
-      // A salvaged (incomplete) AU is a loss event: keep its delivery time
-      // out of the capture-time scheduler's lateness window.
-      if (!(n.meta.flags & maburgs::kRecFlagComplete))
-        regulator.note_incomplete(n.meta.pts_us);
-#endif
-      return;
-    }
+    if (n.kind == maburplay::FeedNote::Kind::kSubmit) return;
     // GS overlay video figures, measured at AU delivery (t_us is stamped where
     // the ring was read) -- not at flip: the presenter is a mailbox on the
     // panel vsync, so flip deltas are quantized to vsync-period multiples.
@@ -1317,17 +1290,56 @@ int main(int argc, char** argv) {
     if (rec_on && !burned_mode && rec_gs && !n.au.empty())
       dvr.feed(n.au.data(), n.au.size(), n.meta.pts_us, n.decodable);
   };
-  // Flush-ordering contract: MppBackend::flush()
-  // / mpi->reset() with DmaFrames still held is an unverified interaction, so
-  // every holder -- presenter, regulator (the THIRD holder), recorder (the
-  // SECOND; resealed with an IDR) -- lets go BEFORE flush() runs.
+  maburplay::FeedLoop* feed_ptr = nullptr;
+#ifdef MABUR_PLAYER_HW
+  // Gives every frame in the release queue back to the decoder. Only while
+  // the decode pump is parked: the queue's consumer is the decoder's output
+  // side, which housekeeping owns only then.
+  std::vector<maburplay::DmaFrame> rel_buf;
+  auto return_releases = [&]() {
+    rel_buf.clear();
+    releases.drain(&rel_buf);
+    for (const maburplay::DmaFrame& f : rel_buf) backend->release_frame(f);
+  };
+  // Parks the decode-output thread, then the release thread, and returns
+  // every frame they let go of to the decoder: the release thread's park
+  // drops what the presenter shows or has queued, every frame the regulator
+  // holds and every frame still in the hand-over queue. Until
+  // resume_output() housekeeping owns the decoder's output side and the
+  // display -- nothing is polled, presented or primed. The pump goes first
+  // so nothing is handed over behind the release thread's park. A thread
+  // that does not park in 2 s is wedged beyond this process: respawn, as
+  // for a feed thread that will not park.
+  auto park_output = [&](const char* why) {
+    if (!pump.park(std::chrono::seconds(2)) || !release.park(std::chrono::seconds(2))) {
+      std::fprintf(stderr,
+                   "maburplay: %s -- the decode-output or release thread did not park in 2 s; "
+                   "exiting for respawn\n",
+                   why);
+      std::fflush(stderr);
+      std::_Exit(1);
+    }
+    return_releases();
+  };
+  auto resume_output = [&]() {
+    release.resume();
+    pump.resume();
+  };
+#endif
+  // Flush-ordering contract: MppBackend::flush() / mpi->reset() with
+  // DmaFrames still held is an unverified interaction, so every holder --
+  // presenter and regulator (both emptied by park_output), recorder (the
+  // SECOND holder; resealed with an IDR) -- lets go BEFORE flush() runs.
+  // Runs with the feed and the output side parked.
   auto drop_holders = [&]() {
 #ifdef MABUR_PLAYER_HW
-    if (presenter) presenter->drop_all();
-    {
-      maburplay::DmaFrame held;
-      while (regulator.release_due(~0ull, &held)) backend->release_frame(held);
+    // Submit notes still queued belong to AUs the reset discards: none of
+    // them will decode, and lat.flush_all() below forgets the session.
+    if (feed_ptr) {
+      std::vector<maburplay::FeedNote> stale;
+      feed_ptr->take_submit_notes(&stale);
     }
+    // The pump is parked: no submit() can race this (burn_recorder.h).
     if (burn) {
       burn->drop_pending();
       burn->request_idr();
@@ -1336,13 +1348,18 @@ int main(int argc, char** argv) {
 #endif
   };
   auto do_flush = [&]() {
+#ifdef MABUR_PLAYER_HW
+    park_output("flush");
+#endif
     drop_holders();
     feeder.on_flush();  // never reset under an open streamed picture
     backend->flush();
     router.disarm();    // resync at the next sid0
+#ifdef MABUR_PLAYER_HW
+    resume_output();
+#endif
   };
   router.set_hooks({process_note, [&]() { do_flush(); return true; }, [] { return mono_us(); }});
-  maburplay::FeedLoop* feed_ptr = nullptr;
   auto sink = [&](maburplay::AuEvent&& ev) {
     if (feed_ptr && !feed_ptr->checkpoint()) return;  // parked for the main thread, or stopping
     router.on_event(std::move(ev));
@@ -1497,21 +1514,23 @@ int main(int argc, char** argv) {
   }
 
   // The decoder-input thread (design-reader-thread.md). From here on the
-  // ring, the StreamFeeder and the router are its; this thread keeps the
-  // display, OSD, DVR, stats, the watchdog and the decoder's OUTPUT side.
+  // ring, the StreamFeeder and the router are its. On hardware the decoder's
+  // output side is the decode pump's and the display the release thread's
+  // (started below); this thread -- housekeeping -- keeps the OSD, DVR,
+  // stats, the phase lock, the watchdog and the hotplug retry.
   maburplay::FeedLoop feed(ring, router, feeder, {});
   auto drain_notes = [&]() {
-    // Submit notes before delivery notes (today's relative order, since the
-    // router emits a close's submit before its delivery): there is no
-    // decode-output thread yet to drain take_submit_notes, so this is it.
-    std::vector<maburplay::FeedNote> sub, got;
-    feed.take_submit_notes(&sub);
-    for (maburplay::FeedNote& n : sub) process_note(std::move(n));
+    std::vector<maburplay::FeedNote> got;
+#ifndef MABUR_PLAYER_HW
+    // No decode pump takes the submit notes here; they would pile up.
+    feed.take_submit_notes(&got);
+    got.clear();
+#endif
     feed.take_notes(&got);
     for (maburplay::FeedNote& n : got) process_note(std::move(n));
   };
   // Notes first, then a waiting flush: everything before the flush record
-  // reaches lat/DVR before lat.flush_all() runs -- today's order.
+  // reaches the DVR before the flush runs.
   auto service_feed = [&]() {
     drain_notes();
     if (feed.flush_waiting()) {
@@ -1520,7 +1539,6 @@ int main(int argc, char** argv) {
       feed.resume();
     }
   };
-  drain_notes_fn = drain_notes;
   router.set_hooks({[&feed](maburplay::FeedNote&& n) { feed.push_note(std::move(n)); },
                     [&feed]() { return feed.park_for_flush(); }, [] { return mono_us(); }});
   feed_ptr = &feed;
@@ -1561,11 +1579,39 @@ int main(int argc, char** argv) {
                    static_cast<unsigned long long>(v4->gated()));
 #endif
   }, 5000);
+#ifdef MABUR_PLAYER_HW
+  // The output side, before the feed: the pump takes the submit notes the
+  // feed starts pushing, and every frame it hands over needs the release
+  // thread. The prime hook reads `presenter`, which the hotplug retry
+  // assigns only while the pump is parked.
+  pump.set_feed(&feed);
+  pump.set_prime([&presenter](const maburplay::DmaFrame& f) {
+    if (presenter) presenter->prime(f);
+  });
+  pump.start();
+  release.start();
+#endif
   feed.start();
   std::fprintf(stderr, "maburplay: feed thread on (ring reader + decoder input off the render loop)\n");
 
+  // Decoded-frame figures for the loop below: the decode pump's on
+  // hardware, the inline sink's otherwise.
+  const auto decoded_frames = [&]() -> uint64_t {
+#ifdef MABUR_PLAYER_HW
+    return pump.frames();
+#else
+    return frame_count;
+#endif
+  };
+  const auto have_decoded = [&]() -> bool {
+#ifdef MABUR_PLAYER_HW
+    return pump.have_frame();
+#else
+    return have_first_frame;
+#endif
+  };
   // --fps-log bookkeeping: a once-per-second stderr line, computed off the
-  // same frame_count the FrameSink above already maintains.
+  // same decoded-frame count.
   auto t_last_fps_log = std::chrono::steady_clock::now();
   uint64_t frames_at_last_fps_log = 0;
 #ifdef MABUR_PLAYER_HW
@@ -1618,60 +1664,22 @@ int main(int argc, char** argv) {
   const uint64_t display_retry_t0_ms = mono_ms();
   uint64_t display_retry_next_ms = 0;
   bool display_retry_announced = false;
+  // Phase margins taken from the release thread each iteration.
+  std::vector<maburplay::ReleaseLoop::MarginSample> margins;
+  margins.reserve(maburplay::ReleaseLoop::kMarginCap);
 #endif
   // The ring reader fell behind and skipped AUs that held references.
   uint64_t resyncs_seen = ring.resyncs();
   while (!g_stop.load()) {
-    // 2 ms pump: flip events must be reaped at sub-vsync latency or the
-    // mailbox frame waits for the NEXT AU burst before anyone submits it
-    // (observed live as juddery ~2-3-vsync-late presentation with a
-    // 100 ms pump -- the doorbell was the only wakeup source).
-    int pump_ms = 2;
-#ifdef MABUR_PLAYER_HW
-    // Wake for the next scheduled release, not just the AU doorbell
-    // (measured on hw): the fixed ceiling plus the decode work below put
-    // the release->submit path ~4 ms behind schedule, forcing
-    // vsync_lead_ms up to ~9 -- and the lead sits inside every frame's
-    // glass latency. Bound the pump by the release deadline, then
-    // micro-sleep the exact remainder and submit BEFORE the decode work,
-    // so the submit lands ~0.2 ms after schedule and the lead only has
-    // to cover the commit itself.
-    if (presenter) {
-      const uint64_t nr0 = regulator.next_release_us();
-      if (nr0 != 0) {
-        const uint64_t now0 = mono_us();
-        pump_ms = nr0 <= now0 ? 0
-                              : (nr0 - now0 >= 2'000 ? 2
-                                                     : static_cast<int>(
-                                                           (nr0 - now0) / 1000));
-      }
-    }
-#endif
-    feed.wait_main(pump_ms);
+    // 2 ms ceiling, for the delivery notes and the record button; the
+    // doorbell ends the wait earlier. Nothing deadline-bound runs on this
+    // thread: on hardware the decode pump collects every decoded frame and
+    // the release thread releases it on time whatever this loop is doing.
+    feed.wait_main(2);
     service_feed();
-#ifdef MABUR_PLAYER_HW
-    if (presenter) {
-      const uint64_t nr1 = regulator.next_release_us();
-      if (nr1 != 0) {
-        const uint64_t now1 = mono_us();
-        // Not a plain sleep: the decoder's output is collected only by
-        // backend->poll(), so the wait keeps polling (release_wait.h) --
-        // a picture finishing here is offered to the regulator within one
-        // step instead of after the release and the commit.
-        if (nr1 > now1 && nr1 - now1 <= 2'500)
-          maburplay::wait_until_polling(
-              nr1, 500, mono_us,
-              [](uint64_t us) {
-                std::this_thread::sleep_for(std::chrono::microseconds(us));
-              },
-              [&] { backend->poll(); });
-        presenter->poll_events();
-        maburplay::DmaFrame due;
-        while (regulator.release_due(mono_us(), &due)) present_now(due);
-      }
-    }
-#endif
+#ifndef MABUR_PLAYER_HW
     backend->poll();
+#endif
     // One ioctl per iteration (~500/s, microseconds each) -- far under the
     // ~1.5 ms budget tools/bench/gs_osd_bench.cpp polices for this loop.
     if ((rec_button.is_open() && rec_button.poll(mono_ms())) || g_rec_toggle.exchange(false)) {
@@ -1684,6 +1692,20 @@ int main(int argc, char** argv) {
     // Every iteration: sends on change, re-sends each second (CoreControlClient).
     core_ctl.tick(rec_on && rec_vtx, mono_ms());
 #ifdef MABUR_PLAYER_HW
+    // The phase margin of every offer the release thread made since the
+    // last iteration, oldest first. The lock takes them only while it
+    // runs: with the source and panel rates out of its reach (rate
+    // mismatch) the margins mean nothing to it.
+    margins.clear();
+    release.take_margins(&margins);
+    if (phase_lock && !rate_match.mismatch())
+      for (const maburplay::ReleaseLoop::MarginSample& m : margins)
+        phase_lock->on_margin(m.margin_us, m.period_us, m.t_us);
+    // The DECODED picture size, which is what the OSD's res: field means --
+    // not screen_mode (the panel) and not bcfg (the burn encoder), both of
+    // which stay at 1080p while the drone streams 720p.
+    gs_ps.vid_w = pump.video_w();
+    gs_ps.vid_h = pump.video_h();
     // Drone fps vs panel Hz, once a second, whether or not the GS OSD (the
     // only sideport reader) is up; its low-power flag counts only while
     // fresh.
@@ -1695,17 +1717,18 @@ int main(int argc, char** argv) {
           gs_src && gs_src->snapshot().low_power);
       const double panel_hz =
           regulator.panel_period_us() > 0 ? 1e6 / regulator.panel_period_us() : 0.0;
+      const double src_hz = pump.source_hz();
       const bool was = rate_match.mismatch();
-      rate_match.on_window(source_rate.hz(), panel_hz, lp);
+      rate_match.on_window(src_hz, panel_hz, lp);
       gs_ps.rate_mismatch = rate_match.mismatch();
-      gs_ps.src_hz = source_rate.hz();
+      gs_ps.src_hz = src_hz;
       gs_ps.panel_hz = panel_hz;
       if (rate_match.mismatch() != was)
         std::fprintf(stderr,
                      rate_match.mismatch()
                          ? "maburplay: rate mismatch: source %.2f Hz, panel %.3f Hz%s\n"
                          : "maburplay: rate mismatch cleared: source %.2f Hz, panel %.3f Hz%s\n",
-                     source_rate.hz(), panel_hz,
+                     src_hz, panel_hz,
                      rate_match.mismatch() && phase_lock ? " -- phase lock paused" : "");
     }
     if (phase_lock) {
@@ -1740,56 +1763,7 @@ int main(int argc, char** argv) {
       resyncs_seen = ring.resyncs();
       core_ctl.send_line("refresh resync");
     }
-    // Idle window: true when no release is due within the next 8 ms, so
-    // the heavy 1 Hz blocks below (stats/statvfs, lat flush, OSD compose)
-    // run clear of a release deadline. This REDUCES misses, it does not
-    // bound them -- statvfs on a degraded SD or a lat-log write can block
-    // past any window; the paced-mode mailbox drop and the chain-break
-    // heal are the backstops that keep an overrun at one lost frame. The
-    // post-release gap is ~10.7 ms at 60 fps, so deferred work runs
-    // within a frame period.
-    bool idle_ok = true;
 #ifdef MABUR_PLAYER_HW
-    if (presenter) {
-      presenter->poll_events();
-      maburplay::DmaFrame due;
-      while (regulator.release_due(mono_us(), &due)) present_now(due);
-      {
-        const uint64_t nr = regulator.next_release_us();
-        idle_ok = nr == 0 || nr > mono_us() + 8'000;
-      }
-      // Paced-mode switch for the presenter's mailbox policy (drop missed
-      // frames instead of resubmitting them a period late) -- follows the
-      // servo state so the fallback path keeps the original behavior.
-      presenter->set_paced(regulator.servo_locked());
-      // Chain-break heal, per-tick (seen on hw): a loop stall past the
-      // lead window (the 1 Hz OSD/stats work) makes one release miss its
-      // latch, and the miss self-sustains -- each parked resubmit lands
-      // exactly on a vblank and misses the next latch, so every frame
-      // after it runs one vsync late. In a chain the presenter mailbox
-      // engages ~every frame; aligned mode produces rare singletons. Two
-      // engagements within 100 ms is therefore unambiguous -- slip the
-      // pending releases one slot (a single repeated frame) so the flip
-      // pipeline drains. Rate-limited so a persisting chain gets one heal
-      // per 150 ms, enough for the slip to take effect before re-judging.
-      {
-        const uint64_t p = presenter->mailbox_engagements();
-        const uint64_t now = mono_ms();
-        // A fresh presenter (hotplug reacquire) restarts the counter at
-        // 0; re-baseline or the detector goes silent for the session.
-        if (p < pend_prev) pend_prev = p;
-        if (p > pend_prev) {
-          if (now - last_engage_ms <= 100 && now - last_heal_ms >= 150) {
-            regulator.heal_slip();
-            last_heal_ms = now;
-            last_engage_ms = 0;  // require a fresh pair before re-healing
-          } else {
-            last_engage_ms = now;
-          }
-          pend_prev = p;
-        }
-      }
-    }
     // Retry acquisition once a second while there is no display. A FRESH
     // presenter every time, never a re-init of the failed one: a display that
     // appears late supplies its own EDID and mode list, and every
@@ -1812,10 +1786,13 @@ int main(int argc, char** argv) {
         // log_failures=false: this runs 86,400 times a day on a GS with no
         // screen, and /tmp is tmpfs.
         if (p->init(cfg.screen_mode, want_osd,
-                    [&backend](const maburplay::DmaFrame& f) {
-                      if (backend) backend->release_frame(f);
-                    },
+                    [&releases](const maburplay::DmaFrame& f) { releases.push(f); },
                     /*log_failures=*/false)) {
+          // Both output threads park across the swap: the pump's prime hook
+          // reads `presenter`, and the release thread takes the new sink
+          // only while parked. Sink-less until now, the release thread's
+          // park returns just the frames the regulator holds.
+          park_output("display acquired");
           presenter = std::move(p);
           install_colortrans(presenter.get());
           // Same pre-first-flip reseed as the startup path: a hotplugged
@@ -1824,15 +1801,17 @@ int main(int argc, char** argv) {
           // Unlike the startup path, the lock may already be locked or
           // acquiring against the OLD panel's grid here: restart it so the
           // new mode gets a fresh window instead of up to 2 s of capture
-          // placement judged against a stale vblank period.
+          // placement judged against a stale vblank period. Margins taken
+          // against the old grid go with it.
           if (phase_lock) phase_lock->on_discontinuity(mono_us());
+          margins.clear();
+          release.take_margins(&margins);
+          margins.clear();
           presenter->set_flip_sink(
               [&lat, &regulator](uint32_t pts, uint64_t t, bool ex) {
                 lat.on_flip(pts, t, ex);
                 regulator.on_flip(t, ex);
               });
-          std::fprintf(stderr, "maburplay: display acquired after %.1f s\n",
-                       (now_ms - display_retry_t0_ms) / 1000.0);
           // Startup-only, and this is where that invariant is enforced for the
           // hotplug path: if this process has ever decoded a frame, the aircraft is
           // flying and a still photo on the goggles would read as a live feed. The
@@ -1840,7 +1819,11 @@ int main(int argc, char** argv) {
           // since splash_show() was skipped, so the first present() performs the
           // full modeset that used to run before splash existed); it simply comes
           // up on video, or on nothing until video returns.
-          if (!have_first_frame) show_splash(presenter.get());
+          if (!pump.have_frame()) show_splash(presenter.get());
+          release.set_sink(presenter.get());
+          resume_output();
+          std::fprintf(stderr, "maburplay: display acquired after %.1f s\n",
+                       (now_ms - display_retry_t0_ms) / 1000.0);
           // The recorder is sized from the OSD surface, so it could not exist
           // before this moment.
           start_burn_if_needed();
@@ -1862,7 +1845,10 @@ int main(int argc, char** argv) {
       const uint64_t now_ms = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
                                   std::chrono::steady_clock::now().time_since_epoch())
                                   .count();
-      msp_ready = osd_src->poll(now_ms);
+      // Sticky until a composition consumes it: the composition can be
+      // held off (the OSD buffers are busy until the display takes the last
+      // publish), and a fresh screen must not be lost meanwhile.
+      if (osd_src->poll(now_ms)) msp_ready = true;
       msp_stale = osd_src->stale(now_ms);
       // Fires at most once per process: either traffic arrived (nothing to
       // report, latch it shut) or 10 s passed with none (report, latch shut).
@@ -1912,7 +1898,7 @@ int main(int argc, char** argv) {
       // Video and recording figures at 1 Hz. The sideport itself runs at
       // 2 Hz, but these are the player's own and recomputing them per
       // iteration would only add noise to numbers read at a glance.
-      if (idle_ok && now_ms - gs_video_mark_ms >= 1000) {
+      if (now_ms - gs_video_mark_ms >= 1000) {
         // The gate guarantees dt >= 1.0, so there is nothing to divide by
         // zero; gs_video_mark_ms == 0 is the first tick, which has no
         // interval behind it and therefore only seeds the marks.
@@ -1921,10 +1907,10 @@ int main(int argc, char** argv) {
           // DECODED frames, not AUs: maburgs' own fps counts what it
           // published to the ring and still reads 60 while a wedged decoder
           // shows a frozen picture. This one falls to zero.
-          gs_ps.fps = (double)(frame_count - gs_frames_at_mark) / dt;
+          gs_ps.fps = (double)(decoded_frames() - gs_frames_at_mark) / dt;
           gs_ps.mbps = (double)(gs_bytes_total - gs_bytes_at_mark) * 8.0 / 1e6 / dt;
         }
-        gs_frames_at_mark = frame_count;
+        gs_frames_at_mark = decoded_frames();
         gs_bytes_at_mark = gs_bytes_total;
         gs_video_mark_ms = now_ms;
         gs_jitter.on_tick(now_ms);  // an outage must not leave a stale figure
@@ -1947,7 +1933,7 @@ int main(int argc, char** argv) {
         // the next start (rec_start is what clears it).
         rin.broken = rec_on && dvr.state() == mabur::RawDvr::State::Error;
         if (burned_mode) {
-          rin.feed = frame_count;
+          rin.feed = decoded_frames();
 #ifdef MABUR_PLAYER_HW
           rin.samples = burn ? burn->frames_encoded() : 0;
           rin.open = burn != nullptr;
@@ -2000,9 +1986,8 @@ int main(int argc, char** argv) {
     // Player tail-latency aggregates + regulator line, 1 Hz. Deliberately
     // OUTSIDE the gs_src gate (nested in the GS-OSD block, disabling the
     // OSD would silently kill the lat:/regulator: lines and the DVR lat
-    // log) and behind the idle-window gate so this
-    // block's own cost can never stall a release past its latch deadline.
-    if (idle_ok && mono_ms() - lat_mark_ms >= 1000) {
+    // log). Its cost lands on this thread only, never on a release.
+    if (mono_ms() - lat_mark_ms >= 1000) {
       lat_mark_ms = mono_ms();
       const auto L = lat.flush_line();
       // OSD LAT rows: p99_frame() returns the REAL p99-by-e2e
@@ -2097,10 +2082,13 @@ int main(int argc, char** argv) {
 #ifdef MABUR_PLAYER_HW
     // Re-checked every iteration, never cached: the presenter switches the
     // OSD off mid-session after repeated commit failures, and from that point
-    // osd_back_surface() is a null Surface. idle_ok: composition is the
-    // heaviest per-iteration work (full-width blits) -- deferring it out of
-    // a release's lead window is what keeps the servo's latches safe.
-    if (idle_ok && presenter && presenter->osd_available()) {
+    // osd_back_surface() is a null Surface. Composition starts only while
+    // no publish is pending: a published back buffer belongs to the release
+    // thread until a commit takes it, and the buffer that commit swaps in as
+    // the new back is still on screen until its flip completes -- the
+    // presenter keeps osd_publish_pending() true through both, so this never
+    // draws into a buffer that is on screen or about to be.
+    if (presenter && presenter->osd_available() && !presenter->osd_publish_pending()) {
       const maburplay::Surface surf = presenter->osd_back_surface();
       if (surf.pixels && composer.gs_present() && !gs_laid_out) {
         // Deferred to the first real surface: its size is the DRM buffer's,
@@ -2131,6 +2119,7 @@ int main(int argc, char** argv) {
         if (composer.wants(in)) {
           const maburplay::OsdComposeOut out = composer.compose(idx, surf, in);
           gs_needs_render = false;
+          msp_ready = false;
           // Unconditional whenever a composition ran, even if it drew
           // nothing: "nothing differs from this buffer" does not mean the
           // screen is right -- the screen is the OTHER buffer. With a value
@@ -2148,14 +2137,14 @@ int main(int argc, char** argv) {
 #endif
     {
       const auto now = std::chrono::steady_clock::now();
-      if (frame_count != wd_frames) {
-        wd_frames = frame_count;
+      if (decoded_frames() != wd_frames) {
+        wd_frames = decoded_frames();
         wd_submits = router.submits();
         wd_last_progress = now;
         wd_consecutive = 0;
-      } else if (have_first_frame && router.submits() > wd_submits + 60 &&
+      } else if (have_decoded() && router.submits() > wd_submits + 60 &&
                  now - wd_last_progress > std::chrono::seconds(2)) {
-        // have_first_frame gate: before the decoder has EVER produced a
+        // have_decoded() gate: before the decoder has EVER produced a
         // frame (cold attach waiting for the encoder's session sync), a
         // fire here would be spurious -- there is nothing to reset yet.
         ++wd_consecutive;
@@ -2176,6 +2165,11 @@ int main(int argc, char** argv) {
           std::_Exit(1);
         }
         drain_notes();
+#ifdef MABUR_PLAYER_HW
+        // And the output side: the pump out of every backend call, the
+        // release thread off the display, every frame back in the decoder.
+        park_output("decode watchdog");
+#endif
         drop_holders();
         feeder.on_flush();  // end a streamed picture before reset/teardown
         if (wd_consecutive < 3) {
@@ -2194,11 +2188,17 @@ int main(int argc, char** argv) {
           if (auto* mpp = dynamic_cast<maburplay::MppBackend*>(backend.get()))
             mpp->set_stream(cfg.decoder.stream);
 #endif
-          if (!backend || !backend->init(bcfg, frame_sink)) {
+          if (!backend || !backend->init(bcfg, decoder_sink)) {
             std::fprintf(stderr,
                          "maburplay: decoder recreation failed -- exiting for respawn\n");
             return 1;
           }
+#ifdef MABUR_PLAYER_HW
+          // While parked and after init(), as at startup. Anything queued for
+          // release since the park belongs to the destroyed decoder and is
+          // discarded, never handed to the new one.
+          pump.set_backend(backend.get());
+#endif
           feeder.set_decoder(dynamic_cast<maburplay::StreamDecoder*>(backend.get()));
 #ifdef MABUR_PLAYER_MPP
           if (auto* mpp = dynamic_cast<maburplay::MppBackend*>(backend.get()))
@@ -2213,6 +2213,9 @@ int main(int argc, char** argv) {
                        "respawn\n");
           return 1;
         }
+#ifdef MABUR_PLAYER_HW
+        resume_output();
+#endif
         core_ctl.send_line("refresh decoder");
         router.disarm();  // resync at the next sid0 AU
         feed.resume();
@@ -2224,7 +2227,8 @@ int main(int argc, char** argv) {
       const auto now = std::chrono::steady_clock::now();
       const double dt = std::chrono::duration<double>(now - t_last_fps_log).count();
       if (dt >= 1.0) {
-        const double fps = static_cast<double>(frame_count - frames_at_last_fps_log) / dt;
+        const uint64_t frames_now = decoded_frames();
+        const double fps = static_cast<double>(frames_now - frames_at_last_fps_log) / dt;
 #ifdef MABUR_PLAYER_HW
         if (presenter) {
           const uint64_t flips = presenter->flips();
@@ -2265,7 +2269,7 @@ int main(int argc, char** argv) {
                        "async=%s osd_screens=%llu osd_dgrams=%llu osd_commit_errors=%llu%s\n",
                        fps, static_cast<double>(flips - flips_at_last_fps_log) / dt,
                        static_cast<unsigned long long>(presenter->busy_replaced()),
-                       static_cast<unsigned long long>(frame_count),
+                       static_cast<unsigned long long>(frames_now),
                        static_cast<unsigned long long>(presenter->commit_errors()),
                        !presenter->async_probed() ? "probing"
                        : presenter->async_flip_active() ? "on" : "off",
@@ -2277,16 +2281,16 @@ int main(int argc, char** argv) {
           // Stall diagnostic: a zero-fps second mid-session means the
           // delivery chain froze somewhere -- dump where the reader sits
           // relative to the ring so the stuck stage is identifiable.
-          if (fps < 0.5 && frame_count > 0)
+          if (fps < 0.5 && frames_now > 0)
             feed.request_debug_line();  // printed by the feed thread, which owns the ring
         } else
 #endif
         {
           std::fprintf(stderr, "fps-log: fps=%.1f frames=%llu\n", fps,
-                       static_cast<unsigned long long>(frame_count));
+                       static_cast<unsigned long long>(frames_now));
         }
         t_last_fps_log = now;
-        frames_at_last_fps_log = frame_count;
+        frames_at_last_fps_log = frames_now;
       }
     }
     if (feed.dead()) {
@@ -2306,9 +2310,16 @@ int main(int argc, char** argv) {
     if (dr.kind == maburplay::DrainResult::kFinished) {
       const uint64_t t1 = mono_ms();
       for (;;) {
+#ifdef MABUR_PLAYER_HW
+        // The decode pump is still running: it collects the picture.
+        decoded = pump.have_frame() && pump.last_pts() == dr.pts;
+#else
         decoded = have_decoded_pts && last_decoded_pts == dr.pts;
+#endif
         if (decoded || mono_ms() - t1 >= 50) break;
+#ifndef MABUR_PLAYER_HW
         backend->poll();
+#endif
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
     }
@@ -2326,7 +2337,9 @@ int main(int argc, char** argv) {
     while (!feed.finished() && mono_ms() - t0 < 500) {  // the feed's own budget is 100 ms
       feed.wait_main(1);
       service_feed();   // a flush can still park it
+#ifndef MABUR_PLAYER_HW
       backend->poll();  // keep the output side moving (a BUFFER_FULL needs it)
+#endif
     }
   }
   feed.stop_and_join();
@@ -2345,8 +2358,17 @@ int main(int argc, char** argv) {
                static_cast<unsigned long long>(feed.notes_dropped()));
 
 #ifdef MABUR_PLAYER_HW
+  // The output side comes down before anything it touches does (the
+  // recorder, the presenter, the decoder all unwind after it): park both
+  // threads, which empties the presenter, the regulator and the hand-over
+  // queue into `releases`, give every frame back to the decoder, then stop
+  // them. stop_and_join() alone returns no frames.
+  park_output("shutdown");
+  pump.set_recorder_submit({});
+  release.stop_and_join();
+  pump.stop_and_join();
   // Final tally -- same line the 1 Hz stats block above already printed all
-  // session long (log_regulator_line(), declared near the presenter).
+  // session long (log_regulator_line(), declared next to the threads).
   log_regulator_line();
   {
     const auto L = lat.flush_line();

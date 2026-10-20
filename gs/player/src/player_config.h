@@ -88,15 +88,14 @@ struct DisplayCfg {
   // estimator is cold or stale.
   int regulate_ms = 12;
   // Servo release to next_vblank - vsync_lead_ms instead of the fixed
-  // hold. lead covers
-  // the present-path submission cost incl. the ~2 ms main-loop tick.
+  // hold. The lead covers the release thread's wake lateness and the
+  // present-path submission cost.
   bool vsync_lock = true;
-  // Default 5 (bench-measured, docs/findings/2026-10-17-vsync-lead-sweep.md):
-  // the lead covers the main loop's release lateness (p99.9 ~2.1 ms in
-  // flight), the present path (p99 0.8 ms with the framebuffer cache) and
-  // the kernel's ~1 ms latch deadline. 5 keeps the flight tail clear; 4
-  // costs about one missed latch a minute in flight; every ms is a ms of
-  // glass latency on every frame.
+  // Default 5 (docs/findings/2026-10-17-vsync-lead-sweep.md): the lead
+  // covers the release lateness (reg.log rlate=), the present path (p99
+  // 0.8 ms with the framebuffer cache) and the kernel's ~1 ms latch
+  // deadline. It is the one lead: recording runs under it too. Every ms
+  // is a ms of glass latency on every frame.
   int vsync_lead_ms = 5;
   // Frames a sequential-slot chain may run before the regulator cuts it
   // with one dropped frame (frame_regulator.h chain_cuts). 0 = unbounded,
@@ -127,6 +126,12 @@ struct DisplayCfg {
   // Smaller is lower latency but lets allowance changes push frames across
   // the edge into the next refresh.
   int phase_margin_ms = 4;
+  // SCHED_FIFO priority of the release thread (release_loop.h), the thread
+  // that hands each frame to the display at its release time; real-time
+  // so a busy CPU cannot make it wake late. 0 = ordinary scheduling. A
+  // refused request (no CAP_SYS_NICE) is logged and the thread runs at
+  // normal priority.
+  int rt_priority = 10;
 };
 
 // GS-side reverse of the drone's ColorTrans sensor tuning (docs/colortrans.md).

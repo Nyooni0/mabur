@@ -29,10 +29,9 @@ namespace maburplay {
 //
 // drop_all() exists for the flush-ordering contract: MppBackend::flush()/
 // mpi->reset() with DmaFrames still held by the presenter is an unverified
-// interaction, so the call site (main.cpp) MUST invoke presenter->drop_all()
-// -- returning every held frame to the backend -- BEFORE calling
-// backend->flush(). See main.cpp's flush_before handling for the exact
-// ordering.
+// interaction, so every held frame MUST be released BEFORE backend->flush().
+// The release thread calls drop_all() when it parks, and main.cpp parks it
+// (park_output) ahead of every flush, decoder re-creation and shutdown.
 //
 // Threads. present(), poll_events(), drop_all(), commit_osd_if_pending(),
 // set_paced() and the rest of the PresentSink surface are called from one
@@ -42,7 +41,10 @@ namespace maburplay {
 // osd_* calls come from the housekeeping thread; the OSD hand-off between
 // it and the release thread is atomic (see the OSD section). init(), the
 // splash, the colortrans installers and set_flip_sink() run before frames
-// flow; the remaining diagnostics getters belong to the release thread.
+// flow (or, on a hotplug reacquire, while the release thread is parked).
+// The diagnostics getters are read by housekeeping for its stats lines
+// while the release thread runs: their counters are atomics and
+// present_timing() takes the window under its own lock.
 //
 // Deliberately free of <xf86drm.h>/<xf86drmMode.h> here -- same rationale
 // as mpp_backend.h: this header only needs DmaFrame from video_backend.h.
@@ -98,8 +100,9 @@ class DrmPresenter : public PresentSink {
 
   // Drains any pending DRM page-flip completion event (nonblocking) and
   // retires the previously-on-screen frame's buffer once its successor is
-  // confirmed showing. Call once per main-loop iteration, alongside the
-  // ring pump. Ends with commit_osd_if_pending().
+  // confirmed showing. The release thread calls it on every wake, the
+  // event fd's included. It commits no OSD: commit_osd_if_pending() is the
+  // caller's separate decision.
   void poll_events() override;
 
   // The DRM device fd: readable when a page-flip event is waiting for
@@ -150,14 +153,17 @@ class DrmPresenter : public PresentSink {
   // the plane id are atomics, and a commit swaps the index BEFORE it clears
   // the flag, so a drawer that sees osd_publish_pending() false also sees
   // the new back index. Draw only while osd_publish_pending() is false: a
-  // published back buffer belongs to the release thread until its commit.
+  // published back buffer belongs to the release thread until its commit,
+  // and after a nonblocking video commit carried it, the buffer the swap
+  // made the back stays on screen until that commit's flip completes --
+  // osd_publish_pending() stays true until then.
   bool osd_available() const;
   Surface osd_back_surface();      // CPU-writable; pixels == nullptr if none
   int osd_back_index() const;      // 0/1 -- picks the caller's ShadowGrid
   void osd_publish();              // back buffer is ready; shown on next commit
   int osd_front_prime_fd() const;  // committed buffer's dmabuf fd (Phase 2)
-  // A published back buffer has not been committed yet (release thread or
-  // housekeeping).
+  // A published back buffer has not been committed yet, or the commit that
+  // carried it has not flipped (release thread or housekeeping).
   bool osd_publish_pending() const override;
   // The standalone OSD commit: the published back buffer shown on its own,
   // when no video commit is coming to carry it. Runs only when the OSD is
@@ -189,9 +195,9 @@ class DrmPresenter : public PresentSink {
   // that missed its latch -- resubmitting it at flip completion can only
   // latch a period late and self-sustains a one-vsync-late chain (hw), so
   // in paced mode it is dropped instead; the regulator's
-  // next on-grid release realigns immediately. The main loop refreshes
-  // this each tick from the regulator's servo state; unpaced (false)
-  // keeps the original park-and-resubmit behavior.
+  // next on-grid release realigns immediately. The release thread
+  // refreshes this on every wake from the regulator's servo state; unpaced
+  // (false) keeps the original park-and-resubmit behavior.
   void set_paced(bool paced) override;
   uint64_t mailbox_dropped_paced() const;
 

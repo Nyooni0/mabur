@@ -103,8 +103,14 @@ goes in before its config -- an older binary exits on the new
 `maburplay.toml` `[display]`: `phase_lock` (code false, bundle true),
 `phase_margin_ms` (code and bundle 4, range 1-10), `sched_cap_ms` (bundle
 16; with the lock on, capture placement runs only while locked).
-`vsync_lead_ms` (bundle 5) is the release's lead before the vblank, the
-only one -- recording runs under the same lead as live view.
+`vsync_lead_ms` (code and bundle 5) is the release's lead before the
+vblank, the only one -- recording runs under the same lead as live view.
+It covers the release thread's wake lateness (`reg.log` `rlate=`), the
+present() path and the kernel's latch deadline. `rt_priority` (code and
+bundle 10, range 0-50) is the release thread's `SCHED_FIFO` priority; 0
+runs it at ordinary priority. A refused request (the process lacks
+`CAP_SYS_NICE`) is logged once and the thread runs at ordinary priority
+(`rt=0`).
 `phase_lock` needs `vsync_lock = true`, `sched_cap_ms > 0` and
 `regulate_ms > 0`, or the player refuses to start.
 
@@ -118,10 +124,56 @@ the camera there (~3 lines, centre near −50 mfps). It logs
 
 The drone has no phase-lock config.
 
+## Threads
+
+maburplay runs four loops, so the release deadline never waits on
+anything slower than itself:
+
+- **Feed thread** (`FeedLoop`, `feed_loop.h`): blocks on the AU doorbell,
+  reads the ring, and makes every decoder *input* call (`AuRouter`,
+  `StreamFeeder`). It posts submit notes and delivery notes.
+- **Decode-output thread** (`DecodePump`, `decode_pump.h`): drives
+  `backend->poll()` (MPP blocks in it up to 4 ms waiting for a picture)
+  and returns released frames to the decoder -- the decoder's whole
+  output side. Per decoded frame, in order: the frame's submit notes
+  (`lat` submit stamps, incomplete-AU flags for the lateness window),
+  `lat.on_decoded`, the source-rate sample, the burned recorder's
+  `submit()`, the hand-over to the release thread, and then the
+  framebuffer prime, so the release thread's present() finds the
+  frame's framebuffer cached.
+- **Release thread** (`ReleaseLoop`, `release_loop.h`, `SCHED_FIFO` at
+  `rt_priority`): owns the `FrameRegulator`'s decisions and every call
+  into the display. It sleeps on an absolute timer armed to the next
+  release (or a 10 ms idle tick), the hand-over queue and the display's
+  flip events. Each wake: reap flips, release due frames, offer
+  newly handed-over frames (a late one is presented at once), set the
+  presenter's paced mode, run the chain-break heal, and commit a pending
+  OSD on its own when no frame is held. It never calls the decoder:
+  displaced frames and frames the display is done with go back through a
+  release queue the decode-output thread drains. Each offer's phase
+  margin is queued for housekeeping.
+- **Housekeeping** (the main loop, 2 ms): delivery notes (raw DVR, OSD
+  figures), the record button, the phase lock itself (it takes the
+  release thread's margins while the source and panel rates match, ticks
+  and sends the offset), the rate match, OSD composition, the 1 Hz
+  stats, `lat.log`/`frame.log`/`reg.log`, the decode watchdog and the
+  display hotplug retry. It composes the OSD only while no publish is
+  pending, so it never draws into a buffer that is on screen or about to
+  be. A flush, a watchdog reset or re-creation, a hotplug reacquire and
+  shutdown park the decode-output thread and then the release thread
+  (which drops everything the display and the regulator hold), return
+  every frame to the decoder, and resume them after; a thread that does
+  not park within 2 s exits the player for respawn.
+
+`--decode-only` (the hardware decode gate) and the host build have no
+decode-output or release thread: one loop polls the decoder and releases
+each frame on the spot.
+
 ## Observability
 
-- `reg.log` (`# reglog 2`) regulator line: `lock=<off|wait|acq|lock|oor>
-  lerr=<ms>ms loff=<mfps> lctr=<mfps>`.
+- `reg.log` (`# reglog 3`) regulator line: `lock=<off|wait|acq|lock|oor>
+  lerr=<ms>ms loff=<mfps> lctr=<mfps>`, and the release thread's
+  `rlate= hand= rt=` (docs/observability.md "Regulator line").
 - maburplay stderr: `phase-lock: <state> err= off= centre=` on each state
   change.
 - Drone stats line: `snr_off=` (the offset on the sensor); `/tmp/mabur.log`

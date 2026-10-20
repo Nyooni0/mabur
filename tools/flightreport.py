@@ -905,10 +905,12 @@ def refresh_span_ms(rr, ctl=None, fec_rows=None):
 
 
 def load_reglog_lock(path):
-    """reg.log phase-lock fields per 1 Hz regulator line (`# reglog 2`):
-    `lock=<off|wait|acq|lock|oor> lerr=<ms>ms loff=<mfps> lctr=<mfps>`.
-    Rows without them (reglog 1, before the phase lock) are skipped, so an
-    empty list means the recording has no lock data."""
+    """reg.log phase-lock fields per 1 Hz regulator line (`# reglog 2` and
+    later): `lock=<off|wait|acq|lock|oor> lerr=<ms>ms loff=<mfps>
+    lctr=<mfps>`. Other key=value tokens (reglog 3's `rlate= hand= rt=`
+    among them) are ignored. Rows without the lock fields (reglog 1, before
+    the phase lock) are skipped, so an empty list means the recording has
+    no lock data."""
     rows = []
     with open(path) as f:
         for line in f:
@@ -922,6 +924,48 @@ def load_reglog_lock(path):
                          "lerr": float(kv["lerr"].rstrip("ms")),
                          "loff": int(kv["loff"]), "lctr": float(kv["lctr"])})
     return rows
+
+
+def load_reglog_release(path):
+    """reg.log release-thread fields per 1 Hz regulator line (`# reglog 3`):
+    `rlate=<p99>/<max> hand=<p99>/<max> rt=<0|1>`, µs over the line's own
+    window. Rows without them (reglog 1/2, before the release thread) are
+    skipped, so an empty list means the recording has none."""
+    rows = []
+    with open(path) as f:
+        for line in f:
+            tok = line.split()
+            if len(tok) < 3 or tok[1] != "regulator:":
+                continue
+            kv = dict(t.split("=", 1) for t in tok[2:] if "=" in t)
+            if "rlate" not in kv or "hand" not in kv:
+                continue
+            try:
+                rp99, rmax = (int(x) for x in kv["rlate"].split("/"))
+                hp99, hmax = (int(x) for x in kv["hand"].split("/"))
+            except ValueError:
+                continue
+            rows.append({"t_us": int(tok[0]), "rlate_p99": rp99, "rlate_max": rmax,
+                         "hand_p99": hp99, "hand_max": hmax, "rt": kv.get("rt") == "1"})
+    return rows
+
+
+def print_release_report(rows):
+    """RELEASE section from load_reglog_release rows: the release thread's
+    lateness behind each held frame's scheduled release (rlate) and the
+    decode-to-offer hand-over (hand), per-second p99s summarised over the
+    recording, plus the worst single frame. Silent without reglog 3 rows."""
+    if not rows:
+        return
+    n = len(rows)
+    rt = sum(1 for r in rows if r["rt"])
+    print("RELEASE (reg.log, release thread)")
+    print(f"  rows={n} rt={'SCHED_FIFO' if rt == n else f'{rt}/{n} rows SCHED_FIFO'}")
+    for key, label in (("rlate", "rlate"), ("hand", "hand")):
+        p99s = [r[key + "_p99"] for r in rows]
+        worst = max(r[key + "_max"] for r in rows)
+        print(f"  {label} p99 per s p50/p90/max={_pct(p99s, 0.5)}/{_pct(p99s, 0.9)}/"
+              f"{max(p99s)} us, worst frame={worst} us")
 
 
 def print_lock_report(rows):
@@ -2021,8 +2065,10 @@ if __name__ == "__main__":
             print_refresh_report(rr, ctl_E=ctl["E"] if ctl else None, fec_rows=fec_rows,
                                  span_ms=refresh_span_ms(rr, ctl=ctl, fec_rows=fec_rows))
         # reg.log is a sibling too: the PHASE LOCK section, silent when the
-        # recording predates the lock or ran with it off.
+        # recording predates the lock or ran with it off, and the RELEASE
+        # section, silent before reglog 3.
         if s.reg:
             print_lock_report(load_reglog_lock(s.reg))
+            print_release_report(load_reglog_release(s.reg))
     else:
         main(arg, sys.argv[2] if len(sys.argv) > 2 else None)

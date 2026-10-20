@@ -11,12 +11,13 @@ namespace maburplay {
 
 // The thread boundary of a decoder whose API may only be driven from one
 // thread (libav). The feed thread decodes and pushes finished frames to the
-// ready queue; the main thread pops them for display and, once the display
-// is done with one, pushes it to the release queue; the feed thread frees
-// released frames before its next decode, so every decoder call -- including
-// the frees, which return buffers to the decoder's pool -- stays on the feed
-// thread. drain_all() is for flush/teardown, which run on the main thread
-// only while the feed is parked.
+// ready queue; the decode-output thread pops them (poll()) and, once the
+// display is done with one, pushes it to the release queue; the feed thread
+// frees released frames before its next decode, so every decoder call --
+// including the frees, which return buffers to the decoder's pool -- stays
+// on the feed thread. drain_all() is for flush/teardown, which run on the
+// housekeeping thread only while the feed and the decode-output thread are
+// parked.
 template <typename T>
 class FrameHandoff {
  public:

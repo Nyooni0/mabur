@@ -165,7 +165,7 @@ struct MppBackend::Impl {
         return false;
       }
       if (input_cancel) {
-        // Split threads: the output side is the main loop's, which keeps
+        // Split threads: the output side is the decode pump's, which keeps
         // releasing frames; draining here would run the FrameSink on this
         // thread. Give way at once to a park or a stop.
         if (input_cancel->load(std::memory_order_relaxed)) {

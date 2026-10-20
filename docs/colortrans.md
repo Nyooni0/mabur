@@ -155,6 +155,14 @@ A recording must not cost the live picture a vsync. What makes that hold:
   `IN_FENCE_FD` on every video-plane commit, so the plane helper takes no
   implicit fence. Startup log:
   `DrmPresenter: video plane commits carry an explicit IN_FENCE_FD (...)`.
+- **Submit on the decode-output thread.** `BurnRecorder::submit()` runs
+  on maburplay's decode-output thread (`DecodePump`, docs/phase-lock.md
+  "Threads"), right after the frame is decoded and before it is handed to
+  the release thread: an fps-cap check, a buffer reference and a mailbox
+  post, never a copy. Record start and stop install and remove that hook
+  from the housekeeping loop (`DecodePump::set_recorder_submit`, removed
+  before `stop()`), so neither ever runs on the thread that releases
+  frames to the display.
 - **Pipelined ct thread.** The stage runs on its own thread (EGL is
   thread-bound) with three destination buffers and a latest-wins handoff to
   the encode thread (`burn_recorder.h`, THREADING).
@@ -165,8 +173,8 @@ A recording must not cost the live picture a vsync. What makes that hold:
   per source buffer (the decoder pool is 24 fixed buffers), so imports
   happen once per buffer per recording, not per frame.
 - **Palette memoised at boot** (`maburplay: burn palette built: N entries`),
-  so a record start does not histogram the MSP atlas on the main loop. A
-  record start/stop still costs a one-shot GPU bring-up/teardown.
+  so a record start does not histogram the MSP atlas on the housekeeping
+  loop. A record start/stop still costs a one-shot GPU bring-up/teardown.
 - **Schedule-based `dvr.burned.fps_cap`** (`gs/player/src/fps_cap.h`,
   `test_fps_cap`): a frame is admitted when its slot is due and slots
   advance one interval per admit, so a source at or under the cap passes
@@ -182,15 +190,17 @@ A recording must not cost the live picture a vsync. What makes that hold:
   so a fragment's kernel work (the page-cache copy and a FAT buffer head per
   512-byte sector) is spread over ~320 ms instead of landing in one ~22 ms
   burst. The burst was the live picture's cost: with the encoder, the GPU
-  stage, the decoder and the writer all busy at once, the main loop woke a
-  few ms late, or its commit ioctl or the decode ran long, and the frame
-  missed its vblank about once per 45-90 s of recording. Lowering the
+  stage, the decoder and the writer all busy at once, the loop that
+  released frames woke a few ms late, or its commit ioctl or the decode ran
+  long, and the frame missed its vblank about once per 45-90 s of
+  recording, measured with frames released from a normal-priority loop;
+  the release thread runs `SCHED_FIFO` (`display.rt_priority`). Lowering the
   writer's priority does not prevent that (a thread that just woke from a
   long sleep keeps the CPU against the loop's wake-up until the tick), so
   the writer runs 10 nice steps below the player only as a tie-breaker.
   The gaps stop while the queue holds 4 MB or more (the card is slower than
   the trickle: catch up) and during the sink's destructor (record stop
-  drains it on the main loop). Record of the search and the gate:
+  drains it on the housekeeping loop). Record of the search and the gate:
   `docs/findings/2026-10-19-burned-dvr-live-repeat.md`.
 
 `BurnRecorder: stopped` reports `ct_ms=mean/max enc_ms=mean/max`; the ct
@@ -204,10 +214,10 @@ Bench record of the three fixes and their numbers:
 
 ## Not done / follow-ups
 
-- A record start or stop blocks the main loop for 70-180 ms:
-  `BurnRecorder::start()` (encoder init, palette upload) and `stop()`
-  (thread joins, encoder teardown, mux close) run synchronously from
-  `rec_start`/`rec_stop`.
+- A record start or stop blocks the housekeeping loop (OSD, stats; not the
+  decode-output or release thread) for 70-180 ms: `BurnRecorder::start()`
+  (encoder init, palette upload) and `stop()` (thread joins, encoder
+  teardown, mux close) run synchronously from `rec_start`/`rec_stop`.
 - Live retune (config + restart is the loop).
 - EGL YUV colour-space / range hints on the dmabuf import (none are passed;
   a mismatch is a slight tint between the display and the DVR).

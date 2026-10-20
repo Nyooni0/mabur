@@ -558,6 +558,24 @@ TEST(display_phase_lock_keys) {
   CHECK(load_throws("[display]\nphase_lock = true\nsched_cap_ms = 16\nregulate_ms = 0\n"));
 }
 
+TEST(display_rt_priority_key) {
+  // display.rt_priority: the release thread's SCHED_FIFO priority, 10 in
+  // code and bundle, 0 = ordinary scheduling, at most 50.
+  const auto bare = maburplay::load_config(write_tmp_play(""));
+  CHECK(bare.display.rt_priority == 10);
+  const auto empty_display = maburplay::load_config(write_tmp_play("[display]\n"));
+  CHECK(empty_display.display.rt_priority == 10);
+  CHECK(maburplay::load_config(write_tmp_play("[display]\nrt_priority = 0\n"))
+            .display.rt_priority == 0);
+  CHECK(maburplay::load_config(write_tmp_play("[display]\nrt_priority = 50\n"))
+            .display.rt_priority == 50);
+  CHECK(load_throws("[display]\nrt_priority = -1\n"));
+  CHECK(load_throws("[display]\nrt_priority = 51\n"));
+  const auto b = maburplay::load_config(
+      std::string(MABUR_PLAY_BUNDLE_DIR) + "/maburplay.default.toml");
+  CHECK(b.display.rt_priority == 10);
+}
+
 TEST(screen_mode_must_parse) {
   const auto c = maburplay::load_config(write_tmp_play("screen_mode = \"1920x1080@59.94\"\n"));
   CHECK(c.screen_mode == "1920x1080@59.94");

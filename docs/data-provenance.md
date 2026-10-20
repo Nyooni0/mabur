@@ -6,7 +6,8 @@ not be pooled. Nothing in the sideport reports most of them, so the only
 reliable method is to date the recording against this page.
 
 Every format marker (`ctllog N`, `scanlog N`, `aulog N`, `probelog N`,
-`feclog N`, `latlog N`, `callog N`) and every removed sideport key is
+`feclog N`, `latlog N`, `framelog N`, `reglog N`, `callog N`) and every
+removed sideport key is
 recorded here with its date, so a recording on the DVR can be read with
 the meaning it was written under.
 
@@ -105,6 +106,14 @@ Chronological; each line names the section below that carries the detail.
   their place, for the few minutes before the framebuffer cache).
 - 2026-10-17 — demand refresh: `# aulog 7` (+vcl column), `feclog 4`
   (I/H rows), sideport `link.refresh` (docs/fec-nack.md "Demand refresh").
+- 2026-10-21 — maburplay's release thread (docs/phase-lock.md "Threads"):
+  `# reglog 3` appends `rlate= hand= rt=` (reglog 2 rows, with the
+  phase-lock fields, end at `ioctl=`); `t_release`, `present=` and
+  `present_jitter=` are the release thread's from here, the main loop's
+  before. `display.rec_vsync_lead_ms` is removed: a burned-DVR recording
+  from before ran the regulator's lead at 8 ms while recording (+3 ms on
+  `dsp` and `e2e` against live view), one from after runs the one
+  `vsync_lead_ms` throughout.
 
 ## 2026-09-23 — `link.pre_fec_loss` scale break, twice
 

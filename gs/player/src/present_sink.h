@@ -10,7 +10,9 @@ namespace maburplay {
 // The display as the release thread sees it: what it presents frames to,
 // polls flip completions from, and commits a pending OSD through.
 // DrmPresenter implements it; host tests fake it. Every call comes from
-// the one thread that owns presentation.
+// the release thread, the one thread that owns presentation, except
+// osd_publish_pending(): the housekeeping thread also reads it before it
+// draws the OSD, so an implementation keeps it safe to read concurrently.
 class PresentSink {
  public:
   virtual ~PresentSink() = default;

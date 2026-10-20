@@ -12,6 +12,7 @@
 #include "mode_pick.h"  // ModeCand, pick_mode, parse_screen_want, mode_hz
 #include "osd_layout.h"  // plan_zpos: the plane stacking policy, unit-tested
 #include "osd_surface.h"
+#include "pi_mutex.h"
 #include "vblank_estimator.h"  // mode_period_us: pure timing math, unit-tested
 
 #include <fcntl.h>
@@ -381,6 +382,12 @@ struct DrmPresenter::Impl {
   // it swaps osd_back first and clears this second: the drawer waits for
   // false, and then sees the swapped index.
   std::atomic<bool> osd_dirty{false};
+  // A nonblocking video commit carried the published buffer and its flip
+  // has not completed: the new back index names the buffer still on screen
+  // until then. Set before osd_dirty is cleared, cleared at the flip (or
+  // when the flip is given up on), so osd_publish_pending() -- the
+  // drawer's gate, either flag -- never reads false in between.
+  std::atomic<bool> osd_flip_inflight{false};
   bool osd_on_plane = false;  // an OSD fb has been attached at least once
   bool osd_commit_warned = false;
   int osd_fail_streak = 0;             // consecutive OSD-attributed commit failures
@@ -408,24 +415,29 @@ struct DrmPresenter::Impl {
   // on the following commit).
   int events_to_swallow = 0;
 
-  bool async_probed = false;
-  bool async_active = false;
+  // The counters and flags the diagnostics getters read are atomics: the
+  // release thread writes them, housekeeping reads them for its stats lines.
+  std::atomic<bool> async_probed{false};
+  std::atomic<bool> async_active{false};
 
-  uint64_t commit_errors = 0;
-  uint64_t frames_dropped_busy = 0;
-  uint64_t flips_total = 0;
+  std::atomic<uint64_t> commit_errors{0};
+  std::atomic<uint64_t> frames_dropped_busy{0};
+  std::atomic<uint64_t> flips_total{0};
   // Mailbox engagements (vsync-lock observability): every present()
   // call that arrives while a flip is outstanding and has to park in
   // `mailbox` -- whether the slot was empty (frame waits) or already held
   // an unshown frame (this one displaces it). Superset of
   // frames_dropped_busy, which counts only the displacement case.
-  uint64_t mailbox_engagements = 0;
+  std::atomic<uint64_t> mailbox_engagements{0};
   // Paced mode (vsync servo): parked mailbox frames are DROPPED at flip
   // completion instead of resubmitted -- see the on_flip mailbox block.
   bool paced = false;
-  uint64_t mailbox_dropped_paced = 0;
+  std::atomic<uint64_t> mailbox_dropped_paced{0};
   DrmPresenter::CommitInfo last_commit;  // what the last present() did
   // Per-stage present() durations since the last present_timing() call.
+  // stage_mu: present() appends on the release thread, present_timing()
+  // takes the window on housekeeping.
+  PiMutex stage_mu;
   static constexpr int kTimingWindow = 256;
   uint32_t stage_us[3][kTimingWindow] = {};
   int stage_n = 0;
@@ -529,6 +541,8 @@ void DrmPresenter::Impl::on_flip(bool real_event) {
     return;
   }
   flip_pending = false;
+  // The OSD buffer this flip replaced is off screen now: free to draw.
+  osd_flip_inflight = false;
   if (pending.valid) {
     if (real_event) ++flips_total;  // force-completes never actually flipped
     if (on_screen.valid) release_slot(on_screen);
@@ -641,6 +655,7 @@ void DrmPresenter::Impl::osd_give_up() {
   __sync_synchronize();
   osd_plane_id = 0;  // every osd_* entry point becomes a no-op from here
   osd_dirty = false;
+  osd_flip_inflight = false;
   // osd_on_primary is now purely descriptive: osd_ready (present()'s gate)
   // is `osd_plane_id != 0 && osd.ok()`, so zeroing osd_plane_id above
   // already makes every attach path a no-op regardless of this flag's
@@ -667,7 +682,7 @@ void DrmPresenter::Impl::osd_give_up() {
 // stays outstanding on the CRTC and would -EBUSY the next video commit; at a
 // degraded ~5 fps every frame is more than the 100 ms of "video silence" the
 // caller requires, so that path could fire between EVERY pair of frames, not
-// just once at link recovery. Blocking costs at most one vsync of main-loop
+// just once at link recovery. Blocking costs at most one vsync of release-thread
 // stall and only after video has already been silent -- it eliminates the
 // race instead of narrowing it. Also never PAGE_FLIP_EVENT (the video path
 // would mistake the event for its own flip) and never PAGE_FLIP_ASYNC.
@@ -1376,7 +1391,7 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
   }
 
   if (flip_pending) {
-    // The event may have already landed without the main loop reaping it
+    // The event may have already landed without the release thread reaping it
     // yet -- drain opportunistically before deciding to drop.
     poll_events();
   }
@@ -1653,11 +1668,14 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
   if (req) drmModeAtomicFree(req);
 
   const uint64_t ts3 = mono_us();
-  if (stage_n < kTimingWindow) {
-    stage_us[0][stage_n] = static_cast<uint32_t>(ts1 - ts0);
-    stage_us[1][stage_n] = static_cast<uint32_t>(ts2 - ts1);
-    stage_us[2][stage_n] = static_cast<uint32_t>(ts3 - ts2);
-    ++stage_n;
+  {
+    std::lock_guard<PiMutex> lk(stage_mu);
+    if (stage_n < kTimingWindow) {
+      stage_us[0][stage_n] = static_cast<uint32_t>(ts1 - ts0);
+      stage_us[1][stage_n] = static_cast<uint32_t>(ts2 - ts1);
+      stage_us[2][stage_n] = static_cast<uint32_t>(ts3 - ts2);
+      ++stage_n;
+    }
   }
   last_commit.t_commit_us = rc == 0 ? ts3 : 0;
   last_commit.bits = static_cast<uint8_t>(
@@ -1704,8 +1722,13 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
   last_video_commit_ms = mono_ms();
   if (attach_osd) {
     if (osd_pub) {
+      // A nonblocking commit's flip is still to come, and until it lands
+      // the buffer the swap below makes the back is the one on screen:
+      // keep the drawer out until on_flip(). A modeset commit has already
+      // completed when the ioctl returns.
+      if (!do_modeset) osd_flip_inflight = true;
       osd_back ^= 1;      // what we just committed becomes the front buffer,
-      osd_dirty = false;  // and only then is the back free to draw into
+      osd_dirty = false;  // and only then is the published buffer handed back
     }
     osd_on_plane = true;
     osd_fail_streak = 0;
@@ -1790,16 +1813,15 @@ void DrmPresenter::Impl::poll_events() {
     evctx.page_flip_handler2 = &Impl::on_flip_static;
     drmHandleEvent(fd, &evctx);
   }
-  commit_osd_if_pending();
 }
 
 void DrmPresenter::Impl::commit_osd_if_pending() {
   if (fd < 0) return;
   // No video commit to ride on: show the OSD on its own. Gated on no flip in
-  // flight AND on video having been quiet for 100 ms -- present() calls
-  // poll_events() while a flip is outstanding, so without the quiet window a
-  // standalone commit could be issued from inside present() itself, right in
-  // front of the video commit it would then block.
+  // flight AND on video having been quiet for 100 ms: this commit blocks up
+  // to a vsync, and while video flows the next video commit carries the
+  // OSD anyway. The release thread is the only caller, and only while it
+  // holds no frame.
   //
   // `crtc_active`, NOT `!needs_modeset`: drop_all() re-arms needs_modeset on
   // every ordinary AU-ring discontinuity (main.cpp's flush_before) and from
@@ -1846,6 +1868,9 @@ void DrmPresenter::Impl::drop_all() {
   fbs.flush();
   if (flip_pending) ++events_to_swallow;  // the kernel still owes this event
   flip_pending = false;
+  // That flip is given up on with the rest: the drawer may have the OSD
+  // back buffer again (a flush tears the picture down anyway).
+  osd_flip_inflight = false;
   needs_modeset = true;  // plane content is gone; next present() must redo the full commit
 }
 
@@ -1918,14 +1943,20 @@ DrmPresenter::CommitInfo DrmPresenter::last_commit() const { return impl_->last_
 DrmPresenter::PresentTiming DrmPresenter::present_timing() {
   PresentTiming t;
   Impl& im = *impl_;
-  t.n = static_cast<uint32_t>(im.stage_n);
-  for (int k = 0; k < 3 && im.stage_n > 0; ++k) {
-    std::vector<uint32_t> v(im.stage_us[k], im.stage_us[k] + im.stage_n);
-    std::nth_element(v.begin(), v.begin() + static_cast<long>(v.size() / 2), v.end());
-    t.p50[k] = v[v.size() / 2];
-    t.max[k] = *std::max_element(v.begin(), v.end());
+  std::vector<uint32_t> v[3];
+  {
+    // Copy the window out under the lock and rank outside it: the release
+    // thread appends to it on every present().
+    std::lock_guard<PiMutex> lk(im.stage_mu);
+    for (int k = 0; k < 3; ++k) v[k].assign(im.stage_us[k], im.stage_us[k] + im.stage_n);
+    im.stage_n = 0;
   }
-  im.stage_n = 0;
+  t.n = static_cast<uint32_t>(v[0].size());
+  for (int k = 0; k < 3 && !v[k].empty(); ++k) {
+    std::nth_element(v[k].begin(), v[k].begin() + static_cast<long>(v[k].size() / 2), v[k].end());
+    t.p50[k] = v[k][v[k].size() / 2];
+    t.max[k] = *std::max_element(v[k].begin(), v[k].end());
+  }
   return t;
 }
 
@@ -1961,7 +1992,11 @@ void DrmPresenter::osd_publish() {
   if (osd_available()) impl_->osd_dirty = true;
 }
 
-bool DrmPresenter::osd_publish_pending() const { return impl_->osd_dirty; }
+bool DrmPresenter::osd_publish_pending() const {
+  // osd_dirty first: a commit sets the in-flight flag before it clears
+  // osd_dirty, so a reader that sees osd_dirty false sees the flag.
+  return impl_->osd_dirty.load() || impl_->osd_flip_inflight.load();
+}
 
 void DrmPresenter::commit_osd_if_pending() { impl_->commit_osd_if_pending(); }
 
