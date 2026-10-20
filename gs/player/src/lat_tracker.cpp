@@ -212,10 +212,16 @@ LatTracker::Line LatTracker::flush_line() {
   Line L{};
   double chk_sum_us = 0.0;
   int chk_n = 0;
+  // The window leaves by swap with an empty vector already sized like the
+  // one going out, allocated here outside the lock: on_flip() appends on
+  // the release thread, and must never be the one to grow it from empty.
+  std::vector<FrameRow> fresh;
+  fresh.reserve(std::max(rows_cap_.load(std::memory_order_relaxed), kMinRowsCap));
   {
     std::lock_guard<PiMutex> lk(mu_);
-    L.rows = std::move(completed_);
-    completed_.clear();
+    L.rows.swap(completed_);
+    completed_.swap(fresh);
+    rows_cap_.store(L.rows.capacity(), std::memory_order_relaxed);
     L.anchor_ok = anchor_.usable();
     L.dsp_exact = dsp_exact_window_;
     chk_sum_us = chk_sum_us_;
