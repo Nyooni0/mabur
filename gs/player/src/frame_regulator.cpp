@@ -338,29 +338,20 @@ bool FrameRegulator::offer(const DmaFrame& f, uint64_t arrival_us,
 
 void FrameRegulator::heal_slip() {
   std::lock_guard<PiMutex> lock(mu_);
-  bool any = false;
+  // Every entry from the first servo entry onward slips, fallback entries
+  // included: the queue is sorted by release, which is pts order, and
+  // moving only the servo entries would let an older servo frame overtake
+  // a newer fallback frame held close behind it. The fallback entries
+  // ahead of the first servo entry are older and release earlier anyway.
+  int first = 0;
+  while (first < count_ && held_[first].target_v == 0) ++first;
+  if (first == count_) return;  // empty, or only fallback frames
   const uint64_t per = static_cast<uint64_t>(est_.period_us());
-  for (int i = 0; i < count_; ++i) {
-    if (held_[i].target_v == 0) continue;  // fallback frames keep their rule
-    held_[i].target_v += per;
+  for (int i = first; i < count_; ++i) {
+    if (held_[i].target_v != 0) held_[i].target_v += per;
     held_[i].release_us += per;
-    any = true;
   }
-  // Only servo entries moved, so a mixed servo/fallback queue can come
-  // out inverted -- restore the sorted-by-release invariant that
-  // release_due() and next_release_us() depend on (found in review: an
-  // inverted head released the fallback frame ~7 ms late, out of pts
-  // order, and made next_release_us() misreport to the pump/idle logic).
-  for (int i = 1; i < count_; ++i) {
-    Held h = held_[i];
-    int j = i;
-    while (j > 0 && held_[j - 1].release_us > h.release_us) {
-      held_[j] = held_[j - 1];
-      --j;
-    }
-    held_[j] = h;
-  }
-  if (any) ++heals_;
+  ++heals_;
 }
 
 // Capture-time placement: the frame's slot follows the drone's capture

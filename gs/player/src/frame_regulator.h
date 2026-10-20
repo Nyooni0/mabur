@@ -182,8 +182,10 @@ class FrameRegulator {
   // release thread detects the chain from the presenter's engagement-counter
   // rate and calls this: every pending servo release slips one slot, so
   // one vblank goes unfilled (a single repeated frame), the flip
-  // pipeline drains, and the phase re-aligns. No-op when the queue is
-  // empty or holds only fallback (untargeted) frames.
+  // pipeline drains, and the phase re-aligns. Fallback frames held behind
+  // the first servo frame slip with it, so release order stays pts order.
+  // No-op when the queue is empty or holds only fallback (untargeted)
+  // frames.
   void heal_slip();
   uint64_t heals() const;
 

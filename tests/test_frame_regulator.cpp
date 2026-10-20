@@ -728,16 +728,12 @@ TEST(order_invariant_displaces_an_older_fallback_hold_behind_a_newer_servo_frame
 }
 
 TEST(heal_slip_still_finds_the_true_head_in_a_mixed_queue) {
-  // heal_slip() moves only servo entries, so a mixed queue [servo,
-  // fallback] can come out of sorted-by-release order after a slip;
-  // the re-sort at the end of heal_slip() must still leave held_[0]
-  // the true earliest release, so release_due()/next_release_us()
-  // never lose or duplicate anything. This is the reachable shape:
-  // an OLDER servo frame held first, then a NEWER fallback frame held
-  // with a release close behind it (close enough that one period of
-  // slip overtakes it) -- the order invariant above does not reject
-  // this pairing at offer time, because the fallback release is still
-  // later than the servo one when both are held.
+  // heal_slip() slips every entry from the first servo entry onward,
+  // fallback entries included, so a mixed queue keeps its release order
+  // -- which is pts order. The reachable shape: an OLDER servo frame held
+  // first, then a NEWER fallback frame held with a release close behind
+  // it (within one period). Slipping only the servo entry would move the
+  // older frame past the newer one and release them backwards.
   //
   // Getting there needs now_us far enough from the vblank grid's phase
   // to make the implausible-phase clamp drop this frame to the
@@ -745,8 +741,8 @@ TEST(heal_slip_still_finds_the_true_head_in_a_mixed_queue) {
   // servo_safety_clamp_uses_fallback_rule), NOT estimator staleness:
   // staleness needs now_us hundreds of ms past the last flip, and the
   // fallback release (arrival_us + D) would then dwarf the servo
-  // frame's by the same margin, putting it far outside the one-period
-  // window a single heal_slip() shift can ever close.
+  // frame's by the same margin, far outside the one-period window a
+  // slip can close.
   FrameRegulator reg(12, true, 3);
   warm(reg);
   const uint64_t phase = kT0 + 7 * kVb;
@@ -766,23 +762,15 @@ TEST(heal_slip_still_finds_the_true_head_in_a_mixed_queue) {
   CHECK(reg.fallback_frames() == 1);
   const uint64_t release2 = arrival1 + kD;  // f1 (fallback, newer pts) -- still later than f0
   CHECK(release2 > release1 && release2 - release1 < kVb);  // within one period
-  CHECK(reg.next_release_us() == release1);  // f0 still heads: not backwards yet
+  CHECK(reg.next_release_us() == release1);
 
   reg.heal_slip();
   CHECK(reg.heals() == 1);
-  // f0 (servo) slips one period, past f1 (fallback, unmoved). What is
-  // pinned here is head-correctness and accounting only: the head is the
-  // smallest held release, and both frames come out exactly once. The
-  // order they come out in is not pinned -- f1 (newer pts) heading f0
-  // after the slip is a known heal_slip() gap, and a fix for it must not
-  // have to rewrite this test.
-  const uint64_t head = std::min(release1 + kVb, release2);
-  CHECK(reg.next_release_us() == head);
+  // Both slip one period: f0 still heads, f1 still follows.
+  CHECK(reg.next_release_us() == release1 + kVb);
   std::vector<void*> drained;
-  while (reg.release_due(release1 + 2 * kVb, &out)) drained.push_back(out.opaque);
-  CHECK(drained.size() == 2);
-  CHECK(std::count(drained.begin(), drained.end(), frame(0).opaque) == 1);
-  CHECK(std::count(drained.begin(), drained.end(), frame(kFrame).opaque) == 1);
+  while (reg.release_due(release2 + 2 * kVb, &out)) drained.push_back(out.opaque);
+  CHECK(drained == (std::vector<void*>{frame(0).opaque, frame(kFrame).opaque}));
   CHECK(!reg.holding());
 }
 
