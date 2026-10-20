@@ -255,6 +255,10 @@ LatTracker::Line LatTracker::flush_line() {
   Breakdown p99, p50;
   rank_frame(99, p99);
   rank_frame(50, p50);
+  // A flush_all() between the two locks needs no guard: it never touches the
+  // breakdowns (they stay stale across a reset on purpose), so storing this
+  // window's ranks now leaves the same state as this flush_line() finishing
+  // before that flush_all() began.
   std::lock_guard<std::mutex> lk(mu_);
   p99_frame_ = p99;
   p50_frame_ = p50;

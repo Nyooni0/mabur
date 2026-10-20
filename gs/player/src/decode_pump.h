@@ -37,7 +37,10 @@ namespace maburplay {
 //
 // Loop: checkpoint (park) -> releases into the backend -> poll(). A backend
 // that implements PollWait blocks in poll() up to kPollTimeoutMs; any other
-// gets a 1 ms wait after a round that produced no frame.
+// gets a 1 ms wait after a round that produced no frame. With a blocking
+// poll, releases queued while the decoder emits a back-to-back burst wait
+// until poll() returns: one poll timeout after the burst's last frame, and a
+// burst cannot outlast the decoder's buffer pool, which those releases refill.
 //
 // Threads: set_feed/set_prime before start(); set_backend before start() or
 // while parked; set_recorder_submit and the reads below from anywhere.
@@ -57,10 +60,14 @@ class DecodePump {
   // Hand to backend->init(). It runs on whichever thread calls poll(): the
   // pump's own once started.
   VideoBackend::FrameSink sink();
-  // Before start() or while parked. Releases still queued for a different
-  // backend are discarded, never delivered to the new one: a frame of an old
-  // decoder means nothing to a new one, and its buffer goes with the old
-  // decoder. Sets the PollWait timeout when the backend has one.
+  // Before start() or while parked, and after backend->init() (MppBackend
+  // takes the PollWait timeout only once initialised). Every release still
+  // queued is discarded, never delivered: park() has already returned the
+  // ones queued before it, so what is left was queued since, and a frame of
+  // the decoder being replaced means nothing to the next one -- even at the
+  // same address, which a destroyed-then-recreated backend easily gets. Its
+  // buffer goes with the old decoder. Sets the PollWait timeout when the
+  // backend has one, and says so on stderr when the backend refuses it.
   void set_backend(VideoBackend* b);
   // Before start(): runs after the hand-over.
   void set_prime(std::function<void(const DmaFrame&)> fn);

@@ -3,6 +3,7 @@
 #include <pthread.h>
 
 #include <csignal>
+#include <cstdio>
 #include <ctime>
 #include <utility>
 
@@ -33,13 +34,17 @@ VideoBackend::FrameSink DecodePump::sink() {
 }
 
 void DecodePump::set_backend(VideoBackend* b) {
-  if (b != backend_) {
-    std::vector<DmaFrame> stale;
-    discarded_.fetch_add(releases_.drain(&stale));
-  }
+  // Unconditionally, even for the same pointer: a backend re-created after
+  // the old one was destroyed often lands at the old address.
+  std::vector<DmaFrame> stale;
+  discarded_.fetch_add(releases_.drain(&stale));
   backend_ = b;
   auto* pw = dynamic_cast<PollWait*>(b);
   blocking_poll_ = pw && pw->set_poll_timeout_ms(kPollTimeoutMs);
+  if (pw && !blocking_poll_)
+    std::fprintf(stderr,
+                 "maburplay: decode pump: backend refused a blocking poll timeout, "
+                 "polling every 1 ms\n");
 }
 
 void DecodePump::set_prime(std::function<void(const DmaFrame&)> fn) { prime_ = std::move(fn); }

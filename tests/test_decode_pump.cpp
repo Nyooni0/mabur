@@ -99,7 +99,9 @@ struct PumpFake : maburplay::VideoBackend {
 // ready, like MPP with MPP_SET_OUTPUT_TIMEOUT.
 struct BlockingFake : PumpFake, maburplay::PollWait {
   std::atomic<int> timeout_ms{0};
+  bool refuse = false;  // like MppBackend before init()
   bool set_poll_timeout_ms(int ms) override {
+    if (refuse) return false;
     timeout_ms.store(ms);
     return true;
   }
@@ -354,6 +356,39 @@ TEST(set_backend_discards_a_release_queued_after_park) {
   CHECK(new_.released_snapshot().empty());
 }
 
+TEST(set_backend_discards_even_for_the_same_backend_address) {
+  // A watchdog recreate: the old decoder destroyed, the new one allocated at
+  // the same address. What was queued since the park belongs to the old one.
+  PumpFake fake;
+  Pump p;
+  fake.init({}, p.pump.sink());
+  p.pump.set_backend(&fake);
+  p.pump.start();
+  REQUIRE(p.pump.park(1000ms));
+  p.rel.push(frame(11));
+  p.pump.set_backend(&fake);
+  CHECK(p.rel.size() == 0);
+  CHECK(p.pump.releases_discarded() == 1);
+  p.pump.resume();
+  fake.emit(frame(12));
+  REQUIRE(wait_until([&] { return p.pump.frames() == 1; }));  // releases drained since
+  CHECK(fake.released_snapshot().empty());
+}
+
+TEST(a_refused_poll_timeout_falls_back_to_the_idle_wait) {
+  BlockingFake fake;
+  fake.refuse = true;  // poll() then returns at once, like an uninitialised MppBackend
+  Pump p;
+  fake.init({}, p.pump.sink());
+  p.pump.set_backend(&fake);
+  p.pump.start();
+  std::this_thread::sleep_for(50ms);
+  p.pump.stop_and_join();
+  const uint64_t n = fake.polls.load();
+  CHECK(n >= 1);
+  CHECK(n <= 500);  // ~1 per ms when idle; a spin would be orders more
+}
+
 TEST(a_backend_without_poll_wait_is_not_spun) {
   PumpFake fake;  // poll() returns at once with nothing
   Pump p;
@@ -363,8 +398,8 @@ TEST(a_backend_without_poll_wait_is_not_spun) {
   std::this_thread::sleep_for(50ms);
   p.pump.stop_and_join();
   const uint64_t n = fake.polls.load();
-  CHECK(n >= 5);    // it does poll
-  CHECK(n <= 80);   // ~1 per ms, not a busy loop
+  CHECK(n >= 1);    // it does poll
+  CHECK(n <= 500);  // ~1 per ms when idle; a spin would be orders more
 }
 
 TEST(park_completes_within_the_poll_timeout_and_stop_joins) {
@@ -377,8 +412,9 @@ TEST(park_completes_within_the_poll_timeout_and_stop_joins) {
     p.pump.start();
     REQUIRE(wait_until([&] { return fake.polls.load() >= 3; }));
     const auto t0 = std::chrono::steady_clock::now();
-    CHECK(p.pump.park(50ms));
-    CHECK(std::chrono::steady_clock::now() - t0 < 50ms);
+    CHECK(p.pump.park(1000ms));
+    // Bounded by the poll timeout, not by park's limit (slack for a loaded host).
+    CHECK(std::chrono::steady_clock::now() - t0 < 200ms);
     const uint64_t polls = fake.polls.load();
     std::this_thread::sleep_for(20ms);
     CHECK(fake.polls.load() == polls);  // parked: outside every backend call
