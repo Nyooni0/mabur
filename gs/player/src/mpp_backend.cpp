@@ -299,6 +299,19 @@ void MppBackend::poll() {
   impl_->drain_frames();
 }
 
+bool MppBackend::set_poll_timeout_ms(int ms) {
+  if (!impl_ || !impl_->ctx) return false;
+  // drain_frames() already ends its round on MPP_ERR_TIMEOUT, which is what
+  // a timed wait that saw no frame returns.
+  RK_S64 t = ms;
+  const MPP_RET ret = impl_->mpi->control(impl_->ctx, MPP_SET_OUTPUT_TIMEOUT, &t);
+  if (ret != MPP_OK) {
+    std::fprintf(stderr, "MppBackend: MPP_SET_OUTPUT_TIMEOUT %d ms failed ret=%d\n", ms, ret);
+    return false;
+  }
+  return true;
+}
+
 void MppBackend::set_input_cancel(const std::atomic<bool>* cancel) {
   input_cancel_ = cancel;
   if (impl_) impl_->input_cancel = cancel;

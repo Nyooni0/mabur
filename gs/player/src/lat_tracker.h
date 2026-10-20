@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <vector>
 
 #include "au_ring.h"     // maburgs::AuRecordMeta
@@ -29,6 +30,11 @@ namespace maburplay {
 // The inflight map is a small bounded array (kMaxInflight slots,
 // drop-oldest by insertion order) so a wedged decoder or a presenter that
 // stops flipping cannot grow it -- a stuck pipeline just ages entries out.
+//
+// Thread-safe: every public method takes mu_ (on_submit/on_decoded run on
+// the decode-output thread, the rest on housekeeping). Each holds it for a
+// map scan at most; flush_line() takes the window under it and ranks after.
+// No public method calls another, so none re-enters the lock.
 class LatTracker {
  public:
   void on_submit(const maburgs::AuRecordMeta& m, uint64_t mono_us);
@@ -102,7 +108,11 @@ class LatTracker {
   // OWN anchor — the daemon's floor_ms export used ITS anchor and the two
   // warm up independently, so borrowing the exported floor here would mix
   // anchor domains.
-  const maburgs::PtsAnchor& anchor() const { return anchor_; }
+  // A copy, taken under the lock: the decode-output thread moves the anchor.
+  maburgs::PtsAnchor anchor() const {
+    std::lock_guard<std::mutex> lk(mu_);
+    return anchor_;
+  }
 
  private:
   struct Entry {
@@ -133,6 +143,7 @@ class LatTracker {
   void invalidate_(int idx);
   static uint32_t percentile_(std::vector<uint32_t>& v, int pct);
 
+  mutable std::mutex mu_;
   std::array<Entry, kMaxInflight> map_{};
   uint64_t next_seq_ = 0;
 

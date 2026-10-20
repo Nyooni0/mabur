@@ -112,8 +112,9 @@ void FeedLoop::take_submit_notes(std::vector<FeedNote>* out) {
 void FeedLoop::push_note(FeedNote&& n) {
   std::lock_guard<std::mutex> lk(mu_);
   if (n.kind == FeedNote::Kind::kSubmit) {
-    // No bytes, so no backpressure cap: the decode-output side drains this
-    // once per frame, well under the delivery queue's stall window.
+    // No cap: a submit note is meta only (no AU bytes), one per AU sent to
+    // the decoder, so even a long stall holds little memory -- and dropping
+    // one would lose a lat row and an incomplete-AU mark, not just bytes.
     submit_notes_.push_back(std::move(n));
     return;
   }

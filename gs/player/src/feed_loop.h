@@ -89,7 +89,7 @@ class FeedLoop {
   mutable std::mutex mu_;
   std::condition_variable cv_;
   std::deque<FeedNote> notes_;         // kDelivery, capped by max_notes
-  std::deque<FeedNote> submit_notes_;  // kSubmit, drained by the decode-output side; no cap (no bytes)
+  std::deque<FeedNote> submit_notes_;  // kSubmit: meta only, uncapped (see push_note)
   Park parked_ = Park::kNone;
   bool resume_ = false;
   DrainResult drain_result_;
