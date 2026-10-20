@@ -193,15 +193,6 @@ A recording must not cost the live picture a vsync. What makes that hold:
   drains it on the main loop). Record of the search and the gate:
   `docs/findings/2026-10-19-burned-dvr-live-repeat.md`.
 
-- **A longer vsync lead while recording.** The trickle halves the live
-  cost but does not remove it: the main loop still wakes 3-6 ms late a few
-  times a minute while the recorder runs, and the 5 ms lead
-  (`display.vsync_lead_ms`) leaves ~3 ms to the latch. At record start the
-  regulator switches to `display.rec_vsync_lead_ms` (bundle 8) and back at
-  stop (`maburplay: rec: vsync lead 5 -> 8 ms for the recording`); the phase
-  lock re-steers the sensor to the moved release. +3 ms of glass latency
-  while recording, 0 repeats on the bench.
-
 `BurnRecorder: stopped` reports `ct_ms=mean/max enc_ms=mean/max`; the ct
 thread logs `colortrans stage mean per frame ...: import, draw+finish, rga`
 at stop. Bench affordance: `kill -USR1 $(pidof maburplay)` toggles a

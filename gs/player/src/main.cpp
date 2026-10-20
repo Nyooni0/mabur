@@ -748,16 +748,13 @@ int main(int argc, char** argv) {
       // to k=0 and are all dropped, so the servo would never engage.
       const double panel_us = presenter->mode_period_us();
       regulator.set_panel_period(panel_us);
-      if (cfg.display.vsync_lock &&
-          std::max(cfg.display.vsync_lead_ms, cfg.display.rec_vsync_lead_ms) * 1000.0 >=
-              panel_us)
+      if (cfg.display.vsync_lock && cfg.display.vsync_lead_ms * 1000.0 >= panel_us)
         std::fprintf(stderr,
-                     "maburplay: display.vsync_lead_ms %d / rec_vsync_lead_ms %d >= the "
+                     "maburplay: display.vsync_lead_ms %d >= the "
                      "%.1f ms panel period -- every servo release rolls past one extra "
                      "vblank (a full period of added glass latency); lower "
                      "the lead for this mode\n",
-                     cfg.display.vsync_lead_ms, cfg.display.rec_vsync_lead_ms,
-                     panel_us / 1000.0);
+                     cfg.display.vsync_lead_ms, panel_us / 1000.0);
       presenter->set_flip_sink(
           [&lat, &regulator](uint32_t p, uint64_t t, bool ex) {
             lat.on_flip(p, t, ex);
@@ -1061,13 +1058,6 @@ int main(int argc, char** argv) {
     // decode watchdog may destroy and recreate it mid-run.
     if (rec->start(bc, dvr_filename(cfg.dvr.dir), backend.get())) burn = std::move(rec);
     if (!burn) return;
-    // The recorder's fragment writes leave the main loop waking a few ms
-    // late now and then; the longer lead keeps those frames on their
-    // refresh (display.rec_vsync_lead_ms; the phase lock re-steers the
-    // sensor to the moved release over the next seconds). Restored at stop.
-    regulator.set_lead_ms(cfg.display.rec_vsync_lead_ms);
-    std::fprintf(stderr, "maburplay: rec: vsync lead %d -> %d ms for the recording\n",
-                 cfg.display.vsync_lead_ms, cfg.display.rec_vsync_lead_ms);
     // Raw pointer, not a reference to the unique_ptr. `burn` IS reset --
     // rec_stop() tears the recorder down on a button press -- so the
     // safety comes from ordering instead: rec_stop() clears the sink
@@ -1284,9 +1274,8 @@ int main(int argc, char** argv) {
       // while the object it points at is still alive.
       composer.set_burn_sink({});
       burn.reset();
-      regulator.set_lead_ms(cfg.display.vsync_lead_ms);
-      std::fprintf(stderr, "maburplay: rec: STOP (%llu frames); vsync lead back to %d ms\n",
-                   static_cast<unsigned long long>(n), cfg.display.vsync_lead_ms);
+      std::fprintf(stderr, "maburplay: rec: STOP (%llu frames)\n",
+                   static_cast<unsigned long long>(n));
       return;
     }
 #endif
