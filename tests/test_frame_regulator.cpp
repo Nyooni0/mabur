@@ -2,6 +2,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <random>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -1163,15 +1164,19 @@ TEST(servo_handover_past_its_release_presents_now_not_held_a_period) {
   CHECK(!reg.holding());  // not parked on V2
 }
 
-TEST(arrival_derived_slot_floors_at_the_furthest_held_target) {
+TEST(arrival_derived_slot_displaces_an_older_hold_it_would_otherwise_follow) {
   // A newer frame's own arrival-derived natural slot can land on a
   // vblank an OLDER held frame has already been chained past (that
   // older frame collided and moved forward; this frame's own arrival
   // says nothing about that) -- in particular, a slot an older frame
-  // once held and has since been released can look entirely free. Floor
-  // the new slot at the furthest held servo target before the occupant
-  // check, so it chains in turn instead of slotting in behind an older
-  // frame and showing out of pts order.
+  // once held and has since been released can look entirely free. The
+  // order invariant resolves this not by relocating the new frame (an
+  // earlier attempt that floored it onto the older frame's slot missed
+  // deeper chains -- see the randomised test below) but by displacing
+  // whichever held frame can no longer show in order: here, f1. f2 then
+  // presents at once (it is, after all, now the newest thing still
+  // waiting and its own slot has already passed). The assertion is
+  // order and accounting, not that f1 ever shows.
   FrameRegulator reg(12, true, 3);
   warm(reg);
   const uint64_t V1 = kT0 + 8 * kVb;
@@ -1182,17 +1187,152 @@ TEST(arrival_derived_slot_floors_at_the_furthest_held_target) {
   CHECK(disp.n == 0);
   CHECK(reg.release_due(V1 - 3'000, &out));  // drains f0 -- V1 now vacant
   CHECK(out.opaque == frame(0).opaque);
-  // f2's OWN arrival (V1 - 7'000) maps to the now-vacant V1, but its
-  // hand-over is late enough that, without the floor, it would read as
-  // immediately due -- while f1 is still held two slots further out.
-  CHECK(!reg.offer(frame(2 * kFrame), V1 - 7'000, V1 - 2'000, &disp));
-  CHECK(disp.n == 0);           // not evicted
-  CHECK(reg.late_count() == 0);  // not presented out of turn either
-  CHECK(reg.release_due(V1 + kVb - kLead, &out));
-  CHECK(out.opaque == frame(kFrame).opaque);        // f1 releases first
-  CHECK(reg.release_due(V1 + 2 * kVb - kLead, &out));
-  CHECK(out.opaque == frame(2 * kFrame).opaque);     // f2 releases second
+  // f2's OWN arrival (V1 - 7'000) maps to the now-vacant V1, and its
+  // hand-over is indeed late relative to that slot -- while f1 is still
+  // held two slots further out. f2 presents at once, and f1 -- which
+  // would otherwise show AFTER f2 despite an earlier pts -- is displaced.
+  CHECK(reg.offer(frame(2 * kFrame), V1 - 7'000, V1 - 2'000, &disp));
+  CHECK(disp.n == 1);
+  CHECK(disp.f[0].opaque == frame(kFrame).opaque);  // f1 displaced, not shown
+  CHECK(reg.late_count() == 1);
   CHECK(!reg.holding());
+}
+
+TEST(deeper_chain_emits_monotonic_pts_with_full_accounting) {
+  // A deeper version of the same shape: f1 chains past f0's slot; f0
+  // drains; f2 and f3 both land back on the now-vacant slot with late
+  // hand-overs and present at once; f4 then lands on a fresh, later
+  // slot and is held. An earlier (floor-based) fix got exactly this
+  // sequence wrong -- f4 ended up shown before f3. The order invariant
+  // instead displaces whatever can no longer show in turn, so every
+  // offered frame is accounted for exactly once (emitted xor displaced)
+  // and whatever IS emitted comes out in increasing pts order.
+  FrameRegulator reg(12, true, 3);
+  warm(reg);
+  const uint64_t V1 = kT0 + 8 * kVb;
+  FrameRegulator::Displaced disp;
+  DmaFrame out;
+  std::vector<uint32_t> emitted, displaced;
+  const uint32_t pts[5] = {0, static_cast<uint32_t>(kFrame),
+                           static_cast<uint32_t>(2 * kFrame),
+                           static_cast<uint32_t>(3 * kFrame),
+                           static_cast<uint32_t>(4 * kFrame)};
+
+  CHECK(!reg.offer(frame(pts[0]), V1 - 9'000, V1 - 9'000, &disp));  // f0 -> V1
+  CHECK(!reg.offer(frame(pts[1]), V1 - 8'000, V1 - 8'000, &disp));  // f1, chains
+  CHECK(reg.release_due(V1 - 3'000, &out));
+  emitted.push_back(out.pts_us);  // f0
+
+  const bool p2 = reg.offer(frame(pts[2]), V1 - 7'000, V1 - 2'000, &disp);
+  for (int i = 0; i < disp.n; ++i) displaced.push_back(disp.f[i].pts_us);
+  if (p2) emitted.push_back(pts[2]);
+
+  const bool p3 = reg.offer(frame(pts[3]), V1 - 6'000, V1 - 2'000, &disp);
+  for (int i = 0; i < disp.n; ++i) displaced.push_back(disp.f[i].pts_us);
+  if (p3) emitted.push_back(pts[3]);
+
+  const bool p4 = reg.offer(frame(pts[4]), V1 - 2'000, V1 - 1'000, &disp);
+  for (int i = 0; i < disp.n; ++i) displaced.push_back(disp.f[i].pts_us);
+  if (p4) emitted.push_back(pts[4]);
+
+  while (reg.release_due(V1 + 10 * kVb, &out)) emitted.push_back(out.pts_us);
+
+  // Every offered frame is accounted for exactly once: emitted xor
+  // displaced, never both, never neither.
+  CHECK(emitted.size() + displaced.size() == 5);
+  for (uint32_t p : pts) {
+    const bool in_e = std::find(emitted.begin(), emitted.end(), p) != emitted.end();
+    const bool in_d = std::find(displaced.begin(), displaced.end(), p) != displaced.end();
+    CHECK(in_e != in_d);
+  }
+  // f1 is specifically the one the old (floor-based) fix got wrong --
+  // pin it displaced here, not merely "accounted for".
+  CHECK(std::find(displaced.begin(), displaced.end(), pts[1]) != displaced.end());
+  // Whatever IS emitted comes out in increasing pts order.
+  for (size_t i = 1; i < emitted.size(); ++i) CHECK(emitted[i] > emitted[i - 1]);
+}
+
+namespace {
+// Drives a regulator through n decode/hand-over pairs at src_period_us,
+// feeding on_flip at panel_period_us and -- with stalls on -- delaying
+// 25% of hand-overs 0-20 ms past their own arrival (arrival_us <=
+// now_us always, matching a real pump: decode finishes, THEN the
+// release thread eventually gets to it). Returns every frame actually
+// emitted (via offer()'s immediate return or release_due, in that
+// order) and every frame displaced, both as their own pts_us.
+struct OrderFuzzResult {
+  std::vector<uint32_t> emitted;
+  std::vector<uint32_t> displaced;
+};
+
+OrderFuzzResult run_order_fuzz(unsigned seed, int n, double src_period_us,
+                               double panel_period_us, int chain_budget,
+                               int sched_cap_ms, bool stalls) {
+  std::mt19937 rng(seed);
+  std::uniform_real_distribution<double> U(0.0, 1.0);
+  FrameRegulator reg(12, true, 3, chain_budget, sched_cap_ms);
+  reg.set_panel_period(panel_period_us);
+  OrderFuzzResult r;
+  double flip_t = static_cast<double>(kT0);
+  for (int i = 0; i < 8; ++i) {
+    reg.on_flip(static_cast<uint64_t>(flip_t), true);
+    flip_t += panel_period_us;
+  }
+  DmaFrame out;
+  const auto drain_to = [&](double t) {
+    while (flip_t <= t) {
+      reg.on_flip(static_cast<uint64_t>(flip_t), true);
+      flip_t += panel_period_us;
+    }
+    while (reg.release_due(static_cast<uint64_t>(t), &out)) r.emitted.push_back(out.pts_us);
+  };
+  double arr_t = flip_t + 1'000.0;
+  for (int i = 0; i < n; ++i) {
+    const uint32_t pts = static_cast<uint32_t>(i * src_period_us);
+    const double jitter = U(rng) * 2'000.0;
+    const double now_t = stalls && U(rng) < 0.25 ? arr_t + U(rng) * 20'000.0 : arr_t;
+    drain_to(now_t);
+    FrameRegulator::Displaced disp;
+    const bool now_ = reg.offer(frame(pts), static_cast<uint64_t>(arr_t),
+                                static_cast<uint64_t>(now_t), &disp);
+    for (int k = 0; k < disp.n; ++k) r.displaced.push_back(disp.f[k].pts_us);
+    if (now_) r.emitted.push_back(pts);
+    drain_to(now_t);
+    arr_t += src_period_us + jitter;
+  }
+  drain_to(flip_t + 20 * panel_period_us);
+  return r;
+}
+}  // namespace
+
+TEST(randomised_order_fuzz_never_emits_backwards) {
+  // A handful of fixed seeds across the configurations the controller's
+  // own fuzzer flagged (59.94/100 fps source on a 60 Hz panel, capture
+  // placement on and off, chain_budget bounded and unbounded), all with
+  // arrival <= now and a quarter of hand-overs stalled 0-20 ms. Cheap
+  // enough for the host suite (a few seeds x ~2000 frames per config).
+  const double kPanel = 1e6 / 60.0;
+  const double rates[] = {1e6 / 59.94, 1e6 / 100.0};
+  const int budgets[] = {0, 3};
+  const int caps[] = {0, 16};
+  const unsigned seeds[] = {1, 2, 3};
+  for (double src : rates) {
+    for (int budget : budgets) {
+      for (int cap : caps) {
+        for (unsigned seed : seeds) {
+          const OrderFuzzResult r =
+              run_order_fuzz(seed, 2000, src, kPanel, budget, cap, /*stalls=*/true);
+          CHECK(r.emitted.size() + r.displaced.size() == 2000);
+          std::vector<uint32_t> seen = r.emitted;
+          seen.insert(seen.end(), r.displaced.begin(), r.displaced.end());
+          std::sort(seen.begin(), seen.end());
+          CHECK(std::adjacent_find(seen.begin(), seen.end()) == seen.end());  // no dupes
+          for (size_t i = 1; i < r.emitted.size(); ++i)
+            CHECK(r.emitted[i] > r.emitted[i - 1]);  // never backwards
+        }
+      }
+    }
+  }
 }
 
 TEST(capture_window_and_lateness_split_between_arrival_and_now) {

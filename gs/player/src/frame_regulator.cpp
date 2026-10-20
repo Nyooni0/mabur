@@ -231,28 +231,7 @@ bool FrameRegulator::offer(const DmaFrame& f, uint64_t arrival_us,
         }
         return -1;
       };
-      int occ = occupant(target_v);
-      if (occ < 0) {
-        // Decode order is pts order, but arrival_us is not monotonic
-        // with it the way now_us would be (a frame can have a prompt
-        // arrival yet a late hand-over, or vice versa): a slot an older
-        // held frame has already chained past can look entirely free to
-        // THIS frame's own natural-slot lookup, even though showing here
-        // would put it before that older frame. Only floor when the
-        // frame's own slot found no direct occupant -- a real collision
-        // already runs the chain/deep-burst logic below correctly on its
-        // own, and flooring unconditionally would skip past an occupant
-        // one slot ahead of this frame's natural one.
-        uint64_t max_held_target = 0;
-        for (int i = 0; i < count_; ++i) {
-          if (held_[i].target_v > max_held_target) max_held_target = held_[i].target_v;
-        }
-        if (target_v < max_held_target) {
-          target_v = max_held_target;
-          release = target_v - lead_us_;
-          occ = occupant(target_v);  // re-check: we just moved onto one
-        }
-      }
+      const int occ = occupant(target_v);
       if (occ >= 0 && chain_budget_ > 0 && chain_run_ >= chain_budget_) {
         // Budget spent: cut the chain here. The occupant is the older
         // frame; freshest wins its slot and the stream is re-aligned.
@@ -281,15 +260,29 @@ bool FrameRegulator::offer(const DmaFrame& f, uint64_t arrival_us,
     if (vsync_lock_) ++fallback_frames_;
   }
 
+  // Order invariant: offers arrive in pts order, so any held frame whose
+  // release lands after this one's own final release is older yet would
+  // show later -- impossible to keep in order, so it loses, freshest
+  // wins, exactly like a direct vblank collision above. This is the
+  // backstop for every path that can leave a newer frame with an
+  // earlier release than something already held: a stalled hand-over
+  // (the natural slot comes from arrival_us, which isn't monotonic with
+  // decode order the way now_us would be -- a frame can arrive promptly
+  // but hand over late, or vice versa), a chain that pushed an older
+  // frame forward past where this frame's own slot lands, or a drop into
+  // the fallback rule while a servo-targeted frame is still held for a
+  // vblank that may now be slow to arrive.
+  for (int i = 0; i < count_;) {
+    if (held_[i].release_us > release) displace(i, out);
+    else ++i;
+  }
+
   // Fallback mailbox semantics: an untargeted (fallback) frame always
-  // displaces an untargeted held one -- the classic single-slot rule.
-  // Servo frames never match anything here: the sequential-slot block
-  // above either found the natural slot free or already moved this frame
-  // past (and displaced) the claimed one, and every held entry claimed
-  // its own distinct slot the same way, so no held entry can remain
-  // within half a period of the final target. The rounding tolerance
-  // that used to live in a same_slot matcher is now occupant()'s < hp
-  // window. vsync_skips_ increments only on the deep-burst claim above.
+  // displaces an untargeted held one -- the classic single-slot rule,
+  // for the pairs the order invariant above leaves alone (an arrival/now
+  // combination can land a new release no later than an old fallback
+  // hold's, which isn't out of order, but fallback still has only one
+  // slot regardless).
   if (target_v == 0) {
     for (int i = 0; i < count_;) {
       if (held_[i].target_v == 0) displace(i, out);
