@@ -1686,10 +1686,11 @@ int main(int argc, char** argv) {
   // The ring reader fell behind and skipped AUs that held references.
   uint64_t resyncs_seen = ring.resyncs();
   while (!g_stop.load()) {
-    // 2 ms ceiling, for the delivery notes and the record button; the
-    // doorbell ends the wait earlier. Nothing deadline-bound runs on this
-    // thread: on hardware the decode pump collects every decoded frame and
-    // the release thread releases it on time whatever this loop is doing.
+    // 2 ms ceiling, for the delivery notes and the record button; the feed
+    // thread ends the wait earlier only when it parks for a flush or exits.
+    // Nothing deadline-bound runs on this thread: on hardware the decode
+    // pump collects every decoded frame and the release thread releases it
+    // on time whatever this loop is doing.
     feed.wait_main(2);
     service_feed();
 #ifndef MABUR_PLAYER_HW

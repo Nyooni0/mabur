@@ -313,9 +313,9 @@ TEST(servo_safety_clamp_uses_fallback_rule) {
 TEST(mixed_fallback_and_servo_targets_all_hold) {
   // Mixed fallback/servo queue: start stale (fallback frame held,
   // target_v==0), re-warm to a fresh grid, then hold TWO servo frames at
-  // distinct targets. Under the old 2-deep queue the third frame evicted
-  // the fallback head; at kMaxHeld=4 all three coexist and each releases
-  // by its own rule (fallback at floor+D, servo at vblank-lead). The
+  // distinct targets. At kMaxHeld=4 all three coexist (a 2-deep queue
+  // would evict the fallback head) and each releases by its own rule
+  // (fallback at floor+D, servo at vblank-lead). The
   // full-queue eviction path is pinned by
   // full_queue_evicts_overdue_head_on_fifth_target.
   FrameRegulator reg(12, /*vsync_lock=*/true, /*vsync_lead_ms=*/3);
@@ -706,12 +706,9 @@ TEST(order_invariant_displaces_an_older_fallback_hold_behind_a_newer_servo_frame
   // knows nothing about, cannot survive if a newer-pts servo frame's
   // own vblank target happens to land earlier: showing the fallback
   // frame afterward would be backwards, so it is displaced instead,
-  // freshest wins, exactly like any other collision. (This used to be
-  // heal_slip_preserves_release_order_with_a_mixed_queue, back when
-  // the fallback frame was expected to survive and head the queue --
-  // that construction is no longer reachable; see
-  // heal_slip_still_finds_the_true_head_in_a_mixed_queue below for
-  // what replaces its coverage of heal_slip() itself.)
+  // freshest wins, exactly like any other collision. A mixed queue that
+  // heal_slip() has to keep in order is built by
+  // heal_slip_still_finds_the_true_head_in_a_mixed_queue below.
   FrameRegulator reg(12, true, 3);
   FrameRegulator::Displaced disp;
   DmaFrame out;
@@ -1194,10 +1191,11 @@ TEST(servo_handover_past_its_release_presents_now_not_held_a_period) {
   // The specific pump-stall shape: arrival maps to vblank V1 (a normal,
   // reachable slot), but the hand-over to offer() doesn't happen until
   // `now` has already slid past V1's release -- into the lead window
-  // before V1 itself. The old next_release(now, ...) path would always
-  // find a release >= now, parking this frame on V2 (a guaranteed
-  // one-period-late repeat); the fix takes the natural slot from arrival
-  // instead, so V1's already-past release is what the late check sees.
+  // before V1 itself. The natural slot comes from arrival, so V1's
+  // already-past release is what the late check sees and the frame
+  // presents at once; a slot taken from now (next_release(now, ...))
+  // would always be >= now and park it on V2, a guaranteed
+  // one-period-late repeat.
   FrameRegulator reg(12, true, 3);
   warm(reg);
   const uint64_t phase = kT0 + 7 * kVb;
