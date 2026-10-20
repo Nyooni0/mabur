@@ -3,11 +3,20 @@
 release-thread lateness over a time window, read straight from a maburplay
 debug-log session directory (frame.log + reg.log; docs/observability.md).
 
-A "miss" is a frame.log row whose kernel latch ran past the lead:
-`t_flip - t_commit > 12 ms` (frame.log's own `t_flip - t_commit` is "the
-kernel's latch", docs/observability.md "frame.log"). A row with `t_commit
-== 0` (the presenter parked the frame instead of committing it) has no
-latch to measure and is never a miss. `dsp`/`e2e` are frame.log's own
+A "miss" is a frame.log row whose kernel latch ran a vblank late:
+`t_flip - t_commit > 0.75 x the panel period` (frame.log's own `t_flip -
+t_commit` is "the kernel's latch", docs/observability.md "frame.log"). A
+commit made on time latches about one lead after it; one that missed its
+vblank latches a period later than that, so three quarters of a period
+splits the two at any lead short of half a period. The period is the
+median `t_flip` interval between consecutive frame.log rows in the window
+(the panel's period while the source keeps up with it; a frame dropped or
+repeated now and then does not move a median), clamped to 4-50 ms, and
+16.667 ms when the window has fewer than two rows. A source well below the
+panel rate reads its own frame interval here, not the panel's: pass
+`--miss-ms` then. A row with `t_commit == 0` (the presenter parked the
+frame instead of committing it) has no latch to measure and is never a
+miss. `dsp`/`e2e` are frame.log's own
 per-frame segment columns (seg[6]/seg[7]) -- NOT reg.log tokens: the
 regulator line carries no `dsp=`/`e2e=` field, only `rlate=`/`hand=` for
 the release thread's own lateness and hand-over, so this reads dsp/e2e as
@@ -45,7 +54,7 @@ print `-` for rlate and hand, and exclude on `disconts=` alone.
 are computed from; an older frame.log is refused as unreadable.
 
 Usage: python3 tools/bench/latchgate.py <session-dir> --from <mono_s>
-         --to <mono_s> [--skip-after-flush 24]
+         --to <mono_s> [--skip-after-flush 24] [--miss-ms <ms>]
   <session-dir>       a debug-log session directory (tools/session.py);
                        must have both frame.log and reg.log
   --from/--to          the analysis window, CLOCK_MONOTONIC seconds --
@@ -54,6 +63,8 @@ Usage: python3 tools/bench/latchgate.py <session-dir> --from <mono_s>
                        relative-to-first-row rebasing)
   --skip-after-flush   frame.log rows after a detected flush or recorder
                        start to exclude from the miss count (default 24)
+  --miss-ms            the miss threshold in ms, overriding 0.75 x the
+                       estimated panel period
 
 All latency figures in the printed line (pend/pdrop excepted, which are
 cumulative counts) are microseconds, frame.log/reg.log's native unit.
@@ -80,7 +91,9 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import session as _session  # tools/session.py
 
-MISS_US = 12000  # 12 ms
+MISS_FRACTION = 0.75           # of the panel period
+DEFAULT_PERIOD_US = 16667      # fewer than two rows to estimate from
+PERIOD_CLAMP_US = (4000, 50000)
 
 
 def growth_step(prev, v):
@@ -225,7 +238,18 @@ def in_gaps(t0, t1, gaps):
     return any(t0 < t_b and t1 > t_a for t_a, t_b in gaps)
 
 
-def analyze(session_dir, t0_s, t1_s, skip_after_flush=24):
+def panel_period_us(rows):
+    """Median t_flip interval between consecutive rows (see the module
+    docstring), clamped; DEFAULT_PERIOD_US with fewer than two rows."""
+    iv = [b['t_flip'] - a['t_flip'] for a, b in zip(rows, rows[1:])]
+    if not iv:
+        return DEFAULT_PERIOD_US
+    iv.sort()
+    med = iv[len(iv) // 2] if len(iv) % 2 else (iv[len(iv) // 2 - 1] + iv[len(iv) // 2]) / 2
+    return min(max(med, PERIOD_CLAMP_US[0]), PERIOD_CLAMP_US[1])
+
+
+def analyze(session_dir, t0_s, t1_s, skip_after_flush=24, miss_ms=None):
     sess = _session.resolve(session_dir)
     if sess.frame is None or sess.reg is None:
         raise LookupError(f"{session_dir}: missing frame.log or reg.log")
@@ -245,9 +269,11 @@ def analyze(session_dir, t0_s, t1_s, skip_after_flush=24):
     skip_rec = skip_indices(frame_rows, rec_gaps, skip_after_flush)
 
     win = [(i, r) for i, r in enumerate(frame_rows) if lo <= r['t_flip'] <= hi]
+    miss_us = (miss_ms * 1000.0 if miss_ms is not None
+               else MISS_FRACTION * panel_period_us([r for _, r in win]))
     misses = ex_flush_m = ex_rec_m = 0
     for i, r in win:
-        if r['t_commit'] == 0 or r['t_flip'] - r['t_commit'] <= MISS_US:
+        if r['t_commit'] == 0 or r['t_flip'] - r['t_commit'] <= miss_us:
             continue
         if i in skip_flush:
             ex_flush_m += 1
@@ -283,7 +309,7 @@ def analyze(session_dir, t0_s, t1_s, skip_after_flush=24):
 
     rl = [r for r in win_reg if 'rlate_p99' in r]
     return {
-        'frames': len(win), 'misses': misses,
+        'frames': len(win), 'misses': misses, 'miss_us': miss_us,
         'pend_delta': pend, 'pdrop_delta': delta('pdrop'),
         'excluded': {'flush': (ex_flush_m, ex_flush_p), 'recstart': (ex_rec_m, ex_rec_p)},
         'rlate': (max(r['rlate_p99'] for r in rl), max(r['rlate_max'] for r in rl)) if rl else None,
@@ -303,7 +329,7 @@ def fmt_pair(p):
 
 def format_line(r):
     return (f"frames {r['frames']}  misses {r['misses']} "
-            f"(late-latch rows, flip-commit > 12 ms)  "
+            f"(late-latch rows, flip-commit > {r['miss_us'] / 1000.0:.1f} ms)  "
             f"pend +{r['pend_delta']}  pdrop +{r['pdrop_delta']}  "
             f"rlate {fmt_pair(r['rlate'])}  hand {fmt_pair(r['hand'])}  "
             f"dsp {fmt(r['dsp_p50'])}  e2e {fmt(r['e2e_p50'])}/{fmt(r['e2e_p99'])}  "
@@ -320,10 +346,11 @@ def main():
     ap.add_argument('--from', dest='t0', type=float, required=True)
     ap.add_argument('--to', dest='t1', type=float, required=True)
     ap.add_argument('--skip-after-flush', type=int, default=24)
+    ap.add_argument('--miss-ms', type=float, default=None)
     args = ap.parse_args()
 
     try:
-        r = analyze(args.session_dir, args.t0, args.t1, args.skip_after_flush)
+        r = analyze(args.session_dir, args.t0, args.t1, args.skip_after_flush, args.miss_ms)
     except (OSError, LookupError, ValueError) as e:
         print(f"latchgate: {e}", file=sys.stderr)
         sys.exit(2)

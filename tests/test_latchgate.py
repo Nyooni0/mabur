@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Test for tools/bench/latchgate.py: the release-thread bench gate reads a
 synthetic frame.log/reg.log pair and reports missed vsync latches
-(`t_flip - t_commit > 12 ms`) and the regulator's pend/pdrop delta over a
---from/--to window.
+(`t_flip - t_commit` past 0.75 of the panel period) and the regulator's
+pend/pdrop delta over a --from/--to window.
 
 Covers: a miss plus a pend delta (exit 1), a clean pair (exit 0), `#
 reglog 2` tolerance (no rlate/hand -> `-`), `--skip-after-flush`
@@ -202,6 +202,25 @@ class LatchgateTest(unittest.TestCase):
         self.assertIn('pend +0', r.stdout, r.stdout)
         self.assertIn('excluded: flush 0 pend 0, recstart 1 pend 1', r.stdout, r.stdout)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_miss_threshold_follows_a_100hz_panel(self):
+        # 10 ms between flips: a latch past 0.75 of the period (7.5 ms) is
+        # a miss, so the 8 ms row counts and the 5 ms rows do not.
+        # --miss-ms overrides the estimate.
+        with tempfile.TemporaryDirectory() as d:
+            write(d, 'frame.log', '# framelog 3\n'
+                  + '\n'.join(periodic_rows(30, 10000, (12,), 8000)) + '\n')
+            write(d, 'reg.log', '# reglog 3\n'
+                  + reg_row(0, rlate=(100, 200), hand=(50, 100)) + '\n'
+                  + reg_row(200_000, rlate=(100, 200), hand=(50, 100)) + '\n')
+            r = run(d, t0=0, t1=1)
+            o = run(d, t0=0, t1=1, extra=('--miss-ms', '9'))
+        self.assertIn('misses 1', r.stdout, r.stdout)
+        self.assertIn('flip-commit > 7.5 ms', r.stdout, r.stdout)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn('misses 0', o.stdout, o.stdout)
+        self.assertIn('flip-commit > 9.0 ms', o.stdout, o.stdout)
+        self.assertEqual(o.returncode, 0, o.stdout + o.stderr)
 
     def test_missing_logs_exit_2(self):
         with tempfile.TemporaryDirectory() as d:
