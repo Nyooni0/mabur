@@ -1,14 +1,12 @@
 #include "decode_pump.h"
 
-#include <pthread.h>
-
-#include <csignal>
 #include <cstdio>
 #include <ctime>
 #include <utility>
 
 #include "au_ring.h"  // kRecFlagComplete
 #include "poll_wait.h"
+#include "worker_thread.h"
 
 namespace maburplay {
 namespace {
@@ -59,7 +57,7 @@ double DecodePump::source_hz() const {
   return source_rate_.hz();
 }
 
-void DecodePump::start() { th_ = std::thread([this] { run_(); }); }
+void DecodePump::start() { th_ = start_worker_thread([this] { run_(); }); }
 
 void DecodePump::drain_submit_notes_() {
   if (!feed_) return;
@@ -126,13 +124,6 @@ bool DecodePump::checkpoint_() {
 }
 
 void DecodePump::run_() {
-  // Signals are the housekeeping thread's: SIGTERM must end ITS wait.
-  sigset_t s;
-  sigemptyset(&s);
-  sigaddset(&s, SIGINT);
-  sigaddset(&s, SIGTERM);
-  sigaddset(&s, SIGUSR1);
-  pthread_sigmask(SIG_BLOCK, &s, nullptr);
   while (!stop_.load()) {
     if (!checkpoint_()) break;
     drain_releases_();

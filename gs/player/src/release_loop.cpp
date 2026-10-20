@@ -3,7 +3,6 @@
 #include <poll.h>
 #include <pthread.h>
 #include <sched.h>
-#include <signal.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/timerfd.h>
@@ -17,6 +16,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+
+#include "worker_thread.h"
 
 namespace maburplay {
 
@@ -114,7 +115,7 @@ void ReleaseLoop::start() {
     if (started_) return;
     started_ = true;
   }
-  th_ = std::thread(&ReleaseLoop::run_, this);
+  th_ = start_worker_thread([this] { run_(); });
   if (cfg_.rt_priority <= 0) {
     std::fprintf(stderr, "maburplay: release thread: SCHED_OTHER (rt_priority 0)\n");
     return;
@@ -138,14 +139,6 @@ void ReleaseLoop::start() {
 }
 
 void ReleaseLoop::run_() {
-  // Signals are the housekeeping thread's: SIGTERM must end ITS wait.
-  sigset_t s;
-  sigemptyset(&s);
-  sigaddset(&s, SIGINT);
-  sigaddset(&s, SIGTERM);
-  sigaddset(&s, SIGUSR1);
-  pthread_sigmask(SIG_BLOCK, &s, nullptr);
-
   bool running = true;
   {
     std::unique_lock<std::mutex> lk(mu_);

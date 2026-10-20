@@ -1,14 +1,14 @@
 #include "feed_loop.h"
 
 #include <poll.h>
-#include <pthread.h>
 #include <sys/eventfd.h>
 #include <unistd.h>
 
-#include <csignal>
 #include <cstdio>
 #include <ctime>
 #include <utility>
+
+#include "worker_thread.h"
 
 namespace maburplay {
 namespace {
@@ -49,16 +49,9 @@ void FeedLoop::set_periodic(std::function<void()> fn, uint32_t every_ms) {
   every_ms_ = every_ms;
 }
 
-void FeedLoop::start() { th_ = std::thread([this] { run_(); }); }
+void FeedLoop::start() { th_ = start_worker_thread([this] { run_(); }); }
 
 void FeedLoop::run_() {
-  // Signals are the main thread's: SIGTERM must end ITS wait.
-  sigset_t s;
-  sigemptyset(&s);
-  sigaddset(&s, SIGINT);
-  sigaddset(&s, SIGTERM);
-  sigaddset(&s, SIGUSR1);
-  pthread_sigmask(SIG_BLOCK, &s, nullptr);
   uint64_t next = now_ms() + every_ms_;
   while (!stop_.load()) {
     if (!checkpoint()) break;

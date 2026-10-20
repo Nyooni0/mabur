@@ -4,6 +4,8 @@
 // clears). Timing bounds are loose on the late side: ctest runs suites in
 // parallel and the host thread has no real-time priority.
 #include <fcntl.h>
+#include <pthread.h>
+#include <signal.h>
 #include <sys/eventfd.h>
 #include <sys/resource.h>
 #include <time.h>
@@ -24,6 +26,7 @@
 #include "present_sink.h"
 #include "release_loop.h"
 #include "wake_queue.h"
+#include "worker_thread.h"
 
 using namespace std::chrono_literals;
 using maburplay::DmaFrame;
@@ -532,6 +535,31 @@ TEST(park_times_out_while_drop_all_blocks_then_a_later_park_succeeds) {
   // A later park(), with drop_all() no longer blocking, succeeds normally.
   CHECK(r.rl.park(200ms));
   CHECK(sink.drop_all_calls.load() == 2);
+}
+
+TEST(worker_threads_start_with_the_housekeeping_signals_blocked) {
+  // start_worker_thread() (the release thread, the decode pump and the feed
+  // thread all start through it): the new thread's mask is the caller's
+  // plus SIGINT/SIGTERM/SIGUSR1, nothing else, and the caller's own mask
+  // comes back unchanged.
+  sigset_t before;
+  pthread_sigmask(SIG_SETMASK, nullptr, &before);
+  sigset_t inside;
+  sigemptyset(&inside);
+  std::thread t = maburplay::start_worker_thread(
+      [&inside] { pthread_sigmask(SIG_SETMASK, nullptr, &inside); });
+  t.join();
+  sigset_t after;
+  pthread_sigmask(SIG_SETMASK, nullptr, &after);
+  for (int sig : {SIGINT, SIGTERM, SIGUSR1}) CHECK(sigismember(&inside, sig) == 1);
+  for (int sig = 1; sig < 32; ++sig) {
+    if (sig == SIGINT || sig == SIGTERM || sig == SIGUSR1 || sig == SIGKILL || sig == SIGSTOP)
+      continue;
+    CHECK(sigismember(&inside, sig) == sigismember(&before, sig));
+    CHECK(sigismember(&after, sig) == sigismember(&before, sig));
+  }
+  for (int sig : {SIGINT, SIGTERM, SIGUSR1})
+    CHECK(sigismember(&after, sig) == sigismember(&before, sig));
 }
 
 MTEST_MAIN
