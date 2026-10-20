@@ -636,6 +636,10 @@ req= ioctl=`.
   frame whose present() path runs past the lead latches a vblank late and
   the frame behind it is a `pdrop` (`frame.log`'s `t_commit` shows it per
   frame).
+- `late=` — frames whose release had already passed when they were
+  offered, presented at once. Every frame still held then is older and is
+  displaced (counted in `replaced=`), including one already due but not
+  yet drained, so nothing shows after a newer frame.
 - `vsync=locked|fallback` — whether the vblank estimator is locked (servo
   release) or has fallen back to the `anchor_floor(pts) + regulate_ms`
   rule.

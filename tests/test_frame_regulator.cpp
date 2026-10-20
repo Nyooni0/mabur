@@ -701,7 +701,7 @@ TEST(servo_triple_burst_claims_the_second_slot) {
 
 TEST(order_invariant_displaces_an_older_fallback_hold_behind_a_newer_servo_frame) {
   // The order invariant is unqualified -- it applies to fallback and
-  // servo entries alike (controller ruling, fix round 3). An
+  // servo entries alike. An
   // older-pts fallback frame, held with a release the vblank grid
   // knows nothing about, cannot survive if a newer-pts servo frame's
   // own vblank target happens to land earlier: showing the fallback
@@ -770,17 +770,19 @@ TEST(heal_slip_still_finds_the_true_head_in_a_mixed_queue) {
 
   reg.heal_slip();
   CHECK(reg.heals() == 1);
-  // f0 (servo) slips one period past f1 (fallback, unmoved): the
-  // re-sort still reports the TRUE earliest release correctly -- that
-  // it is now f1's is heal_slip()'s known, unfixed gap (ledgered in
-  // the fix-round-3 report, not addressed here): f1 (newer pts) now
-  // heads ahead of f0 (older pts). No frame is lost or duplicated
-  // either way.
-  CHECK(reg.next_release_us() == release2);
-  CHECK(reg.release_due(release2, &out));
-  CHECK(out.opaque == frame(kFrame).opaque);     // f1, head-correct
-  CHECK(reg.release_due(release1 + kVb, &out));
-  CHECK(out.opaque == frame(0).opaque);          // f0, slipped
+  // f0 (servo) slips one period, past f1 (fallback, unmoved). What is
+  // pinned here is head-correctness and accounting only: the head is the
+  // smallest held release, and both frames come out exactly once. The
+  // order they come out in is not pinned -- f1 (newer pts) heading f0
+  // after the slip is a known heal_slip() gap, and a fix for it must not
+  // have to rewrite this test.
+  const uint64_t head = std::min(release1 + kVb, release2);
+  CHECK(reg.next_release_us() == head);
+  std::vector<void*> drained;
+  while (reg.release_due(release1 + 2 * kVb, &out)) drained.push_back(out.opaque);
+  CHECK(drained.size() == 2);
+  CHECK(std::count(drained.begin(), drained.end(), frame(0).opaque) == 1);
+  CHECK(std::count(drained.begin(), drained.end(), frame(kFrame).opaque) == 1);
   CHECK(!reg.holding());
 }
 
@@ -1309,53 +1311,104 @@ TEST(deeper_chain_emits_monotonic_pts_with_full_accounting) {
   for (size_t i = 1; i < emitted.size(); ++i) CHECK(emitted[i] > emitted[i - 1]);
 }
 
+TEST(late_frame_offered_before_the_drain_displaces_every_held_frame) {
+  // The caller may offer before it drains the frames already due. f0 is
+  // held on V1; nothing drains it; f1's hand-over is past its own
+  // release, so f1 presents at once. f0's release is earlier than f1's,
+  // so a release comparison alone would keep it -- and the drain that
+  // follows would then show f0 AFTER f1. Presenting at once flushes
+  // every held frame instead: they are all older.
+  FrameRegulator reg(12, true, 3);
+  warm(reg);
+  const uint64_t V1 = kT0 + 8 * kVb;
+  const uint64_t V2 = V1 + kVb;
+  FrameRegulator::Displaced disp;
+  DmaFrame out;
+  CHECK(!reg.offer(frame(0), V1 - 9'000, V1 - 9'000, &disp));  // f0 -> V1
+  CHECK(reg.offer(frame(kFrame), V2 - 9'000, V2 - 1'000, &disp));  // f1: late, now
+  CHECK(disp.n == 1);
+  CHECK(disp.f[0].opaque == frame(0).opaque);  // f0 displaced, never shown after f1
+  CHECK(reg.late_count() == 1);
+  CHECK(!reg.holding());
+  CHECK(!reg.release_due(V2 - 1'000, &out));
+}
+
 namespace {
 // Drives a regulator through n decode/hand-over pairs at src_period_us,
-// feeding on_flip at panel_period_us and -- with stalls on -- delaying
-// 25% of hand-overs 0-20 ms past their own arrival (arrival_us <=
-// now_us always, matching a real pump: decode finishes, THEN the
-// release thread eventually gets to it). Returns every frame actually
-// emitted (via offer()'s immediate return or release_due, in that
-// order) and every frame displaced, both as their own pts_us.
+// feeding on_flip at panel_period_us. Arrivals and hand-overs both move
+// forward only, and arrival_us <= now_us always, matching a real pump:
+// decode finishes, THEN the caller eventually offers it.
+//  - stalls: 25% of hand-overs land 0-20 ms past their own arrival.
+//  - drain_first_p: the probability that the caller drains the frames
+//    already due before offering; otherwise it offers first and drains
+//    after (the regulator's order must not depend on which).
+//  - bursts: 10% of the time a decode stall holds back 2-4 frames, which
+//    then arrive back-to-back (0-1.5 ms apart) at the last one's
+//    nominal arrival.
+// Returns every frame actually emitted (via offer()'s immediate return
+// or release_due, in that order) and every frame displaced, both as
+// their own pts_us.
 struct OrderFuzzResult {
   std::vector<uint32_t> emitted;
   std::vector<uint32_t> displaced;
 };
 
+struct OrderFuzzMode {
+  bool stalls;
+  double drain_first_p;
+  bool bursts;
+};
+
 OrderFuzzResult run_order_fuzz(unsigned seed, int n, double src_period_us,
                                double panel_period_us, int chain_budget,
-                               int sched_cap_ms, bool stalls) {
+                               int sched_cap_ms, OrderFuzzMode mode) {
   std::mt19937 rng(seed);
   std::uniform_real_distribution<double> U(0.0, 1.0);
   FrameRegulator reg(12, true, 3, chain_budget, sched_cap_ms);
   reg.set_panel_period(panel_period_us);
   OrderFuzzResult r;
   double flip_t = static_cast<double>(kT0);
-  for (int i = 0; i < 8; ++i) {
-    reg.on_flip(static_cast<uint64_t>(flip_t), true);
-    flip_t += panel_period_us;
-  }
-  DmaFrame out;
-  const auto drain_to = [&](double t) {
+  const auto flips_to = [&](double t) {
     while (flip_t <= t) {
       reg.on_flip(static_cast<uint64_t>(flip_t), true);
       flip_t += panel_period_us;
     }
+  };
+  flips_to(flip_t + 7 * panel_period_us);
+  DmaFrame out;
+  const auto drain_to = [&](double t) {
+    flips_to(t);
     while (reg.release_due(static_cast<uint64_t>(t), &out)) r.emitted.push_back(out.pts_us);
   };
-  double arr_t = flip_t + 1'000.0;
+  double nominal = flip_t + 1'000.0;
+  double last_arr = 0.0, last_now = 0.0;
+  int burst_left = 0;
   for (int i = 0; i < n; ++i) {
     const uint32_t pts = static_cast<uint32_t>(i * src_period_us);
-    const double jitter = U(rng) * 2'000.0;
-    const double now_t = stalls && U(rng) < 0.25 ? arr_t + U(rng) * 20'000.0 : arr_t;
-    drain_to(now_t);
+    double arr_t = nominal;
+    if (mode.bursts && burst_left == 0 && U(rng) < 0.1) {
+      burst_left = 2 + static_cast<int>(rng() % 3);
+      arr_t = nominal + (burst_left - 1) * src_period_us;  // held back to the last one's slot
+    } else if (burst_left > 0) {
+      arr_t = last_arr + U(rng) * 1'500.0;  // decoded back-to-back
+    }
+    if (burst_left > 0) --burst_left;
+    arr_t = std::max(arr_t, last_arr);
+    double now_t = mode.stalls && U(rng) < 0.25 ? arr_t + U(rng) * 20'000.0 : arr_t;
+    now_t = std::max(now_t, last_now);
+    last_arr = arr_t;
+    last_now = now_t;
+    if (U(rng) < mode.drain_first_p)
+      drain_to(now_t);
+    else
+      flips_to(now_t);
     FrameRegulator::Displaced disp;
     const bool now_ = reg.offer(frame(pts), static_cast<uint64_t>(arr_t),
                                 static_cast<uint64_t>(now_t), &disp);
     for (int k = 0; k < disp.n; ++k) r.displaced.push_back(disp.f[k].pts_us);
     if (now_) r.emitted.push_back(pts);
     drain_to(now_t);
-    arr_t += src_period_us + jitter;
+    nominal += src_period_us + U(rng) * 2'000.0;
   }
   drain_to(flip_t + 20 * panel_period_us);
   return r;
@@ -1363,33 +1416,44 @@ OrderFuzzResult run_order_fuzz(unsigned seed, int n, double src_period_us,
 }  // namespace
 
 TEST(randomised_order_fuzz_never_emits_backwards) {
-  // A handful of fixed seeds across the configurations the controller's
-  // own fuzzer flagged (59.94/100 fps source on a 60 Hz panel, capture
-  // placement on and off, chain_budget bounded and unbounded), all with
-  // arrival <= now and a quarter of hand-overs stalled 0-20 ms. Cheap
-  // enough for the host suite (a few seeds x ~2000 frames per config).
+  // Fixed seeds across 59.94/100 fps sources on a 60 Hz panel, capture
+  // placement on and off, chain_budget bounded and unbounded, in two
+  // pump shapes: drain-then-offer with stalled hand-overs, and a mixed
+  // pump (offer before the drain 30% of the time) with decode bursts on
+  // top. Every offered frame is accounted for exactly once (emitted xor
+  // displaced) and the emitted ones never go backwards in pts. Cheap
+  // enough for the host suite.
   const double kPanel = 1e6 / 60.0;
   const double rates[] = {1e6 / 59.94, 1e6 / 100.0};
   const int budgets[] = {0, 3};
   const int caps[] = {0, 16};
   const unsigned seeds[] = {1, 2, 3};
-  for (double src : rates) {
-    for (int budget : budgets) {
-      for (int cap : caps) {
-        for (unsigned seed : seeds) {
-          const OrderFuzzResult r =
-              run_order_fuzz(seed, 2000, src, kPanel, budget, cap, /*stalls=*/true);
-          CHECK(r.emitted.size() + r.displaced.size() == 2000);
-          std::vector<uint32_t> seen = r.emitted;
-          seen.insert(seen.end(), r.displaced.begin(), r.displaced.end());
-          std::sort(seen.begin(), seen.end());
-          CHECK(std::adjacent_find(seen.begin(), seen.end()) == seen.end());  // no dupes
-          for (size_t i = 1; i < r.emitted.size(); ++i)
-            CHECK(r.emitted[i] > r.emitted[i - 1]);  // never backwards
+  const OrderFuzzMode modes[] = {
+      {/*stalls=*/true, /*drain_first_p=*/1.0, /*bursts=*/false},
+      {/*stalls=*/true, /*drain_first_p=*/0.7, /*bursts=*/true},
+  };
+  int backwards = 0, misaccounted = 0;
+  for (const OrderFuzzMode& mode : modes) {
+    for (double src : rates) {
+      for (int budget : budgets) {
+        for (int cap : caps) {
+          for (unsigned seed : seeds) {
+            const OrderFuzzResult r = run_order_fuzz(seed, 2000, src, kPanel, budget, cap, mode);
+            std::vector<uint32_t> seen = r.emitted;
+            seen.insert(seen.end(), r.displaced.begin(), r.displaced.end());
+            std::sort(seen.begin(), seen.end());
+            if (seen.size() != 2000 ||
+                std::adjacent_find(seen.begin(), seen.end()) != seen.end())
+              ++misaccounted;  // lost or duplicated a frame
+            for (size_t i = 1; i < r.emitted.size(); ++i)
+              if (r.emitted[i] <= r.emitted[i - 1]) ++backwards;
+          }
         }
       }
     }
   }
+  CHECK(misaccounted == 0);
+  CHECK(backwards == 0);
 }
 
 TEST(capture_window_and_lateness_split_between_arrival_and_now) {

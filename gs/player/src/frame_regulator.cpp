@@ -271,7 +271,8 @@ bool FrameRegulator::offer(const DmaFrame& f, uint64_t arrival_us,
   // but hand over late, or vice versa), a chain that pushed an older
   // frame forward past where this frame's own slot lands, or a drop into
   // the fallback rule while a servo-targeted frame is still held for a
-  // vblank that may now be slow to arrive.
+  // vblank that may now be slow to arrive. It can drop a frame that is
+  // already due but not yet drained: shown, it would follow a newer one.
   for (int i = 0; i < count_;) {
     if (held_[i].release_us > release) displace(i, out);
     else ++i;
@@ -292,6 +293,12 @@ bool FrameRegulator::offer(const DmaFrame& f, uint64_t arrival_us,
   if (count_ == kMaxHeld) displace(0, out);
 
   if (release <= now_us) {
+    // Presented now, so it shows before anything still held -- and every
+    // held frame is older. Comparing releases is not enough here: a held
+    // frame whose release has passed but which the caller has not yet
+    // drained (it may offer before it drains) would show after this one.
+    // Flush them all, so order never depends on that call order.
+    while (count_ > 0) displace(0, out);
     ++late_count_;
     return true;  // never stack delay on the tail
   }

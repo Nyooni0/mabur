@@ -27,12 +27,13 @@ namespace maburplay {
 //
 // Ownership: offer() either passes the frame through (present it NOW —
 // regulator disabled, frame already past its release, or a pts
-// discontinuity re-seed) or holds it in a kMaxHeld-deep queue. A held
-// frame displaced by a newer one, or orphaned by a discontinuity, comes
-// back via *out (up to kMaxHeld at once) and MUST be returned to the
-// backend by the caller. release_due() surfaces held frames once their
-// time arrives — call it in a loop, since more than one can be due in
-// the same tick.
+// discontinuity re-seed) or holds it in a kMaxHeld-deep queue. A frame
+// presented now displaces every held frame (all older, so any of them
+// shown afterwards would go backwards). A held frame displaced by a newer
+// one, or orphaned by a discontinuity, comes back via *out (up to
+// kMaxHeld at once) and MUST be returned to the backend by the caller.
+// release_due() surfaces held frames once their time arrives — call it in
+// a loop, since more than one can be due in the same tick.
 //
 // Thread safety: every public method takes the internal lock for its
 // whole body (the counters' getters included) and no public method calls
