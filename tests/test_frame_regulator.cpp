@@ -293,28 +293,20 @@ TEST(servo_falls_back_when_stale_and_recovers) {
 }
 
 TEST(servo_safety_clamp_uses_fallback_rule) {
-  // The natural slot now comes from arrival_us via release_at_or_after,
-  // which (unlike the old next_release(mono_us, ...) call) is designed to
-  // find the right vblank for an arrival far from the estimator's phase --
-  // a single corrupted flip jumping phase into the future no longer trips
-  // this clamp, because the arrival-based slot still lands close to
-  // arrival regardless of where phase sits. What the clamp still guards:
-  // now_us itself sitting implausibly far behind the vblank arrival maps
-  // to (more than 2 periods + lead) -- the grid cannot be trusted to serve
-  // THIS now, so the frame falls back to the pts+D rule.
   FrameRegulator reg(12, true, 3);
   warm(reg);
+  // Corrupt-phase stand-in: an estimator whose next release lands
+  // > 2*period + lead away must NOT be trusted for this frame.
+  // Constructed via a phase far in the future: feed one exact flip 10
+  // periods ahead (k=10 updates phase), then offer a frame "now".
   const uint64_t phase = kT0 + 7 * kVb;
-  const uint64_t arrival = phase + kVb - 9'000;  // an ordinary, reachable slot
-  const uint64_t release = phase + kVb - kLead;  // the slot arrival maps to
-  const uint64_t clamp = 2 * kVb + kLead;
-  const uint64_t now = release - clamp - 1'000;  // now is unreachably far behind
+  reg.on_flip(phase + 10 * kVb, true);
   FrameRegulator::Displaced disp;
   DmaFrame out;
-  CHECK(!reg.offer(frame(0), arrival, now, &disp));
+  const uint64_t t_dec = phase + 10 * kVb - 60'000;  // 60 ms before phase
+  CHECK(!reg.offer(frame(0), t_dec, t_dec, &disp));
   CHECK(reg.fallback_frames() == 1);  // clamp routed to fallback
-  CHECK(!reg.release_due(arrival + kD - 1, &out));
-  CHECK(reg.release_due(arrival + kD, &out));
+  CHECK(reg.release_due(t_dec + kD, &out));
 }
 
 TEST(mixed_fallback_and_servo_targets_all_hold) {
@@ -1123,14 +1115,16 @@ TEST(phase_lock_mode_switching_placement_never_shows_backwards) {
   CHECK(s.backwards == 0);
 }
 
-// ---- arrival vs now (the release thread's own clock) ----
+// ---- arrival vs now ----
 
 TEST(arrival_feeds_the_window_and_now_decides_lateness) {
   // vsync lock on, warm the estimator with 8 exact flips 16667 apart at kT0.
   FrameRegulator reg(12, true, 3, 0, 16);
   warm(reg);
-  // arrival = decode stamp 2 ms before now: the frame's release is computed
-  // from `now`, not `arrival`.
+  // arrival = decode stamp 2 ms before now: this offer takes a capture
+  // slot (capture scheduling is on) and just establishes a sane baseline
+  // -- next_release_us() no earlier than now -- for the second offer
+  // below, which is the actual point.
   FrameRegulator::Displaced d;
   const bool now_ = reg.offer(frame(1000), /*arrival*/ kT0 + 10'000,
                               /*now*/ kT0 + 12'000, &d);
@@ -1167,6 +1161,38 @@ TEST(servo_handover_past_its_release_presents_now_not_held_a_period) {
   CHECK(reg.offer(frame(0), arrival, now, &disp));  // presented now
   CHECK(reg.late_count() == 1);
   CHECK(!reg.holding());  // not parked on V2
+}
+
+TEST(arrival_derived_slot_floors_at_the_furthest_held_target) {
+  // A newer frame's own arrival-derived natural slot can land on a
+  // vblank an OLDER held frame has already been chained past (that
+  // older frame collided and moved forward; this frame's own arrival
+  // says nothing about that) -- in particular, a slot an older frame
+  // once held and has since been released can look entirely free. Floor
+  // the new slot at the furthest held servo target before the occupant
+  // check, so it chains in turn instead of slotting in behind an older
+  // frame and showing out of pts order.
+  FrameRegulator reg(12, true, 3);
+  warm(reg);
+  const uint64_t V1 = kT0 + 8 * kVb;
+  FrameRegulator::Displaced disp;
+  DmaFrame out;
+  CHECK(!reg.offer(frame(0), V1 - 9'000, V1 - 9'000, &disp));       // f0 -> V1
+  CHECK(!reg.offer(frame(kFrame), V1 - 8'000, V1 - 8'000, &disp));  // collides, chains to V1+kVb
+  CHECK(disp.n == 0);
+  CHECK(reg.release_due(V1 - 3'000, &out));  // drains f0 -- V1 now vacant
+  CHECK(out.opaque == frame(0).opaque);
+  // f2's OWN arrival (V1 - 7'000) maps to the now-vacant V1, but its
+  // hand-over is late enough that, without the floor, it would read as
+  // immediately due -- while f1 is still held two slots further out.
+  CHECK(!reg.offer(frame(2 * kFrame), V1 - 7'000, V1 - 2'000, &disp));
+  CHECK(disp.n == 0);           // not evicted
+  CHECK(reg.late_count() == 0);  // not presented out of turn either
+  CHECK(reg.release_due(V1 + kVb - kLead, &out));
+  CHECK(out.opaque == frame(kFrame).opaque);        // f1 releases first
+  CHECK(reg.release_due(V1 + 2 * kVb - kLead, &out));
+  CHECK(out.opaque == frame(2 * kFrame).opaque);     // f2 releases second
+  CHECK(!reg.holding());
 }
 
 TEST(capture_window_and_lateness_split_between_arrival_and_now) {

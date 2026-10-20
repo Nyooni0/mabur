@@ -178,23 +178,34 @@ bool FrameRegulator::offer(const DmaFrame& f, uint64_t arrival_us,
     }
   }
   if (servo_now_ && !by_capture) {
-    // The natural slot comes from arrival_us, not now_us: release_at_or_after
-    // (unlike next_release) accepts a time before the last flip and returns
-    // the vblank the frame would actually land on if the pipeline weren't
-    // stalled. A hand-over whose own slot has already gone by (a pump
-    // stall between decode and offer) reads release_us in the past; the
-    // late check below then presents it at once instead of parking it on
-    // the NEXT slot, which next_release(now_us, ...) would always have
-    // forced (its release is >= now_us by construction) -- a guaranteed
-    // one-period-late repeat for every stalled hand-over.
-    const auto r = est_.release_at_or_after(arrival_us, lead_us_);
+    // The implausible-phase gate stays anchored to now_us via
+    // next_release(), unchanged from before this split: it asks "is the
+    // NEXT release from where we are now plausible", and a corrupted
+    // phase (e.g. a single flip timestamp jumping into the future) fails
+    // it the same way it always did. release_at_or_after(arrival_us, ...)
+    // would NOT fail it here -- it's designed to find the right vblank
+    // for an arrival far from phase, so it never reads as implausible,
+    // which is exactly why it's only used below to pick the slot, not to
+    // gate trust in the grid.
+    const auto gate = est_.next_release(now_us, lead_us_);
     const uint64_t clamp =
         static_cast<uint64_t>(2.0 * est_.period_us()) + lead_us_;
-    if (r.release_us > now_us + clamp) {
+    if (gate.release_us > now_us + clamp) {
       // Implausible hold (corrupted phase): don't trust the grid for
       // this frame; the estimator self-heals on the next real flips.
       servo_now_ = false;
     } else {
+      // The slot itself comes from arrival_us, not now_us:
+      // release_at_or_after (unlike next_release) accepts a time before
+      // the last flip and returns the vblank the frame would actually
+      // land on if the pipeline weren't stalled. A hand-over whose own
+      // slot has already gone by (a pump stall between decode and
+      // offer) reads release_us in the past; the late check below then
+      // presents it at once instead of parking it on the NEXT slot,
+      // which next_release(now_us, ...) would always have forced (its
+      // release is >= now_us by construction) -- a guaranteed
+      // one-period-late repeat for every stalled hand-over.
+      const auto r = est_.release_at_or_after(arrival_us, lead_us_);
       release = r.release_us;
       target_v = r.vblank_us;
       // Sequential-slot assignment (hw): base+enh of a
@@ -220,7 +231,28 @@ bool FrameRegulator::offer(const DmaFrame& f, uint64_t arrival_us,
         }
         return -1;
       };
-      const int occ = occupant(target_v);
+      int occ = occupant(target_v);
+      if (occ < 0) {
+        // Decode order is pts order, but arrival_us is not monotonic
+        // with it the way now_us would be (a frame can have a prompt
+        // arrival yet a late hand-over, or vice versa): a slot an older
+        // held frame has already chained past can look entirely free to
+        // THIS frame's own natural-slot lookup, even though showing here
+        // would put it before that older frame. Only floor when the
+        // frame's own slot found no direct occupant -- a real collision
+        // already runs the chain/deep-burst logic below correctly on its
+        // own, and flooring unconditionally would skip past an occupant
+        // one slot ahead of this frame's natural one.
+        uint64_t max_held_target = 0;
+        for (int i = 0; i < count_; ++i) {
+          if (held_[i].target_v > max_held_target) max_held_target = held_[i].target_v;
+        }
+        if (target_v < max_held_target) {
+          target_v = max_held_target;
+          release = target_v - lead_us_;
+          occ = occupant(target_v);  // re-check: we just moved onto one
+        }
+      }
       if (occ >= 0 && chain_budget_ > 0 && chain_run_ >= chain_budget_) {
         // Budget spent: cut the chain here. The occupant is the older
         // frame; freshest wins its slot and the stream is re-aligned.
