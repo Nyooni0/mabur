@@ -46,6 +46,14 @@ Usage: python3 tools/bench/latchgate.py <session-dir> --from <mono_s>
 All latency figures in the printed line (pend/pdrop excepted, which are
 cumulative counts) are microseconds, frame.log/reg.log's native unit.
 
+`pend`/`pdrop`'s `+P`/`+D` are reset-tolerant growth across the window's
+reg.log rows, not last-minus-first: a player restart resets both
+counters to 0 mid-window, and a plain subtraction would read that as a
+negative delta that cancels real misses out of the exit-code sum (the
+same convention as tools/flightreport.py's `_counter_growth` -- a value
+going backwards contributes its post-restart value, never a negative
+one).
+
 Exit code 1 when `misses + pend-delta > 0` (the brief's literal gate;
 `pdrop` is reported but does not itself trip the gate), 0 otherwise,
 2 if the session directory or its logs can't be read.
@@ -61,6 +69,23 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 import session as _session  # tools/session.py
 
 MISS_US = 12000  # 12 ms
+
+
+def counter_growth(vals):
+    """Reset-tolerant delta across a cumulative counter's values in a
+    window, same convention as tools/flightreport.py's _counter_growth: a
+    player restart (the counter going backwards, e.g. pend 10 -> 0) is not
+    a negative delta, it is a reset, and the post-restart value is the
+    growth since it (0, then 0 -> 2 contributes +2). A plain monotonic
+    counter still just sums to last-first. Needs at least 2 values to mean
+    anything; the caller is responsible for that check."""
+    total = 0
+    prev = None
+    for v in vals:
+        if prev is not None:
+            total += v if v < prev else v - prev
+        prev = v
+    return total
 
 
 def pct(values, q):
@@ -200,7 +225,7 @@ def analyze(session_dir, t0_s, t1_s, skip_after_flush=24):
 
     def delta(key):
         vals = [r[key] for r in win_reg if key in r]
-        return (vals[-1] - vals[0]) if len(vals) >= 2 else 0
+        return counter_growth(vals) if len(vals) >= 2 else 0
 
     rl = [r for r in win_reg if 'rlate_p99' in r]
     return {

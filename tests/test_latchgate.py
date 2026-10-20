@@ -131,6 +131,30 @@ class LatchgateTest(unittest.TestCase):
             r = run(d)
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
 
+    def test_restart_shaped_counter_never_goes_negative(self):
+        # pend 10 -> 0 -> 2 is a player restart mid-window, not a drop of
+        # 8: last-minus-first would read "pend +-8", which cancels a real
+        # miss out of the misses+pend-delta exit-code sum. The growth is
+        # 0 (10 -> 0, a reset) + 2 (0 -> 2) = +2, and the miss alone must
+        # still trip the gate.
+        with tempfile.TemporaryDirectory() as d:
+            rows = [
+                frame_row(1_000_000, 995_000),      # clean
+                frame_row(1_016_666, 1_000_666),    # 16 ms, a miss
+                frame_row(1_033_332, 1_028_332),    # clean
+            ]
+            write(d, 'frame.log', '# framelog 3\n' + '\n'.join(rows) + '\n')
+            write(d, 'reg.log', '# reglog 3\n'
+                  + reg_row(1_000_000, pend=10, pdrop=5, rlate=(100, 200), hand=(50, 100)) + '\n'
+                  + reg_row(1_100_000, pend=0, pdrop=0, rlate=(100, 200), hand=(50, 100)) + '\n'
+                  + reg_row(1_500_000, pend=2, pdrop=1, rlate=(120, 250), hand=(60, 110)) + '\n')
+            r = run(d)
+        self.assertIn('misses 1', r.stdout, r.stdout)
+        self.assertIn('pend +2', r.stdout, r.stdout)
+        self.assertIn('pdrop +1', r.stdout, r.stdout)
+        self.assertNotIn('+-', r.stdout, r.stdout)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()
