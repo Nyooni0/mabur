@@ -87,13 +87,16 @@ ReleaseLoop::~ReleaseLoop() {
   ::close(ep_);
 }
 
+void ReleaseLoop::unregister_sink_fd_() {
+  if (sink_fd_reg_ < 0) return;
+  // May already be gone (a destroyed sink's fd is closed, which removes it
+  // from the set on its own); the error is harmless.
+  ::epoll_ctl(ep_, EPOLL_CTL_DEL, sink_fd_reg_, nullptr);
+  sink_fd_reg_ = -1;
+}
+
 void ReleaseLoop::register_sink_fd_() {
-  if (sink_fd_reg_ >= 0) {
-    // May already be gone (a destroyed sink's fd is closed, which removes
-    // it from the set); the error is harmless.
-    ::epoll_ctl(ep_, EPOLL_CTL_DEL, sink_fd_reg_, nullptr);
-    sink_fd_reg_ = -1;
-  }
+  unregister_sink_fd_();
   const int fd = sink_ ? sink_->event_fd() : -1;
   if (fd < 0) return;
   epoll_event ev{};
@@ -167,6 +170,17 @@ void ReleaseLoop::run_() {
         armed_us_ = 0;  // expired
       } else if (evs[i].data.fd == ctl_fd_) {
         clear_fd(ctl_fd_);
+      } else if (evs[i].data.fd == sink_fd_reg_ &&
+                 (evs[i].events & (EPOLLERR | EPOLLHUP))) {
+        // epoll reports an error/hangup fd as immediately ready on every
+        // call, so leaving it registered would busy-spin this SCHED_FIFO
+        // thread; drop it from the set and let iterate_()'s idle tick
+        // carry the wake instead (it still calls sink->poll_events() every
+        // time, error or not).
+        std::fprintf(stderr,
+                     "maburplay: release thread: display fd error, falling back to the idle "
+                     "tick\n");
+        unregister_sink_fd_();
       }
     }
     if (stop_.load()) break;
@@ -215,7 +229,7 @@ void ReleaseLoop::iterate_() {
     double margin_us = 0.0;
     if (reg_.take_margin(&margin_us)) {
       const MarginSample m{margin_us, reg_.panel_period_us(), now};
-      std::lock_guard<std::mutex> lk(margin_mu_);
+      std::lock_guard<PiMutex> lk(margin_mu_);
       if (margin_n_ == kMarginCap) {
         margins_[margin_head_] = m;
         margin_head_ = (margin_head_ + 1) % kMarginCap;
@@ -313,6 +327,12 @@ void ReleaseLoop::arm_(uint64_t abs_us) {
 }
 
 void ReleaseLoop::park_work_() {
+  // Unregister the sink's fd now, while sink_ is still the live sink that
+  // owns it: a hotplug reacquire can destroy it (closing the fd) anywhere
+  // between here and resume(), and a DEL issued later against that fd
+  // number would risk landing on whatever the kernel has since handed it
+  // to. register_sink_fd_() on resume then only ADDs the new sink's fd.
+  unregister_sink_fd_();
   if (sink_) sink_->drop_all();
   DmaFrame f;
   while (reg_.release_due(~0ull, &f)) {
@@ -425,7 +445,7 @@ void ReleaseLoop::stop_and_join() {
 }
 
 void ReleaseLoop::take_margins(std::vector<MarginSample>* out) {
-  std::lock_guard<std::mutex> lk(margin_mu_);
+  std::lock_guard<PiMutex> lk(margin_mu_);
   for (int i = 0; i < margin_n_; ++i) out->push_back(margins_[(margin_head_ + i) % kMarginCap]);
   margin_head_ = 0;
   margin_n_ = 0;
@@ -433,7 +453,7 @@ void ReleaseLoop::take_margins(std::vector<MarginSample>* out) {
 
 void ReleaseLoop::stat_rlate_(uint64_t us) {
   const uint32_t v = clamp_u32(us);
-  std::lock_guard<std::mutex> lk(stats_mu_);
+  std::lock_guard<PiMutex> lk(stats_mu_);
   rlate_[rlate_n_ % kStatCap] = v;
   ++rlate_n_;
   if (v > rlate_max_) rlate_max_ = v;
@@ -441,7 +461,7 @@ void ReleaseLoop::stat_rlate_(uint64_t us) {
 
 void ReleaseLoop::stat_hand_(uint64_t us) {
   const uint32_t v = clamp_u32(us);
-  std::lock_guard<std::mutex> lk(stats_mu_);
+  std::lock_guard<PiMutex> lk(stats_mu_);
   hand_[hand_n_ % kStatCap] = v;
   ++hand_n_;
   if (v > hand_max_) hand_max_ = v;
@@ -451,7 +471,7 @@ void ReleaseLoop::stat_hand_(uint64_t us) {
 // smoothness number. Submission clock, not vsync, but a straddle shows up
 // in it either way.
 void ReleaseLoop::note_present_time_(uint64_t t) {
-  std::lock_guard<std::mutex> lk(stats_mu_);
+  std::lock_guard<PiMutex> lk(stats_mu_);
   if (last_present_us_ != 0) {
     const int64_t iv = static_cast<int64_t>(t - last_present_us_);
     if (prev_present_iv_ >= 0) {
@@ -468,7 +488,7 @@ ReleaseLoop::Stats ReleaseLoop::take_stats() {
   uint32_t rn, hn;
   Stats st;
   {
-    std::lock_guard<std::mutex> lk(stats_mu_);
+    std::lock_guard<PiMutex> lk(stats_mu_);
     rn = std::min<uint32_t>(rlate_n_, kStatCap);
     hn = std::min<uint32_t>(hand_n_, kStatCap);
     std::copy(rlate_.begin(), rlate_.begin() + rn, r.begin());

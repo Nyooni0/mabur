@@ -7,6 +7,8 @@
 #include <mutex>
 #include <vector>
 
+#include "pi_mutex.h"
+
 namespace maburplay {
 
 // Keeps a decoded frame's imported GEM handle and its KMS framebuffer alive
@@ -67,7 +69,7 @@ class FbCache {
   FbCache(Ops ops, size_t max_entries) : ops_(std::move(ops)), max_(max_entries) {}
   ~FbCache() {
     // No other thread is left: close what in-flight misses still hold too.
-    std::lock_guard<std::mutex> lk(mu_);
+    std::lock_guard<PiMutex> lk(mu_);
     for (const Entry& e : entries_) {
       if (e.fb_id) ops_.rm_fb(e.fb_id);
       ops_.close_handle(e.handle);
@@ -88,7 +90,7 @@ class FbCache {
     *fb_id = 0;
     *handle = 0;
     uint32_t h = 0;
-    std::unique_lock<std::mutex> lk = import_(dmabuf_fd, &h);
+    std::unique_lock<PiMutex> lk = import_(dmabuf_fd, &h);
     if (h == 0) return false;
     ++imports_;
     *handle = h;
@@ -133,7 +135,7 @@ class FbCache {
   // bound.
   uint32_t insert(uint32_t handle, const Geom& g, uint32_t fb_id, uint64_t now,
                   const Pinned& pinned) {
-    std::lock_guard<std::mutex> lk(mu_);
+    std::lock_guard<PiMutex> lk(mu_);
     if (fb_id) ++adds_;
     Entry* e = entry_(handle);
     if (!e) {
@@ -210,7 +212,7 @@ class FbCache {
   // evict (their caller cannot say what is pinned): the thread that can
   // calls this.
   void trim(const Pinned& pinned) {
-    std::lock_guard<std::mutex> lk(mu_);
+    std::lock_guard<PiMutex> lk(mu_);
     while (entries_.size() > max_)
       if (!evict_lru_(pinned)) break;
   }
@@ -219,7 +221,7 @@ class FbCache {
   // is still in flight on: its framebuffer goes, the handle stays open for
   // that thread's AddFB2, and its insert() then drops it.
   void flush() {
-    std::lock_guard<std::mutex> lk(mu_);
+    std::lock_guard<PiMutex> lk(mu_);
     std::vector<Entry> keep;
     for (Entry& e : entries_) {
       if (e.fb_id) ops_.rm_fb(e.fb_id);
@@ -236,23 +238,23 @@ class FbCache {
 
   // Cached framebuffers (placeholders of misses in flight count too).
   size_t size() const {
-    std::lock_guard<std::mutex> lk(mu_);
+    std::lock_guard<PiMutex> lk(mu_);
     return entries_.size();
   }
   uint64_t imports() const {
-    std::lock_guard<std::mutex> lk(mu_);
+    std::lock_guard<PiMutex> lk(mu_);
     return imports_;
   }
   uint64_t hits() const {
-    std::lock_guard<std::mutex> lk(mu_);
+    std::lock_guard<PiMutex> lk(mu_);
     return hits_;
   }
   uint64_t adds() const {
-    std::lock_guard<std::mutex> lk(mu_);
+    std::lock_guard<PiMutex> lk(mu_);
     return adds_;
   }
   uint64_t evictions() const {
-    std::lock_guard<std::mutex> lk(mu_);
+    std::lock_guard<PiMutex> lk(mu_);
     return evictions_;
   }
 
@@ -271,8 +273,8 @@ class FbCache {
   // already-imported dma-buf its existing handle -- so then the import is
   // redone. After a few rounds of that it is redone under the lock, where
   // no close can intervene. Returns holding the lock; *h is 0 on failure.
-  std::unique_lock<std::mutex> import_(int dmabuf_fd, uint32_t* h) {
-    std::unique_lock<std::mutex> lk(mu_);
+  std::unique_lock<PiMutex> import_(int dmabuf_fd, uint32_t* h) {
+    std::unique_lock<PiMutex> lk(mu_);
     for (int attempt = 0; attempt < 3; ++attempt) {
       const uint64_t seq = close_seq_;
       lk.unlock();
@@ -324,7 +326,7 @@ class FbCache {
 
   Ops ops_;
   size_t max_;
-  mutable std::mutex mu_;
+  mutable PiMutex mu_;
   std::vector<Entry> entries_;
   uint64_t close_seq_ = 0;  // bumped by every handle close, under mu_
   uint64_t imports_ = 0, hits_ = 0, adds_ = 0, evictions_ = 0;

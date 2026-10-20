@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "au_ring.h"     // maburgs::AuRecordMeta
+#include "pi_mutex.h"
 #include "pts_anchor.h"  // maburgs::PtsAnchor -- the ONE anchor impl
 
 namespace maburplay {
@@ -110,7 +111,7 @@ class LatTracker {
   // anchor domains.
   // A copy, taken under the lock: the decode-output thread moves the anchor.
   maburgs::PtsAnchor anchor() const {
-    std::lock_guard<std::mutex> lk(mu_);
+    std::lock_guard<PiMutex> lk(mu_);
     return anchor_;
   }
 
@@ -143,7 +144,7 @@ class LatTracker {
   void invalidate_(int idx);
   static uint32_t percentile_(std::vector<uint32_t>& v, int pct);
 
-  mutable std::mutex mu_;
+  mutable PiMutex mu_;
   std::array<Entry, kMaxInflight> map_{};
   uint64_t next_seq_ = 0;
 

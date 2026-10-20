@@ -6,118 +6,118 @@
 namespace maburplay {
 
 bool FrameRegulator::enabled() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return d_us_ > 0;
 }
 
 bool FrameRegulator::holding() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return count_ > 0;
 }
 
 void FrameRegulator::on_flip(uint64_t flip_us, bool exact) {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   est_.on_flip(flip_us, exact);
 }
 
 void FrameRegulator::set_panel_period(double period_us) {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   est_ = VblankEstimator(period_us);
 }
 
 uint64_t FrameRegulator::held_count() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return held_count_;
 }
 
 uint64_t FrameRegulator::late_count() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return late_count_;
 }
 
 uint64_t FrameRegulator::replaced_count() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return replaced_count_;
 }
 
 uint64_t FrameRegulator::discont_count() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return discont_count_;
 }
 
 double FrameRegulator::hold_ema_ms() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return hold_ema_ms_;
 }
 
 uint64_t FrameRegulator::vsync_skips() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return vsync_skips_;
 }
 
 uint64_t FrameRegulator::chained_count() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return chained_count_;
 }
 
 uint64_t FrameRegulator::chain_run() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return chain_run_;
 }
 
 uint64_t FrameRegulator::chain_max() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return chain_max_;
 }
 
 uint64_t FrameRegulator::chains_count() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return chains_count_;
 }
 
 uint64_t FrameRegulator::chain_cuts() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return chain_cuts_;
 }
 
 uint64_t FrameRegulator::fallback_frames() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return fallback_frames_;
 }
 
 void FrameRegulator::note_incomplete(uint32_t pts_us) {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   incomplete_[incomplete_head_] = pts_us;
   incomplete_head_ = (incomplete_head_ + 1) % kIncomplete;
 }
 
 double FrameRegulator::allowance_ms() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return static_cast<double>(allowance_us_) / 1000.0;
 }
 
 uint64_t FrameRegulator::late_slot_count() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return late_slot_;
 }
 
 bool FrameRegulator::servo_locked() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return servo_now_;
 }
 
 void FrameRegulator::set_phase_lock_mode(bool on) {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   phase_lock_mode_ = on;
 }
 
 void FrameRegulator::set_capture_placement(bool on) {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   capture_on_ = on;
 }
 
 bool FrameRegulator::take_margin(double* margin_us) {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   if (!margin_fresh_) return false;
   margin_fresh_ = false;
   *margin_us = margin_us_;
@@ -125,17 +125,17 @@ bool FrameRegulator::take_margin(double* margin_us) {
 }
 
 double FrameRegulator::panel_period_us() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return est_.period_us();
 }
 
 uint64_t FrameRegulator::heals() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return heals_;
 }
 
 uint64_t FrameRegulator::next_release_us() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   return count_ ? held_[0].release_us : 0;
 }
 
@@ -149,7 +149,7 @@ void FrameRegulator::displace(int idx, Displaced* out) {
 
 bool FrameRegulator::offer(const DmaFrame& f, uint64_t arrival_us,
                            uint64_t now_us, Displaced* out) {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   out->n = 0;
   margin_fresh_ = false;
   if (d_us_ <= 0) return true;
@@ -318,7 +318,7 @@ bool FrameRegulator::offer(const DmaFrame& f, uint64_t arrival_us,
 }
 
 void FrameRegulator::heal_slip() {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   bool any = false;
   const uint64_t per = static_cast<uint64_t>(est_.period_us());
   for (int i = 0; i < count_; ++i) {
@@ -402,7 +402,7 @@ bool FrameRegulator::place_by_capture(const CaptureSlot& s, uint64_t now_us,
 }
 
 bool FrameRegulator::release_due(uint64_t now_us, DmaFrame* out) {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<PiMutex> lock(mu_);
   if (count_ == 0 || now_us < held_[0].release_us) return false;
   *out = held_[0].f;
   for (int i = 0; i + 1 < count_; ++i) held_[i] = held_[i + 1];

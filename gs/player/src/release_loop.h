@@ -12,6 +12,7 @@
 
 #include "frame_regulator.h"
 #include "lat_tracker.h"
+#include "pi_mutex.h"
 #include "present_sink.h"
 #include "video_backend.h"
 #include "wake_queue.h"
@@ -130,6 +131,7 @@ class ReleaseLoop {
   bool park_wait_();
   void arm_(uint64_t abs_us);
   void register_sink_fd_();
+  void unregister_sink_fd_();
   void chain_break_check_();
   void stat_rlate_(uint64_t us);
   void stat_hand_(uint64_t us);
@@ -157,6 +159,10 @@ class ReleaseLoop {
   uint64_t last_engage_ms_ = 0;
   uint64_t last_heal_ms_ = 0;
 
+  // Control handshake only (start/park/resume/stop): the release thread
+  // takes this outside its steady-state wake, so it stays a plain mutex
+  // (no normal-priority holder on the data path to invert against) and
+  // keeps std::condition_variable rather than the _any variant.
   std::thread th_;
   std::mutex mu_;
   std::condition_variable cv_;
@@ -167,12 +173,16 @@ class ReleaseLoop {
   std::atomic<bool> rt_applied_{false};
   std::atomic<uint64_t> heals_{0};
 
-  std::mutex margin_mu_;
+  // Taken by the release thread itself on every wake (margin_mu_ on a
+  // fresh offer margin, stats_mu_ on every present/hand-over), contended
+  // against housekeeping's take_margins()/take_stats() at 1 Hz -- on the
+  // release thread's data path, unlike mu_ above, so priority-inherit too.
+  PiMutex margin_mu_;
   std::array<MarginSample, kMarginCap> margins_{};
   int margin_head_ = 0;  // oldest
   int margin_n_ = 0;
 
-  std::mutex stats_mu_;
+  PiMutex stats_mu_;
   std::array<uint32_t, kStatCap> rlate_{};
   std::array<uint32_t, kStatCap> hand_{};
   uint32_t rlate_n_ = 0, hand_n_ = 0;  // samples this window (may exceed kStatCap)

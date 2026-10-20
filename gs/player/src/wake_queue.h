@@ -9,6 +9,7 @@
 #include <sys/eventfd.h>
 #include <vector>
 
+#include "pi_mutex.h"
 #include "video_backend.h"
 
 namespace maburplay {
@@ -40,7 +41,7 @@ class WakeQueue {
   // Append item under lock, then write 1 to the fd (still under lock).
   // This ensures the fd is readable whenever the queue has items.
   void push(T t) {
-    std::lock_guard<std::mutex> lock(mu_);
+    std::lock_guard<PiMutex> lock(mu_);
     queue_.push_back(std::move(t));
     uint64_t val = 1;
     ssize_t ret = write(fd_, &val, sizeof(val));
@@ -52,7 +53,7 @@ class WakeQueue {
   // Holding the lock while reading the fd ensures a concurrent push cannot
   // add items after we clear the queue, leaving it non-empty with an unreadable fd.
   size_t drain(std::vector<T>* out) {
-    std::lock_guard<std::mutex> lock(mu_);
+    std::lock_guard<PiMutex> lock(mu_);
     size_t count = queue_.size();
     for (T& item : queue_) {
       out->push_back(std::move(item));
@@ -74,13 +75,13 @@ class WakeQueue {
 
   // Return the current queue size.
   size_t size() const {
-    std::lock_guard<std::mutex> lock(mu_);
+    std::lock_guard<PiMutex> lock(mu_);
     return queue_.size();
   }
 
  private:
   int fd_ = -1;
-  mutable std::mutex mu_;
+  mutable PiMutex mu_;
   std::vector<T> queue_;
 };
 

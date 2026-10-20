@@ -3,6 +3,7 @@
 // models the OSD hand-off (a pending publish that the OSD-only commit
 // clears). Timing bounds are loose on the late side: ctest runs suites in
 // parallel and the host thread has no real-time priority.
+#include <fcntl.h>
 #include <sys/eventfd.h>
 #include <sys/resource.h>
 #include <time.h>
@@ -77,7 +78,21 @@ struct FakePresentSink : PresentSink {
   FrameRegulator* reg = nullptr;  // to catch an OSD commit while frames are held
   uint64_t last_t_us = 0;
 
-  FakePresentSink() { efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC); }
+  // broken_fd: event_fd() is the read end of a pipe whose write end is
+  // closed immediately, so epoll reports EPOLLHUP on it persistently --
+  // stands in for a dead display fd (a hotplug yank, a crashed KMS driver)
+  // without needing a real display.
+  explicit FakePresentSink(bool broken_fd = false) {
+    if (broken_fd) {
+      int fds[2] = {-1, -1};
+      if (pipe(fds) == 0) {
+        close(fds[1]);
+        efd = fds[0];
+      }
+    } else {
+      efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    }
+  }
   ~FakePresentSink() override { close(efd); }
 
   bool present(const DmaFrame& f) override {
@@ -232,9 +247,17 @@ TEST(park_returns_every_held_frame_once) {
   CHECK(sink.drop_all_calls.load() == 1);
   CHECK(r.rel.size() == 3);
   CHECK(!r.reg.holding());
+  // A parked thread touches nothing on the sink: no late poll_events,
+  // no OSD commit, no paced flip-flop, while it sits in park_wait_().
+  const int poll_at_park = sink.poll_calls.load();
+  const int osd_at_park = sink.osd_calls.load();
+  const bool paced_at_park = sink.paced.load();
   std::this_thread::sleep_for(100ms);
   CHECK(sink.presents() == 0);
   CHECK(r.rel.size() == 3);  // each returned once, nothing more
+  CHECK(sink.poll_calls.load() == poll_at_park);
+  CHECK(sink.osd_calls.load() == osd_at_park);
+  CHECK(sink.paced.load() == paced_at_park);
   // A frame handed while parked goes straight back, never to the sink.
   r.hand(3 * kVb, now_us());
   CHECK(wait_until([&] { return r.rel.size() == 4; }));
@@ -397,6 +420,27 @@ TEST(two_mailbox_engagements_within_100ms_heal_once) {
   sink.signal();
   std::this_thread::sleep_for(30ms);
   CHECK(r.rl.heals() == 1);
+}
+
+TEST(dead_sink_fd_falls_back_to_the_idle_tick_without_spinning) {
+  FakePresentSink sink(/*broken_fd=*/true);
+  Rig r(&sink, 12, false);
+  r.rl.start();
+  // The broken fd's HUP is visible to epoll immediately; give the loop a
+  // moment to see it, DEL it, and settle onto the idle tick.
+  std::this_thread::sleep_for(50ms);
+  const int before = sink.poll_calls.load();
+  std::this_thread::sleep_for(100ms);
+  const int after = sink.poll_calls.load();
+  // A spinning thread would run this hundreds of thousands of times in
+  // 100 ms; the idle tick is 10 ms, so a healthy loop wakes roughly 10
+  // times here. Generous bound for a loaded ctest -j run.
+  std::printf("  poll_events calls in 100ms after the dead fd: %d\n", after - before);
+  CHECK(after - before < 50);
+  // Still presents afterwards: the dead fd cost it an epoll registration,
+  // not the ability to show frames.
+  r.hand(0, now_us());
+  CHECK(wait_until([&] { return sink.presents() == 1; }));
 }
 
 MTEST_MAIN

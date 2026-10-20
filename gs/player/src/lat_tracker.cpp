@@ -47,7 +47,7 @@ uint32_t LatTracker::percentile_(std::vector<uint32_t>& v, int pct) {
 }
 
 void LatTracker::on_submit(const maburgs::AuRecordMeta& m, uint64_t mono_us) {
-  std::lock_guard<std::mutex> lk(mu_);
+  std::lock_guard<PiMutex> lk(mu_);
   const int idx = alloc_(m.pts_us);
   Entry& e = map_[static_cast<std::size_t>(idx)];
   e = Entry{};
@@ -104,7 +104,7 @@ void LatTracker::on_submit(const maburgs::AuRecordMeta& m, uint64_t mono_us) {
 }
 
 void LatTracker::on_decoded(uint32_t pts_us, uint64_t mono_us) {
-  std::lock_guard<std::mutex> lk(mu_);
+  std::lock_guard<PiMutex> lk(mu_);
   const int idx = find_(pts_us);
   if (idx < 0) return;
   Entry& e = map_[static_cast<std::size_t>(idx)];
@@ -116,7 +116,7 @@ void LatTracker::on_decoded(uint32_t pts_us, uint64_t mono_us) {
 }
 
 void LatTracker::on_present(uint32_t pts_us, uint64_t mono_us) {
-  std::lock_guard<std::mutex> lk(mu_);
+  std::lock_guard<PiMutex> lk(mu_);
   const int idx = find_(pts_us);
   if (idx < 0) return;
   Entry& e = map_[static_cast<std::size_t>(idx)];
@@ -127,7 +127,7 @@ void LatTracker::on_present(uint32_t pts_us, uint64_t mono_us) {
 }
 
 void LatTracker::on_commit(uint32_t pts_us, uint64_t commit_mono_us, uint8_t bits) {
-  std::lock_guard<std::mutex> lk(mu_);
+  std::lock_guard<PiMutex> lk(mu_);
   const int idx = find_(pts_us);
   if (idx < 0) return;
   Entry& e = map_[static_cast<std::size_t>(idx)];
@@ -136,7 +136,7 @@ void LatTracker::on_commit(uint32_t pts_us, uint64_t commit_mono_us, uint8_t bit
 }
 
 void LatTracker::on_flip(uint32_t pts_us, uint64_t flip_mono_us, bool exact) {
-  std::lock_guard<std::mutex> lk(mu_);
+  std::lock_guard<PiMutex> lk(mu_);
   const int idx = find_(pts_us);
   if (idx < 0) return;
   Entry& e = map_[static_cast<std::size_t>(idx)];
@@ -187,13 +187,13 @@ void LatTracker::on_flip(uint32_t pts_us, uint64_t flip_mono_us, bool exact) {
 }
 
 void LatTracker::on_drop(uint32_t pts_us) {
-  std::lock_guard<std::mutex> lk(mu_);
+  std::lock_guard<PiMutex> lk(mu_);
   const int idx = find_(pts_us);
   if (idx >= 0) invalidate_(idx);
 }
 
 void LatTracker::flush_all() {
-  std::lock_guard<std::mutex> lk(mu_);
+  std::lock_guard<PiMutex> lk(mu_);
   for (auto& e : map_) e = Entry{};
   // New session's pts space is unrelated to the old one's -- same
   // reasoning as gs/src/main.cpp's lat_anchor.reset() on a discontinuity.
@@ -213,7 +213,7 @@ LatTracker::Line LatTracker::flush_line() {
   double chk_sum_us = 0.0;
   int chk_n = 0;
   {
-    std::lock_guard<std::mutex> lk(mu_);
+    std::lock_guard<PiMutex> lk(mu_);
     L.rows = std::move(completed_);
     completed_.clear();
     L.anchor_ok = anchor_.usable();
@@ -259,18 +259,18 @@ LatTracker::Line LatTracker::flush_line() {
   // breakdowns (they stay stale across a reset on purpose), so storing this
   // window's ranks now leaves the same state as this flush_line() finishing
   // before that flush_all() began.
-  std::lock_guard<std::mutex> lk(mu_);
+  std::lock_guard<PiMutex> lk(mu_);
   p99_frame_ = p99;
   p50_frame_ = p50;
   return L;
 }
 
 LatTracker::Breakdown LatTracker::p99_frame() const {
-  std::lock_guard<std::mutex> lk(mu_);
+  std::lock_guard<PiMutex> lk(mu_);
   return p99_frame_;
 }
 LatTracker::Breakdown LatTracker::p50_frame() const {
-  std::lock_guard<std::mutex> lk(mu_);
+  std::lock_guard<PiMutex> lk(mu_);
   return p50_frame_;
 }
 

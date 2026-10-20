@@ -5,6 +5,7 @@
 #include <mutex>
 
 #include "lateness_window.h"
+#include "pi_mutex.h"
 #include "pts_anchor.h"
 #include "vblank_estimator.h"
 #include "video_backend.h"
@@ -214,7 +215,7 @@ class FrameRegulator {
   }
   static constexpr int kIncomplete = 8;
 
-  mutable std::mutex mu_;
+  mutable PiMutex mu_;
 
   const int64_t d_us_;
   const bool vsync_lock_;
