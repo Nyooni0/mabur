@@ -1,8 +1,143 @@
 #include "frame_regulator.h"
 
+#include <mutex>
 #include <utility>
 
 namespace maburplay {
+
+bool FrameRegulator::enabled() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return d_us_ > 0;
+}
+
+bool FrameRegulator::holding() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return count_ > 0;
+}
+
+void FrameRegulator::on_flip(uint64_t flip_us, bool exact) {
+  std::lock_guard<std::mutex> lock(mu_);
+  est_.on_flip(flip_us, exact);
+}
+
+void FrameRegulator::set_panel_period(double period_us) {
+  std::lock_guard<std::mutex> lock(mu_);
+  est_ = VblankEstimator(period_us);
+}
+
+uint64_t FrameRegulator::held_count() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return held_count_;
+}
+
+uint64_t FrameRegulator::late_count() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return late_count_;
+}
+
+uint64_t FrameRegulator::replaced_count() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return replaced_count_;
+}
+
+uint64_t FrameRegulator::discont_count() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return discont_count_;
+}
+
+double FrameRegulator::hold_ema_ms() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return hold_ema_ms_;
+}
+
+uint64_t FrameRegulator::vsync_skips() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return vsync_skips_;
+}
+
+uint64_t FrameRegulator::chained_count() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return chained_count_;
+}
+
+uint64_t FrameRegulator::chain_run() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return chain_run_;
+}
+
+uint64_t FrameRegulator::chain_max() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return chain_max_;
+}
+
+uint64_t FrameRegulator::chains_count() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return chains_count_;
+}
+
+uint64_t FrameRegulator::chain_cuts() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return chain_cuts_;
+}
+
+uint64_t FrameRegulator::fallback_frames() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return fallback_frames_;
+}
+
+void FrameRegulator::note_incomplete(uint32_t pts_us) {
+  std::lock_guard<std::mutex> lock(mu_);
+  incomplete_[incomplete_head_] = pts_us;
+  incomplete_head_ = (incomplete_head_ + 1) % kIncomplete;
+}
+
+double FrameRegulator::allowance_ms() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return static_cast<double>(allowance_us_) / 1000.0;
+}
+
+uint64_t FrameRegulator::late_slot_count() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return late_slot_;
+}
+
+bool FrameRegulator::servo_locked() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return servo_now_;
+}
+
+void FrameRegulator::set_phase_lock_mode(bool on) {
+  std::lock_guard<std::mutex> lock(mu_);
+  phase_lock_mode_ = on;
+}
+
+void FrameRegulator::set_capture_placement(bool on) {
+  std::lock_guard<std::mutex> lock(mu_);
+  capture_on_ = on;
+}
+
+bool FrameRegulator::take_margin(double* margin_us) {
+  std::lock_guard<std::mutex> lock(mu_);
+  if (!margin_fresh_) return false;
+  margin_fresh_ = false;
+  *margin_us = margin_us_;
+  return true;
+}
+
+double FrameRegulator::panel_period_us() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return est_.period_us();
+}
+
+uint64_t FrameRegulator::heals() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return heals_;
+}
+
+uint64_t FrameRegulator::next_release_us() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return count_ ? held_[0].release_us : 0;
+}
 
 void FrameRegulator::displace(int idx, Displaced* out) {
   if (idx >= count_) return;
@@ -12,13 +147,14 @@ void FrameRegulator::displace(int idx, Displaced* out) {
   ++replaced_count_;
 }
 
-bool FrameRegulator::offer(const DmaFrame& f, uint64_t mono_us,
-                           Displaced* out) {
+bool FrameRegulator::offer(const DmaFrame& f, uint64_t arrival_us,
+                           uint64_t now_us, Displaced* out) {
+  std::lock_guard<std::mutex> lock(mu_);
   out->n = 0;
   margin_fresh_ = false;
   if (d_us_ <= 0) return true;
 
-  const auto obs = anchor_.observe(f.pts_us, mono_us);
+  const auto obs = anchor_.observe(f.pts_us, arrival_us);
   if (obs.discont) {
     // Encoder clock discontinuity (drone restart): the old timebase is
     // dead. Free any held old-timebase frames, show this one now, and
@@ -30,22 +166,22 @@ bool FrameRegulator::offer(const DmaFrame& f, uint64_t mono_us,
 
   uint64_t release = 0;
   uint64_t target_v = 0;
-  servo_now_ = vsync_lock_ && est_.valid(mono_us);
+  servo_now_ = vsync_lock_ && est_.valid(now_us);
   bool by_capture = false;
   if (servo_now_ && sched_cap_us_ > 0) {
     CaptureSlot slot;
-    if (capture_slot(obs.pts64, f.pts_us, mono_us, &slot)) {
+    if (capture_slot(obs.pts64, f.pts_us, arrival_us, &slot)) {
       margin_us_ = static_cast<double>(static_cast<int64_t>(slot.r.release_us) - slot.want);
       margin_fresh_ = true;
       if (!phase_lock_mode_ || capture_on_)
-        by_capture = place_by_capture(slot, mono_us, &release, &target_v, out);
+        by_capture = place_by_capture(slot, now_us, &release, &target_v, out);
     }
   }
   if (servo_now_ && !by_capture) {
-    const auto r = est_.next_release(mono_us, lead_us_);
+    const auto r = est_.next_release(now_us, lead_us_);
     const uint64_t clamp =
         static_cast<uint64_t>(2.0 * est_.period_us()) + lead_us_;
-    if (r.release_us > mono_us + clamp) {
+    if (r.release_us > now_us + clamp) {
       // Implausible hold (corrupted phase): don't trust the grid for
       // this frame; the estimator self-heals on the next real flips.
       servo_now_ = false;
@@ -121,7 +257,7 @@ bool FrameRegulator::offer(const DmaFrame& f, uint64_t mono_us,
   }
   if (count_ == kMaxHeld) displace(0, out);
 
-  if (release <= mono_us) {
+  if (release <= now_us) {
     ++late_count_;
     return true;  // never stack delay on the tail
   }
@@ -135,12 +271,13 @@ bool FrameRegulator::offer(const DmaFrame& f, uint64_t mono_us,
   held_[pos] = Held{f, release, target_v};
   ++count_;
   ++held_count_;
-  const double hold_ms = static_cast<double>(release - mono_us) / 1000.0;
+  const double hold_ms = static_cast<double>(release - now_us) / 1000.0;
   hold_ema_ms_ += (hold_ms - hold_ema_ms_) / 16.0;
   return false;
 }
 
 void FrameRegulator::heal_slip() {
+  std::lock_guard<std::mutex> lock(mu_);
   bool any = false;
   const uint64_t per = static_cast<uint64_t>(est_.period_us());
   for (int i = 0; i < count_; ++i) {
@@ -179,9 +316,9 @@ void FrameRegulator::heal_slip() {
 // later than that slot loses it and goes down the arrival path; the next
 // on-time frame claims the same vblank and wins it (freshest wins), so one
 // late frame costs one hitch and no chain.
-bool FrameRegulator::capture_slot(uint64_t pts64, uint32_t pts32, uint64_t mono_us,
+bool FrameRegulator::capture_slot(uint64_t pts64, uint32_t pts32, uint64_t arrival_us,
                                   CaptureSlot* s) {
-  const int64_t transit = static_cast<int64_t>(mono_us) - static_cast<int64_t>(pts64);
+  const int64_t transit = static_cast<int64_t>(arrival_us) - static_cast<int64_t>(pts64);
   if (!was_incomplete(pts32)) win_.add(transit);
   if (win_.empty()) return false;
   const int64_t floor_us = win_.lo();
@@ -194,17 +331,17 @@ bool FrameRegulator::capture_slot(uint64_t pts64, uint32_t pts32, uint64_t mono_
   return true;
 }
 
-bool FrameRegulator::place_by_capture(const CaptureSlot& s, uint64_t mono_us,
+bool FrameRegulator::place_by_capture(const CaptureSlot& s, uint64_t now_us,
                                       uint64_t* release, uint64_t* target_v,
                                       Displaced* out) {
   const auto& r = s.r;
-  if (r.release_us < mono_us) {
+  if (r.release_us < now_us) {
     ++late_slot_;
     return false;
   }
   const uint64_t per = static_cast<uint64_t>(est_.period_us());
   const uint64_t clamp = 2 * per + lead_us_ + static_cast<uint64_t>(sched_cap_us_);
-  if (r.release_us > mono_us + clamp) return false;  // implausible phase
+  if (r.release_us > now_us + clamp) return false;  // implausible phase
   // Every held frame is older than this one (offers arrive in decode
   // order). One on this vblank loses it (freshest wins); one targeted LATER
   // -- a late frame the arrival path chained forward -- would show after
@@ -223,8 +360,9 @@ bool FrameRegulator::place_by_capture(const CaptureSlot& s, uint64_t mono_us,
   return true;
 }
 
-bool FrameRegulator::release_due(uint64_t mono_us, DmaFrame* out) {
-  if (count_ == 0 || mono_us < held_[0].release_us) return false;
+bool FrameRegulator::release_due(uint64_t now_us, DmaFrame* out) {
+  std::lock_guard<std::mutex> lock(mu_);
+  if (count_ == 0 || now_us < held_[0].release_us) return false;
   *out = held_[0].f;
   for (int i = 0; i + 1 < count_; ++i) held_[i] = held_[i + 1];
   --count_;

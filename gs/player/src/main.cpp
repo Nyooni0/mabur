@@ -1163,7 +1163,8 @@ int main(int argc, char** argv) {
       // presenter's ownership contract is unchanged.
       if (burn) burn->submit(f);
       maburplay::FrameRegulator::Displaced disp;
-      if (regulator.offer(f, mono_us(), &disp))
+      const uint64_t t_now = mono_us();
+      if (regulator.offer(f, t_now, t_now, &disp))
         present_now(f);
       double margin_us = 0.0;
       if (phase_lock && !rate_match.mismatch() && regulator.take_margin(&margin_us))
