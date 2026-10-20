@@ -699,31 +699,88 @@ TEST(servo_triple_burst_claims_the_second_slot) {
   CHECK(!reg.holding());
 }
 
-TEST(heal_slip_preserves_release_order_with_a_mixed_queue) {
-  // heal_slip() moves only servo entries, so a mixed queue [servo, fallback]
-  // could invert the sorted-by-release invariant that
-  // release_due()/next_release_us() head-inspect -- releasing the fallback
-  // frame late and out of pts order. Construct: fallback frame held first
-  // (cold estimator), then warm the grid so a servo frame lands with an
-  // EARLIER release, then heal.
+TEST(order_invariant_displaces_an_older_fallback_hold_behind_a_newer_servo_frame) {
+  // The order invariant is unqualified -- it applies to fallback and
+  // servo entries alike (controller ruling, fix round 3). An
+  // older-pts fallback frame, held with a release the vblank grid
+  // knows nothing about, cannot survive if a newer-pts servo frame's
+  // own vblank target happens to land earlier: showing the fallback
+  // frame afterward would be backwards, so it is displaced instead,
+  // freshest wins, exactly like any other collision. (This used to be
+  // heal_slip_preserves_release_order_with_a_mixed_queue, back when
+  // the fallback frame was expected to survive and head the queue --
+  // that construction is no longer reachable; see
+  // heal_slip_still_finds_the_true_head_in_a_mixed_queue below for
+  // what replaces its coverage of heal_slip() itself.)
   FrameRegulator reg(12, true, 3);
   FrameRegulator::Displaced disp;
   DmaFrame out;
-  CHECK(!reg.offer(frame(0), kT0, kT0, &disp));           // fallback @ kT0+12ms
+  CHECK(!reg.offer(frame(0), kT0, kT0, &disp));  // fallback @ kT0+12ms (cold estimator)
   // Warm with flips whose next grid slot is kT0+8000.
   for (int i = 8; i >= 1; --i) reg.on_flip(kT0 + 8'000 - i * kVb, true);
   CHECK(!reg.offer(frame(kFrame), kT0 + 2'000, kT0 + 2'000, &disp));  // servo @ kT0+5000
+  CHECK(disp.n == 1);
+  CHECK(disp.f[0].opaque == frame(0).opaque);  // the older fallback hold, displaced
+  CHECK(reg.next_release_us() == kT0 + 5'000);
+  CHECK(reg.release_due(kT0 + 5'000, &out));
+  CHECK(out.opaque == frame(kFrame).opaque);   // the servo frame releases normally
+  CHECK(!reg.holding());
+}
+
+TEST(heal_slip_still_finds_the_true_head_in_a_mixed_queue) {
+  // heal_slip() moves only servo entries, so a mixed queue [servo,
+  // fallback] can come out of sorted-by-release order after a slip;
+  // the re-sort at the end of heal_slip() must still leave held_[0]
+  // the true earliest release, so release_due()/next_release_us()
+  // never lose or duplicate anything. This is the reachable shape:
+  // an OLDER servo frame held first, then a NEWER fallback frame held
+  // with a release close behind it (close enough that one period of
+  // slip overtakes it) -- the order invariant above does not reject
+  // this pairing at offer time, because the fallback release is still
+  // later than the servo one when both are held.
+  //
+  // Getting there needs now_us far enough from the vblank grid's phase
+  // to make the implausible-phase clamp drop this frame to the
+  // fallback rule (a single artificial flip, same trick as
+  // servo_safety_clamp_uses_fallback_rule), NOT estimator staleness:
+  // staleness needs now_us hundreds of ms past the last flip, and the
+  // fallback release (arrival_us + D) would then dwarf the servo
+  // frame's by the same margin, putting it far outside the one-period
+  // window a single heal_slip() shift can ever close.
+  FrameRegulator reg(12, true, 3);
+  warm(reg);
+  const uint64_t phase = kT0 + 7 * kVb;
+  FrameRegulator::Displaced disp;
+  DmaFrame out;
+
+  CHECK(!reg.offer(frame(0), phase + kVb - 9'000, phase + kVb - 9'000, &disp));
+  const uint64_t release1 = phase + kVb - kLead;  // f0 (servo, older pts)
+  CHECK(reg.next_release_us() == release1);
+
+  reg.on_flip(phase + 10 * kVb, true);  // artificial future jump
+
+  const uint64_t arrival1 = phase + kVb - 5'000;  // f1's own decode stamp
+  const uint64_t now1 = phase + kVb - 2'000;      // f1's hand-over
+  CHECK(!reg.offer(frame(kFrame), arrival1, now1, &disp));  // f1: clamp -> fallback, held
   CHECK(disp.n == 0);
-  CHECK(reg.next_release_us() == kT0 + 5'000);           // servo heads
+  CHECK(reg.fallback_frames() == 1);
+  const uint64_t release2 = arrival1 + kD;  // f1 (fallback, newer pts) -- still later than f0
+  CHECK(release2 > release1 && release2 - release1 < kVb);  // within one period
+  CHECK(reg.next_release_us() == release1);  // f0 still heads: not backwards yet
+
   reg.heal_slip();
   CHECK(reg.heals() == 1);
-  // Servo slipped past the fallback frame: head must be the fallback
-  // release (kT0+12ms), not a stale claim of the slipped servo slot.
-  CHECK(reg.next_release_us() == kT0 + kD);
-  CHECK(reg.release_due(kT0 + kD, &out));
-  CHECK(out.opaque == frame(0).opaque);                  // fallback first
-  CHECK(reg.release_due(kT0 + 5'000 + kVb, &out));
-  CHECK(out.opaque == frame(kFrame).opaque);             // slipped servo
+  // f0 (servo) slips one period past f1 (fallback, unmoved): the
+  // re-sort still reports the TRUE earliest release correctly -- that
+  // it is now f1's is heal_slip()'s known, unfixed gap (ledgered in
+  // the fix-round-3 report, not addressed here): f1 (newer pts) now
+  // heads ahead of f0 (older pts). No frame is lost or duplicated
+  // either way.
+  CHECK(reg.next_release_us() == release2);
+  CHECK(reg.release_due(release2, &out));
+  CHECK(out.opaque == frame(kFrame).opaque);     // f1, head-correct
+  CHECK(reg.release_due(release1 + kVb, &out));
+  CHECK(out.opaque == frame(0).opaque);          // f0, slipped
   CHECK(!reg.holding());
 }
 
