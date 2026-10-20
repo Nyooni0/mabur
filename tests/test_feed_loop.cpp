@@ -151,10 +151,13 @@ struct Rig {
     w.finish(complete, maburgs::AuLatMeta{});
     db.notify(0);
   }
-  // maburplay's service_feed(), minus the frame holders.
+  // maburplay's service_feed(), minus the frame holders. Drains both queues
+  // into the one "main thread" view, submit before delivery (today's order).
   bool service() {
+    feed->take_submit_notes(&notes);
     feed->take_notes(&notes);
     if (!feed->flush_waiting()) return false;
+    feed->take_submit_notes(&notes);
     feed->take_notes(&notes);
     feeder.on_flush();
     backend->flush();
@@ -196,6 +199,19 @@ TEST(a_slice_reaches_the_decoder_while_the_main_thread_is_busy) {
   for (const FeedNote& n : r.notes)
     if (n.kind == FeedNote::Kind::kSubmit && n.meta.pts_us == 200u) submit_seen = true;
   CHECK(submit_seen);
+}
+
+TEST(submit_notes_leave_through_their_own_queue) {
+  Rig r("notes");
+  r.start_and_connect();
+  r.publish_whole(100, 0, true);  // complete sid-0: arms, submits, delivers
+  REQUIRE(r.fake->wait_for('W', 100, 500ms));
+  std::this_thread::sleep_for(10ms);
+  std::vector<FeedNote> sub, del;
+  r.fl->take_submit_notes(&sub);
+  r.fl->take_notes(&del);
+  CHECK(sub.size() == 1 && sub[0].kind == FeedNote::Kind::kSubmit);
+  for (auto& n : del) CHECK(n.kind == FeedNote::Kind::kDelivery);
 }
 
 TEST(flush_parks_the_feed_until_the_main_thread_resumes) {

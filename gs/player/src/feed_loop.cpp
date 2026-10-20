@@ -103,8 +103,20 @@ void FeedLoop::take_notes(std::vector<FeedNote>* out) {
   notes_.clear();
 }
 
+void FeedLoop::take_submit_notes(std::vector<FeedNote>* out) {
+  std::lock_guard<std::mutex> lk(mu_);
+  for (FeedNote& n : submit_notes_) out->push_back(std::move(n));
+  submit_notes_.clear();
+}
+
 void FeedLoop::push_note(FeedNote&& n) {
   std::lock_guard<std::mutex> lk(mu_);
+  if (n.kind == FeedNote::Kind::kSubmit) {
+    // No bytes, so no backpressure cap: the decode-output side drains this
+    // once per frame, well under the delivery queue's stall window.
+    submit_notes_.push_back(std::move(n));
+    return;
+  }
   if (notes_.size() >= cfg_.max_notes && !n.au.empty()) {
     std::vector<uint8_t>().swap(n.au);  // main is stalled: keep the record, not its bytes
     notes_dropped_.fetch_add(1);

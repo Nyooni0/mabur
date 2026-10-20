@@ -175,11 +175,13 @@ Bench record: `docs/findings/2026-10-10-slice-salvage.md`.
   vs 0.83 ms on its own thread), which ate most of the streamed-decode
   gain. The main thread keeps frame *output* (`get_frame`/release), the
   presenter, the regulator, OSD compose, the raw DVR and `lat`, plus the
-  watchdog; it learns of submits, delivered bytes and figures through a
-  bounded note queue (`FeedNote`, `kSubmit` before the MPP call so `lat`
-  sees submit before decode, `kDelivery` after, with the AU's bytes moved
-  in for the DVR — beyond 256 queued notes a note keeps its meta and drops
-  its bytes, counted `notes_dropped`). A flush and the watchdog "park" the
+  watchdog; it learns of submits, delivered bytes and figures through two
+  note queues (`FeedNote`, routed by `Kind`): `kSubmit` leaves before the
+  MPP call so `lat` sees submit before decode, through `take_submit_notes`
+  (no cap — a submit note carries no bytes); `kDelivery` leaves after, with
+  the AU's bytes moved in for the DVR, through `take_notes` — beyond 256
+  queued delivery notes a note keeps its meta and drops its bytes, counted
+  `notes_dropped`. A flush and the watchdog "park" the
   feed between ring events (outside every decoder call, the only place MPP
   reset/destroy/create is safe): main releases the frames the presenter,
   regulator and recorder hold and resets or recreates MPP while the feed is

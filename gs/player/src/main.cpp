@@ -1501,7 +1501,12 @@ int main(int argc, char** argv) {
   // display, OSD, DVR, stats, the watchdog and the decoder's OUTPUT side.
   maburplay::FeedLoop feed(ring, router, feeder, {});
   auto drain_notes = [&]() {
-    std::vector<maburplay::FeedNote> got;
+    // Submit notes before delivery notes (today's relative order, since the
+    // router emits a close's submit before its delivery): there is no
+    // decode-output thread yet to drain take_submit_notes, so this is it.
+    std::vector<maburplay::FeedNote> sub, got;
+    feed.take_submit_notes(&sub);
+    for (maburplay::FeedNote& n : sub) process_note(std::move(n));
     feed.take_notes(&got);
     for (maburplay::FeedNote& n : got) process_note(std::move(n));
   };
