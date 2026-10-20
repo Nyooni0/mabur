@@ -237,6 +237,36 @@ TEST(late_handover_presents_immediately) {
   CHECK(r.rel.size() == 0);
 }
 
+TEST(a_pair_partner_handed_just_after_its_partner_presented_waits_a_period) {
+  // A is held and presented at its release (vblank V's). B, its pair
+  // partner, was decoded before that release but is handed over after A
+  // went out: B's arrival maps to V, which A already has, so B must wait
+  // for V + period. Presented at once it would queue behind A's pending
+  // flip and A would show twice.
+  FakePresentSink sink;
+  Rig r(&sink, 12, true);
+  r.rl.start();
+  const uint64_t t = now_us();
+  const uint64_t rel_a = warm_for_release(r.reg, t, 10'000);
+  r.hand(0, t);
+  REQUIRE(wait_until([&] { return sink.presents() == 1; }));
+  r.hand(static_cast<uint32_t>(kVb), rel_a - 100);
+  const uint64_t handed = now_us();
+  CHECK(handed < rel_a + kVb - 2'000);  // handed well before V + period's release
+  const int64_t until = static_cast<int64_t>(rel_a + kVb - 1'000) - static_cast<int64_t>(now_us());
+  if (until > 0) std::this_thread::sleep_for(std::chrono::microseconds(until));
+  CHECK(sink.presents() == 1);  // nothing more before V + period's release
+  REQUIRE(wait_until([&] { return sink.presents() == 2; }));
+  const auto s = sink.snapshot();
+  REQUIRE(s.size() == 2);
+  std::printf("  B presented %+lld us from V+period's release\n",
+              static_cast<long long>(s[1].t_us) - static_cast<long long>(rel_a + kVb));
+  CHECK(s[1].pts == kVb);
+  CHECK(s[1].t_us + 300 >= rel_a + kVb);
+  CHECK(r.reg.late_count() == 0);
+  CHECK(r.rel.size() == 0);
+}
+
 TEST(displaced_frames_go_to_the_release_queue_not_the_sink) {
   FakePresentSink sink;
   Rig r(&sink, 12, false);  // fallback: one slot, so the second displaces the first

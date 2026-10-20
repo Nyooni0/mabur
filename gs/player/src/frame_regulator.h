@@ -50,7 +50,14 @@ namespace maburplay {
 // allowed to trust right now -- the vblank estimator's validity, the
 // implausible-phase clamps, and the final late check. A frame whose
 // arrival-derived slot has already passed by now_us presents at once
-// instead of being parked on a later one.
+// instead of being parked on a later one -- unless a frame that already
+// left the regulator (released, or presented at once) was aimed at that
+// vblank. The regulator remembers the vblank of the last servo frame out
+// and treats it, and anything before it, as taken: a burst pair's second
+// frame decoded just before its partner's release but offered just after
+// it would otherwise present at once onto the vblank its partner was
+// committed for, queue behind that pending flip and make the partner show
+// twice. It takes the first vblank after that one instead.
 //
 // Queue depth (bench A/B): the old
 // single-slot mailbox meant that once D approached the spacing to the
@@ -180,6 +187,12 @@ class FrameRegulator {
   void heal_slip();
   uint64_t heals() const;
 
+  // Forgets the vblank the last frame out was aimed at (see the class
+  // comment). Call once the display shows or queues nothing the regulator
+  // let go of -- the release thread does it when a park has dropped
+  // everything. A discontinuity and set_panel_period() forget it too.
+  void reset_output_history();
+
   // Earliest pending release (0 = nothing held). The release thread arms
   // its timer to it.
   uint64_t next_release_us() const;
@@ -224,6 +237,9 @@ class FrameRegulator {
   Held held_[kMaxHeld];  // held_[0] releases first (sorted by release_us)
   int count_ = 0;
   bool servo_now_ = false;
+  // Target vblank of the last servo frame that left (released or presented
+  // at once); 0 = none since the last reset.
+  uint64_t last_out_v_ = 0;
 
   uint64_t held_count_ = 0;
   uint64_t late_count_ = 0;

@@ -23,6 +23,12 @@ void FrameRegulator::on_flip(uint64_t flip_us, bool exact) {
 void FrameRegulator::set_panel_period(double period_us) {
   std::lock_guard<PiMutex> lock(mu_);
   est_ = VblankEstimator(period_us);
+  last_out_v_ = 0;  // a vblank on the old grid means nothing on the new one
+}
+
+void FrameRegulator::reset_output_history() {
+  std::lock_guard<PiMutex> lock(mu_);
+  last_out_v_ = 0;
 }
 
 uint64_t FrameRegulator::held_count() const {
@@ -161,6 +167,7 @@ bool FrameRegulator::offer(const DmaFrame& f, uint64_t arrival_us,
     // let the NEXT frame seed a fresh floor.
     while (count_ > 0) displace(0, out);
     ++discont_count_;
+    last_out_v_ = 0;
     return true;
   }
 
@@ -208,6 +215,19 @@ bool FrameRegulator::offer(const DmaFrame& f, uint64_t arrival_us,
       const auto r = est_.release_at_or_after(arrival_us, lead_us_);
       release = r.release_us;
       target_v = r.vblank_us;
+      const uint64_t per = static_cast<uint64_t>(est_.period_us());
+      const uint64_t hp = per / 2;
+      // ...except onto a vblank a frame that already left was aimed at:
+      // that frame is committed for it (or queued behind the flip before
+      // it), and a newer one presented now would queue behind it and make
+      // it show twice. The first vblank after the taken one is the
+      // earliest this frame can follow it. Half a period of tolerance, as
+      // for a held occupant below, absorbs a grid re-estimate between the
+      // two frames.
+      if (last_out_v_ != 0 && per > 0 && target_v < last_out_v_ + hp) {
+        target_v += (last_out_v_ + hp - target_v + per - 1) / per * per;
+        release = target_v > lead_us_ ? target_v - lead_us_ : 0;
+      }
       // Sequential-slot assignment (hw): base+enh of a
       // capture pair complete together (FEC generation close), so their
       // decodes land within ~1 ms while their pts sit a full frame
@@ -222,8 +242,6 @@ bool FrameRegulator::offer(const DmaFrame& f, uint64_t arrival_us,
       // construction (chaining would creep unboundedly under a
       // faster-than-panel source). If the next slot is occupied too
       // (deep burst), the newest frame claims it -- freshest wins.
-      const uint64_t per = static_cast<uint64_t>(est_.period_us());
-      const uint64_t hp = per / 2;
       const auto occupant = [&](uint64_t slot) {
         for (int i = 0; i < count_; ++i) {
           const uint64_t hv = held_[i].target_v;
@@ -300,6 +318,7 @@ bool FrameRegulator::offer(const DmaFrame& f, uint64_t arrival_us,
     // Flush them all, so order never depends on that call order.
     while (count_ > 0) displace(0, out);
     ++late_count_;
+    if (target_v > last_out_v_) last_out_v_ = target_v;
     return true;  // never stack delay on the tail
   }
 
@@ -405,6 +424,7 @@ bool FrameRegulator::release_due(uint64_t now_us, DmaFrame* out) {
   std::lock_guard<PiMutex> lock(mu_);
   if (count_ == 0 || now_us < held_[0].release_us) return false;
   *out = held_[0].f;
+  if (held_[0].target_v > last_out_v_) last_out_v_ = held_[0].target_v;
   for (int i = 0; i + 1 < count_; ++i) held_[i] = held_[i + 1];
   --count_;
   return true;

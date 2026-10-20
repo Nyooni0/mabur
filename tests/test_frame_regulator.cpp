@@ -1223,19 +1223,13 @@ TEST(servo_handover_past_its_release_presents_now_not_held_a_period) {
   CHECK(!reg.holding());  // not parked on V2
 }
 
-TEST(arrival_derived_slot_displaces_an_older_hold_it_would_otherwise_follow) {
-  // A newer frame's own arrival-derived natural slot can land on a
-  // vblank an OLDER held frame has already been chained past (that
-  // older frame collided and moved forward; this frame's own arrival
-  // says nothing about that) -- in particular, a slot an older frame
-  // once held and has since been released can look entirely free. The
-  // order invariant resolves this not by relocating the new frame (an
-  // earlier attempt that floored it onto the older frame's slot missed
-  // deeper chains -- see the randomised test below) but by displacing
-  // whichever held frame can no longer show in order: here, f1. f2 then
-  // presents at once (it is, after all, now the newest thing still
-  // waiting and its own slot has already passed). The assertion is
-  // order and accounting, not that f1 ever shows.
+TEST(a_vacated_slot_stays_taken_for_a_newer_frame_behind_a_chain) {
+  // f0 holds V1 and f1 collides with it, chaining to V1 + period. f0 is
+  // released. f2's own arrival maps to V1 again and its hand-over is past
+  // V1's release -- but f0 was committed for V1, so V1 is taken. f2 moves
+  // to the first vblank after it, finds f1 there and chains once more, to
+  // V1 + 2 periods. Nothing is displaced, nothing presents at once, and
+  // the three come out in pts order on consecutive vblanks.
   FrameRegulator reg(12, true, 3);
   warm(reg);
   const uint64_t V1 = kT0 + 8 * kVb;
@@ -1244,28 +1238,27 @@ TEST(arrival_derived_slot_displaces_an_older_hold_it_would_otherwise_follow) {
   CHECK(!reg.offer(frame(0), V1 - 9'000, V1 - 9'000, &disp));       // f0 -> V1
   CHECK(!reg.offer(frame(kFrame), V1 - 8'000, V1 - 8'000, &disp));  // collides, chains to V1+kVb
   CHECK(disp.n == 0);
-  CHECK(reg.release_due(V1 - 3'000, &out));  // drains f0 -- V1 now vacant
+  CHECK(reg.release_due(V1 - kLead, &out));  // f0 goes out for V1
   CHECK(out.opaque == frame(0).opaque);
-  // f2's OWN arrival (V1 - 7'000) maps to the now-vacant V1, and its
-  // hand-over is indeed late relative to that slot -- while f1 is still
-  // held two slots further out. f2 presents at once, and f1 -- which
-  // would otherwise show AFTER f2 despite an earlier pts -- is displaced.
-  CHECK(reg.offer(frame(2 * kFrame), V1 - 7'000, V1 - 2'000, &disp));
-  CHECK(disp.n == 1);
-  CHECK(disp.f[0].opaque == frame(kFrame).opaque);  // f1 displaced, not shown
-  CHECK(reg.late_count() == 1);
+  CHECK(!reg.offer(frame(2 * kFrame), V1 - 7'000, V1 - 2'000, &disp));  // f2: held
+  CHECK(disp.n == 0);
+  CHECK(reg.late_count() == 0);
+  CHECK(reg.release_due(V1 + kVb - kLead, &out));
+  CHECK(out.opaque == frame(kFrame).opaque);
+  CHECK(!reg.release_due(V1 + 2 * kVb - kLead - 1, &out));
+  CHECK(reg.release_due(V1 + 2 * kVb - kLead, &out));
+  CHECK(out.opaque == frame(2 * kFrame).opaque);
   CHECK(!reg.holding());
 }
 
 TEST(deeper_chain_emits_monotonic_pts_with_full_accounting) {
   // A deeper version of the same shape: f1 chains past f0's slot; f0
-  // drains; f2 and f3 both land back on the now-vacant slot with late
-  // hand-overs and present at once; f4 then lands on a fresh, later
-  // slot and is held. An earlier (floor-based) fix got exactly this
-  // sequence wrong -- f4 ended up shown before f3. The order invariant
-  // instead displaces whatever can no longer show in turn, so every
-  // offered frame is accounted for exactly once (emitted xor displaced)
-  // and whatever IS emitted comes out in increasing pts order.
+  // drains; f2 and f3 both map back to f0's vblank with late hand-overs;
+  // f4 maps to the vblank after it. f0's vblank stays taken, so f2 and f3
+  // chain past f1 and f3 takes f2's slot (freshest wins); f4 finds f1 on
+  // its own slot and claims the one after it from f3. Every offered frame
+  // is accounted for exactly once (emitted xor displaced), the emitted ones
+  // come out in increasing pts order, and f1 -- held throughout -- is shown.
   FrameRegulator reg(12, true, 3);
   warm(reg);
   const uint64_t V1 = kT0 + 8 * kVb;
@@ -1304,9 +1297,8 @@ TEST(deeper_chain_emits_monotonic_pts_with_full_accounting) {
     const bool in_d = std::find(displaced.begin(), displaced.end(), p) != displaced.end();
     CHECK(in_e != in_d);
   }
-  // f1 is specifically the one the old (floor-based) fix got wrong --
-  // pin it displaced here, not merely "accounted for".
-  CHECK(std::find(displaced.begin(), displaced.end(), pts[1]) != displaced.end());
+  CHECK(emitted == (std::vector<uint32_t>{pts[0], pts[1], pts[4]}));
+  CHECK(displaced == (std::vector<uint32_t>{pts[2], pts[3]}));
   // Whatever IS emitted comes out in increasing pts order.
   for (size_t i = 1; i < emitted.size(); ++i) CHECK(emitted[i] > emitted[i - 1]);
 }
@@ -1333,6 +1325,86 @@ TEST(late_frame_offered_before_the_drain_displaces_every_held_frame) {
   CHECK(!reg.release_due(V2 - 1'000, &out));
 }
 
+TEST(pair_partner_handed_after_its_partner_left_takes_the_next_vblank) {
+  // A burst pair: A is decoded and offered before its release and goes out
+  // on vblank V at V - lead. B, its partner one pts step later, is decoded
+  // 0.1 ms before that release but offered 0.1 ms after it. B's arrival
+  // maps to V too -- the vblank A has already been committed for. A is no
+  // longer held, so only the regulator's memory of what it let go of can
+  // see that V is taken: B waits for V + period instead of presenting at
+  // once behind A's pending flip (which would make A repeat).
+  FrameRegulator reg(12, true, 3);
+  warm(reg);
+  const uint64_t V = kT0 + 8 * kVb;
+  const uint64_t relV = V - kLead;
+  FrameRegulator::Displaced disp;
+  DmaFrame out;
+  CHECK(!reg.offer(frame(0), relV - 800, relV - 700, &disp));  // A -> V
+  CHECK(reg.release_due(relV, &out));
+  CHECK(out.opaque == frame(0).opaque);
+  CHECK(!reg.offer(frame(kFrame), relV - 100, relV + 100, &disp));  // B: held
+  CHECK(disp.n == 0);
+  CHECK(reg.late_count() == 0);
+  CHECK(reg.next_release_us() == relV + kVb);
+  CHECK(!reg.release_due(relV + kVb - 1, &out));
+  CHECK(reg.release_due(relV + kVb, &out));
+  CHECK(out.opaque == frame(kFrame).opaque);
+}
+
+TEST(a_frame_presented_at_once_marks_its_vblank_taken) {
+  // S's own slot V has passed by the time it is offered and nothing went
+  // out on V, so S presents at once. T, decoded before V's release and
+  // offered just after S, maps to V as well: S has it, so T is held for
+  // V + period.
+  FrameRegulator reg(12, true, 3);
+  warm(reg);
+  const uint64_t V = kT0 + 8 * kVb;
+  const uint64_t relV = V - kLead;
+  FrameRegulator::Displaced disp;
+  DmaFrame out;
+  CHECK(reg.offer(frame(0), relV - 900, relV + 1'000, &disp));  // S: at once
+  CHECK(reg.late_count() == 1);
+  CHECK(!reg.offer(frame(kFrame), relV - 50, relV + 1'100, &disp));  // T: held
+  CHECK(disp.n == 0);
+  CHECK(reg.late_count() == 1);
+  CHECK(reg.next_release_us() == relV + kVb);
+  CHECK(reg.release_due(relV + kVb, &out));
+  CHECK(out.opaque == frame(kFrame).opaque);
+}
+
+TEST(forgetting_the_output_history_lets_a_late_frame_present_at_once) {
+  // The history of the last frame out is forgotten when a park dropped
+  // everything (reset_output_history), when the panel grid is reseeded
+  // (set_panel_period) and on a pts discontinuity. The pair partner of
+  // pair_partner_handed_after_its_partner_left_takes_the_next_vblank then
+  // presents at once: its slot has passed and nothing holds it any more.
+  for (int how = 0; how < 3; ++how) {
+    FrameRegulator reg(12, true, 3);
+    warm(reg);
+    const uint64_t V = kT0 + 8 * kVb;
+    const uint64_t relV = V - kLead;
+    FrameRegulator::Displaced disp;
+    DmaFrame out;
+    CHECK(!reg.offer(frame(0), relV - 800, relV - 700, &disp));
+    CHECK(reg.release_due(relV, &out));
+    uint32_t next_pts = static_cast<uint32_t>(kFrame);
+    if (how == 0) {
+      reg.reset_output_history();
+    } else if (how == 1) {
+      reg.set_panel_period(static_cast<double>(kVb));
+      warm(reg);
+    } else {
+      CHECK(reg.offer(frame(5'000'000), relV - 150, relV + 50, &disp));  // drone restart
+      CHECK(reg.discont_count() == 1);
+      next_pts = 5'000'000 + static_cast<uint32_t>(kFrame);
+    }
+    const uint64_t late_before = reg.late_count();
+    CHECK(reg.offer(frame(next_pts), relV - 100, relV + 100, &disp));
+    CHECK(reg.late_count() == late_before + 1);
+    CHECK(!reg.holding());
+  }
+}
+
 namespace {
 // Drives a regulator through n decode/hand-over pairs at src_period_us,
 // feeding on_flip at panel_period_us. Arrivals and hand-overs both move
@@ -1345,6 +1417,10 @@ namespace {
 //  - bursts: 10% of the time a decode stall holds back 2-4 frames, which
 //    then arrive back-to-back (0-1.5 ms apart) at the last one's
 //    nominal arrival.
+//  - pairs: every odd frame is the second of a burst pair, decoded
+//    0.5-1.5 ms after its partner, and half of them are handed over up to
+//    2 ms after their decode -- so a partner can be offered just after the
+//    first frame of its pair was released.
 // Returns every frame actually emitted (via offer()'s immediate return
 // or release_due, in that order) and every frame displaced, both as
 // their own pts_us.
@@ -1357,6 +1433,7 @@ struct OrderFuzzMode {
   bool stalls;
   double drain_first_p;
   bool bursts;
+  bool pairs;
 };
 
 OrderFuzzResult run_order_fuzz(unsigned seed, int n, double src_period_us,
@@ -1393,8 +1470,11 @@ OrderFuzzResult run_order_fuzz(unsigned seed, int n, double src_period_us,
       arr_t = last_arr + U(rng) * 1'500.0;  // decoded back-to-back
     }
     if (burst_left > 0) --burst_left;
+    const bool pair_second = mode.pairs && (i % 2) == 1;
+    if (pair_second) arr_t = last_arr + 500.0 + U(rng) * 1'000.0;
     arr_t = std::max(arr_t, last_arr);
     double now_t = mode.stalls && U(rng) < 0.25 ? arr_t + U(rng) * 20'000.0 : arr_t;
+    if (pair_second && U(rng) < 0.5) now_t = arr_t + U(rng) * 2'000.0;
     now_t = std::max(now_t, last_now);
     last_arr = arr_t;
     last_now = now_t;
@@ -1420,17 +1500,20 @@ TEST(randomised_order_fuzz_never_emits_backwards) {
   // placement on and off, chain_budget bounded and unbounded, in two
   // pump shapes: drain-then-offer with stalled hand-overs, and a mixed
   // pump (offer before the drain 30% of the time) with decode bursts on
-  // top. Every offered frame is accounted for exactly once (emitted xor
-  // displaced) and the emitted ones never go backwards in pts. Cheap
-  // enough for the host suite.
+  // top, plus burst pairs whose second frame is often handed over just
+  // after the first one's release. Every offered frame is accounted for
+  // exactly once (emitted xor displaced) and the emitted ones never go
+  // backwards in pts. Cheap enough for the host suite.
   const double kPanel = 1e6 / 60.0;
   const double rates[] = {1e6 / 59.94, 1e6 / 100.0};
   const int budgets[] = {0, 3};
   const int caps[] = {0, 16};
   const unsigned seeds[] = {1, 2, 3};
   const OrderFuzzMode modes[] = {
-      {/*stalls=*/true, /*drain_first_p=*/1.0, /*bursts=*/false},
-      {/*stalls=*/true, /*drain_first_p=*/0.7, /*bursts=*/true},
+      {/*stalls=*/true, /*drain_first_p=*/1.0, /*bursts=*/false, /*pairs=*/false},
+      {/*stalls=*/true, /*drain_first_p=*/0.7, /*bursts=*/true, /*pairs=*/false},
+      {/*stalls=*/false, /*drain_first_p=*/1.0, /*bursts=*/false, /*pairs=*/true},
+      {/*stalls=*/true, /*drain_first_p=*/0.7, /*bursts=*/false, /*pairs=*/true},
   };
   int backwards = 0, misaccounted = 0;
   for (const OrderFuzzMode& mode : modes) {

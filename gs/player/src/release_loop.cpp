@@ -362,6 +362,9 @@ void ReleaseLoop::park_work_() {
     lat_.on_drop(f.pts_us);
     releases_.push(f);
   }
+  // The sink holds nothing now, so no vblank is taken by a frame the
+  // regulator let go of.
+  reg_.reset_output_history();
   in_.drain(&handed_);
   for (const HandedFrame& h : handed_) {
     lat_.on_drop(h.f.pts_us);

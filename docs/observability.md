@@ -662,7 +662,12 @@ against it, not against the housekeeping loop that prints the line.
 - `late=` — frames whose release had already passed when they were
   offered, presented at once. Every frame still held then is older and is
   displaced (counted in `replaced=`), including one already due but not
-  yet released, so nothing shows after a newer frame.
+  yet released, so nothing shows after a newer frame. A frame whose
+  arrival maps to a vblank the last frame out (released or presented at
+  once) was aimed at is not late: that vblank is taken, so the frame is
+  held for the first vblank after it (a burst pair's second frame handed
+  over just after its partner's release; presented at once it would queue
+  behind the partner's flip and the partner would show twice).
 - `replaced=` — held frames displaced and never shown: a newer frame took
   their vblank slot, a full queue evicted its oldest, a chain cut, or the
   release order had to be kept — a frame due to release after a newer one

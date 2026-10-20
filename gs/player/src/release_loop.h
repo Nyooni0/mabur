@@ -51,7 +51,9 @@ namespace maburplay {
 //
 // Park: the thread drops everything the sink holds (drop_all), returns
 // every held frame and every frame still in the hand-over queue to
-// `releases`, disarms the timer and waits on the control fd. Frames handed
+// `releases`, clears the regulator's output history
+// (FrameRegulator::reset_output_history), disarms the timer and waits on
+// the control fd. Frames handed
 // over while parked go straight back to `releases` (no present until
 // resume). park() returns once the thread confirms; a park that times out
 // is withdrawn and leaves the thread running as before. Before start()
