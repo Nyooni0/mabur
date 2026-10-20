@@ -140,7 +140,9 @@ anything slower than itself:
   `lat.on_decoded`, the source-rate sample, the burned recorder's
   `submit()`, the hand-over to the release thread, and then the
   framebuffer prime, so the release thread's present() finds the
-  frame's framebuffer cached.
+  frame's framebuffer cached. It also takes the submit notes after every
+  poll round, frame or not, so they never queue up in the feed while the
+  decoder emits nothing.
 - **Release thread** (`ReleaseLoop`, `release_loop.h`, `SCHED_FIFO` at
   `rt_priority`): owns the `FrameRegulator`'s decisions and every call
   into the display. It sleeps on an absolute timer armed to the next

@@ -317,6 +317,30 @@ TEST(an_incomplete_note_reaches_the_regulator_before_its_frame) {
   CHECK(allowance_after_late_frame(p.reg) < 3.0);
 }
 
+TEST(submit_notes_are_drained_every_round_with_no_frame_decoded) {
+  // The decoder emits nothing (a cold start before the first picture, or
+  // a wedged decoder): the feed's submit notes must not pile up waiting
+  // for a frame -- the pump drains them every poll round.
+  Rig r("pump_nofr");
+  PumpFake fake;
+  Pump p;
+  p.pump.set_feed(r.fl);
+  fake.init({}, p.pump.sink());
+  p.pump.set_backend(&fake);
+  r.start_and_connect();
+  p.pump.start();
+  for (uint32_t i = 0; i < 8; ++i) {
+    r.publish_whole(i * kFrameStep, 0, true);
+    REQUIRE(r.fake->wait_for('W', i * kFrameStep, 500ms));
+  }
+  std::this_thread::sleep_for(100ms);  // a hundred idle rounds or more
+  std::vector<maburplay::FeedNote> left;
+  r.fl->take_submit_notes(&left);
+  CHECK(left.empty());
+  CHECK(p.pump.frames() == 0);
+  CHECK(p.out.size() == 0);
+}
+
 TEST(park_drains_pending_releases_into_the_backend_they_belong_to) {
   PumpFake old_, new_;
   Pump p;

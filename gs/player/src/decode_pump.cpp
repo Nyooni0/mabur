@@ -61,17 +61,20 @@ double DecodePump::source_hz() const {
 
 void DecodePump::start() { th_ = std::thread([this] { run_(); }); }
 
-void DecodePump::on_frame_(const DmaFrame& f) {
-  if (feed_) {
-    notes_.clear();
-    feed_->take_submit_notes(&notes_);
-    for (const FeedNote& n : notes_) {
-      lat_.on_submit(n.meta, n.t_us);
-      // A salvaged (incomplete) AU is a loss event: its delivery time stays
-      // out of the capture-time scheduler's lateness window.
-      if (!(n.meta.flags & maburgs::kRecFlagComplete)) regulator_.note_incomplete(n.meta.pts_us);
-    }
+void DecodePump::drain_submit_notes_() {
+  if (!feed_) return;
+  notes_.clear();
+  feed_->take_submit_notes(&notes_);
+  for (const FeedNote& n : notes_) {
+    lat_.on_submit(n.meta, n.t_us);
+    // A salvaged (incomplete) AU is a loss event: its delivery time stays
+    // out of the capture-time scheduler's lateness window.
+    if (!(n.meta.flags & maburgs::kRecFlagComplete)) regulator_.note_incomplete(n.meta.pts_us);
   }
+}
+
+void DecodePump::on_frame_(const DmaFrame& f) {
+  drain_submit_notes_();
   const uint64_t now = mono_us();
   lat_.on_decoded(f.pts_us, now);
   {
@@ -139,6 +142,9 @@ void DecodePump::run_() {
       backend_->poll();
       got = frames_.load() != before;
     }
+    // Notes for AUs still in the decoder (or for a decoder that emits
+    // nothing): consumed now, so the feed's queue never waits on a frame.
+    drain_submit_notes_();
     if (!got && !(backend_ && blocking_poll_)) {
       // Nothing came out and poll() did not wait for it: a short wait so the
       // thread does not spin, ended early by a park or a stop.

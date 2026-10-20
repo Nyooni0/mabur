@@ -28,16 +28,19 @@ namespace maburplay {
 //
 // Per frame, on this thread, in this order:
 //  1. the feed's submit notes (lat.on_submit; an incomplete AU's pts goes to
-//     regulator.note_incomplete) -- a frame's note is out before its frame;
+//     regulator.note_incomplete) -- a frame's note is out before its frame.
+//     The notes are also drained after every poll round, frame or not, so
+//     they never pile up in the feed while the decoder emits nothing;
 //  2. lat.on_decoded, the source-rate sample and the stats atomics;
 //  3. the recorder hook (it only takes a buffer reference; it must see the
 //     frame before anyone downstream can release it);
 //  4. the hand-over: out.push({f, t_decoded});
 //  5. the prime hook, after the hand-over so it never delays it.
 //
-// Loop: checkpoint (park) -> releases into the backend -> poll(). A backend
-// that implements PollWait blocks in poll() up to kPollTimeoutMs; any other
-// gets a 1 ms wait after a round that produced no frame. With a blocking
+// Loop: checkpoint (park) -> releases into the backend -> poll() -> submit
+// notes. A backend that implements PollWait blocks in poll() up to
+// kPollTimeoutMs; any other gets a 1 ms wait after a round that produced no
+// frame. With a blocking
 // poll, releases queued while the decoder emits a back-to-back burst wait
 // until poll() returns: one poll timeout after the burst's last frame, and a
 // burst cannot outlast the decoder's buffer pool, which those releases refill.
@@ -97,6 +100,7 @@ class DecodePump {
   void run_();
   bool checkpoint_();  // parks iff asked; false = stopping
   void drain_releases_();
+  void drain_submit_notes_();
   void on_frame_(const DmaFrame& f);
 
   LatTracker& lat_;
