@@ -186,14 +186,37 @@ void ReleaseLoop::run_() {
     if (stop_.load()) break;
     if (park_req_.load()) {
       std::unique_lock<std::mutex> lk(mu_);
-      // Re-checked under mu_: a park() that timed out has withdrawn it.
-      if (park_req_.load() && !stop_.load()) {
+      // Re-checked under mu_: a park() that timed out may have withdrawn
+      // it already.
+      const bool still_wanted = park_req_.load() && !stop_.load();
+      lk.unlock();
+      if (still_wanted) {
+        // park_work_() runs outside mu_: sink_->drop_all() can block for
+        // as long as the sink does (a wedged display's drop_all forcing a
+        // synchronous plane-disable can hang for seconds), and a
+        // controlling park(limit) must still return false at its limit in
+        // that case -- which needs mu_ free so cv_.wait_for's timeout path
+        // can reacquire it without waiting on this thread. Safe unlocked:
+        // park_work_() touches only this thread's own state and the sink,
+        // and set_sink() refuses to change sink_ until parked_ is true,
+        // which it still isn't here.
         park_work_();
-        parked_ = true;
-        park_req_.store(false);
-        cv_.notify_all();
-        lk.unlock();
-        if (!park_wait_()) break;
+        lk.lock();
+        if (park_req_.load() && !stop_.load()) {
+          parked_ = true;
+          park_req_.store(false);
+          cv_.notify_all();
+          lk.unlock();
+          if (!park_wait_()) break;
+        } else {
+          // The caller gave up waiting while park_work_ ran (or a stop
+          // arrived meanwhile): the work already happened -- frames
+          // dropped, the sink fd unregistered -- and cannot be undone, so
+          // pick back up as a normal running loop instead of parking:
+          // re-register the sink park_work_ removed and carry on.
+          lk.unlock();
+          register_sink_fd_();
+        }
       }
     }
     iterate_();

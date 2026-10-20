@@ -73,10 +73,24 @@ struct FakePresentSink : PresentSink {
   uint64_t first_present_delay_us = 0;
   std::atomic<int> poll_calls{0}, drop_all_calls{0}, osd_calls{0}, osd_commits{0};
   std::atomic<int> osd_calls_while_holding{0};
+  std::atomic<int> paced_calls{0};
   std::atomic<bool> publish_pending{false}, paced{false};
   std::atomic<uint64_t> engagements{0};
   FrameRegulator* reg = nullptr;  // to catch an OSD commit while frames are held
   uint64_t last_t_us = 0;
+
+  // drop_all() blocks here while block_drop_all is set, until open_latch()
+  // -- stands in for a wedged display (e.g. DrmPresenter's drop_all forcing
+  // a synchronous plane-disable) without a real one.
+  std::atomic<bool> block_drop_all{false};
+  std::mutex latch_mu;
+  std::condition_variable latch_cv;
+  bool latch_open = false;
+  void open_latch() {
+    std::lock_guard<std::mutex> lk(latch_mu);
+    latch_open = true;
+    latch_cv.notify_all();
+  }
 
   // broken_fd: event_fd() is the read end of a pipe whose write end is
   // closed immediately, so epoll reports EPOLLHUP on it persistently --
@@ -85,7 +99,7 @@ struct FakePresentSink : PresentSink {
   explicit FakePresentSink(bool broken_fd = false) {
     if (broken_fd) {
       int fds[2] = {-1, -1};
-      if (pipe(fds) == 0) {
+      if (pipe2(fds, O_CLOEXEC) == 0) {
         close(fds[1]);
         efd = fds[0];
       }
@@ -109,8 +123,17 @@ struct FakePresentSink : PresentSink {
     poll_calls.fetch_add(1);
   }
   int event_fd() const override { return efd; }
-  void drop_all() override { drop_all_calls.fetch_add(1); }
-  void set_paced(bool p) override { paced.store(p); }
+  void drop_all() override {
+    drop_all_calls.fetch_add(1);
+    if (block_drop_all.load()) {
+      std::unique_lock<std::mutex> lk(latch_mu);
+      latch_cv.wait(lk, [this] { return latch_open; });
+    }
+  }
+  void set_paced(bool p) override {
+    paced.store(p);
+    paced_calls.fetch_add(1);
+  }
   uint64_t mailbox_engagements() const override { return engagements.load(); }
   CommitInfo last_commit() const override {
     std::lock_guard<std::mutex> lk(mu);
@@ -252,12 +275,14 @@ TEST(park_returns_every_held_frame_once) {
   const int poll_at_park = sink.poll_calls.load();
   const int osd_at_park = sink.osd_calls.load();
   const bool paced_at_park = sink.paced.load();
+  const int paced_calls_at_park = sink.paced_calls.load();
   std::this_thread::sleep_for(100ms);
   CHECK(sink.presents() == 0);
   CHECK(r.rel.size() == 3);  // each returned once, nothing more
   CHECK(sink.poll_calls.load() == poll_at_park);
   CHECK(sink.osd_calls.load() == osd_at_park);
   CHECK(sink.paced.load() == paced_at_park);
+  CHECK(sink.paced_calls.load() == paced_calls_at_park);  // not just the bool: no flip-flop either
   // A frame handed while parked goes straight back, never to the sink.
   r.hand(3 * kVb, now_us());
   CHECK(wait_until([&] { return r.rel.size() == 4; }));
@@ -441,6 +466,42 @@ TEST(dead_sink_fd_falls_back_to_the_idle_tick_without_spinning) {
   // not the ability to show frames.
   r.hand(0, now_us());
   CHECK(wait_until([&] { return sink.presents() == 1; }));
+}
+
+TEST(park_times_out_while_drop_all_blocks_then_a_later_park_succeeds) {
+  FakePresentSink sink;
+  Rig r(&sink, 12, false);
+  r.rl.start();
+  sink.block_drop_all.store(true);
+  const auto t0 = std::chrono::steady_clock::now();
+  // drop_all() is stuck on the latch: park(100ms) must still return false
+  // at its limit rather than block for as long as drop_all() does.
+  CHECK(!r.rl.park(100ms));
+  const auto dt = std::chrono::steady_clock::now() - t0;
+  std::printf("  park(100ms) returned false after %lldms\n",
+              static_cast<long long>(
+                  std::chrono::duration_cast<std::chrono::milliseconds>(dt).count()));
+  CHECK(dt < 300ms);  // bounded near the limit, not hung on the blocked drop_all
+  CHECK(sink.drop_all_calls.load() == 1);  // the call happened; it just hasn't returned yet
+  // State stays consistent while the thread is still inside the blocked
+  // drop_all(): nothing crashes, and once the latch opens the loop picks
+  // back up as a normal running loop (never entered park_wait_, since this
+  // park() already withdrew its request).
+  const int polls_before = sink.poll_calls.load();
+  sink.open_latch();
+  // Let the still-running park_work_() finish its own cleanup (including
+  // draining the hand-over queue back to the decoder, since as far as it
+  // knows it is still parking) before hand()ing a frame of our own --
+  // otherwise this frame could race into that same drain and be returned
+  // unpresented instead of exercising the resumed loop. A poll_events()
+  // call only happens from iterate_(), which park_work_() never reaches
+  // until after it returns, so this is a safe fence.
+  CHECK(wait_until([&] { return sink.poll_calls.load() > polls_before; }));
+  r.hand(0, now_us());
+  CHECK(wait_until([&] { return sink.presents() == 1; }));
+  // A later park(), with drop_all() no longer blocking, succeeds normally.
+  CHECK(r.rl.park(200ms));
+  CHECK(sink.drop_all_calls.load() == 2);
 }
 
 MTEST_MAIN
