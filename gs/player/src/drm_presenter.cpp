@@ -3,6 +3,7 @@
 #include "fit_rect.h"
 
 #include <algorithm>
+#include <atomic>
 #include <vector>
 
 #include "fb_cache.h"
@@ -266,6 +267,17 @@ int make_signalled_sync_file() {
   return -1;
 }
 
+// The cache key's geometry for a decoded frame: NV12, the backend's strides.
+FbCache::Geom fb_geom(const DmaFrame& frame) {
+  FbCache::Geom g;
+  g.width = frame.width;
+  g.height = frame.height;
+  g.stride = frame.stride;
+  g.vstride = frame.vstride;
+  g.fourcc = DRM_FORMAT_NV12;
+  return g;
+}
+
 }  // namespace
 
 struct DrmPresenter::Impl {
@@ -349,7 +361,10 @@ struct DrmPresenter::Impl {
   // MSP OSD overlay plane. osd_plane_id == 0 means "no OSD" and every
   // osd_* path below is a no-op -- an OSD that could not be set up must
   // never cost us video.
-  uint32_t osd_plane_id = 0;
+  // Atomic, like osd_back/osd_dirty/osd_commit_errors below: the osd_*
+  // calls read them on the housekeeping thread while the release thread
+  // commits (and, on giving up, zeroes the plane id).
+  std::atomic<uint32_t> osd_plane_id{0};
   // The OSD plane IS this CRTC's primary plane (the normal case on vop2:
   // Cluster0 is AFBC-only, so the primary Smart0 window is the only other
   // linear-ARGB plane). Then there is no backdrop and the OSD must be
@@ -361,12 +376,15 @@ struct DrmPresenter::Impl {
   uint32_t osd_blend_prop = 0;    // "pixel blend mode", when exposed
   uint64_t osd_blend_premul = 0;  // enum value for "Pre-multiplied"
   OsdSurface osd;
-  int osd_back = 0;           // index the CPU draws into
-  bool osd_dirty = false;     // back buffer published, not yet committed
+  std::atomic<int> osd_back{0};         // index the CPU draws into
+  // Back buffer published, not yet committed. Every commit that consumes
+  // it swaps osd_back first and clears this second: the drawer waits for
+  // false, and then sees the swapped index.
+  std::atomic<bool> osd_dirty{false};
   bool osd_on_plane = false;  // an OSD fb has been attached at least once
   bool osd_commit_warned = false;
   int osd_fail_streak = 0;             // consecutive OSD-attributed commit failures
-  uint64_t osd_commit_errors = 0;      // kept OUT of commit_errors: that one is video health
+  std::atomic<uint64_t> osd_commit_errors{0};  // kept OUT of commit_errors: that one is video health
   uint64_t osd_last_commit_ms = 0;
   uint64_t last_video_commit_ms = 0;   // gates the standalone OSD commit
   // Three consecutive OSD-attributed failures and the OSD is off for good.
@@ -447,8 +465,10 @@ struct DrmPresenter::Impl {
 
   bool init(const std::string& screen_mode, bool want_osd, ReleaseFn rel, bool log_failures);
   bool present(const DmaFrame& frame);
+  void prime(const DmaFrame& frame);
   void poll_events();
   void drop_all();
+  void commit_osd_if_pending();
 
   bool splash_show();
   void free_splash();
@@ -603,7 +623,7 @@ void DrmPresenter::Impl::osd_give_up() {
   std::fprintf(stderr,
                "DrmPresenter: OSD plane %u rejected %d commits in a row -- disabling the OSD for "
                "the rest of this session; video continues unaffected\n",
-               osd_plane_id, osd_fail_streak);
+               osd_plane_id.load(), osd_fail_streak);
   for (int i = 0; i < 2; ++i) {
     const Surface s = osd.cpu(i);
     if (!s.pixels) continue;
@@ -655,7 +675,7 @@ void DrmPresenter::Impl::commit_osd_only() {
   drmModeAtomicReqPtr req = drmModeAtomicAlloc();
   int rc = -ENOMEM;
   if (req) {
-    add_osd_props(req, osd_back, !osd_on_plane);
+    add_osd_props(req, osd_back.load(), !osd_on_plane);
     rc = drmModeAtomicCommit(fd, req, 0, this);
     drmModeAtomicFree(req);
   }
@@ -680,10 +700,10 @@ void DrmPresenter::Impl::commit_osd_only() {
     if (osd_fail_streak >= kOsdMaxFailStreak) osd_give_up();
     return;
   }
-  osd_dirty = false;
   osd_on_plane = true;
   osd_fail_streak = 0;
-  osd_back ^= 1;
+  osd_back ^= 1;       // swap first:
+  osd_dirty = false;   // a drawer that sees this sees the new back index
 }
 
 bool DrmPresenter::Impl::init(const std::string& screen_mode, bool want_osd, ReleaseFn rel,
@@ -1108,7 +1128,7 @@ bool DrmPresenter::Impl::init(const std::string& screen_mode, bool want_osd, Rel
                    "DrmPresenter: OSD plane %u cannot be stacked above video (video range "
                    "[%llu,%llu] / osd range [%llu,%llu]) -- running WITHOUT the OSD rather than "
                    "disturbing the video stacking\n",
-                   osd_plane_id, static_cast<unsigned long long>(vmin),
+                   osd_plane_id.load(), static_cast<unsigned long long>(vmin),
                    static_cast<unsigned long long>(vmax), static_cast<unsigned long long>(omin),
                    static_cast<unsigned long long>(omax));
       osd_err = "not stackable above the video plane";
@@ -1220,7 +1240,7 @@ bool DrmPresenter::Impl::init(const std::string& screen_mode, bool want_osd, Rel
     if (osd_plane_id)
       std::snprintf(osd_part, sizeof(osd_part),
                     "OSD plane %u (%s, ARGB8888 linear %ux%u, blend %s) at zpos %llu",
-                    osd_plane_id, osd_on_primary ? "primary" : "overlay", mode.hdisplay,
+                    osd_plane_id.load(), osd_on_primary ? "primary" : "overlay", mode.hdisplay,
                     mode.vdisplay, osd_blend_prop ? "premultiplied" : "driver default",
                     static_cast<unsigned long long>(zpos_osd_val));
     else
@@ -1407,15 +1427,21 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
   last_commit = DrmPresenter::CommitInfo{};
 
   const uint64_t ts0 = mono_us();
+  const FbCache::Geom geom = fb_geom(frame);
   uint32_t handle = 0;
-  FbCache::Geom geom;
-  geom.width = frame.width;
-  geom.height = frame.height;
-  geom.stride = frame.stride;
-  geom.vstride = frame.vstride;
-  geom.fourcc = DRM_FORMAT_NV12;
-  const uint32_t fb_id =
-      fbs.acquire(frame.dmabuf_fd, geom, ts0, [this](uint32_t h) { return slot_pins(h); }, &handle);
+  uint32_t fb_id = 0;
+  if (fbs.find(frame.dmabuf_fd, geom, ts0, &fb_id, &handle)) {
+    // The usual case once prime() has run. prime() never evicts, so the
+    // bound is kept here, where the slots are known; this frame's own
+    // handle counts as pinned too, ahead of its slot.
+    fbs.trim([this, handle](uint32_t h) { return h == handle || slot_pins(h); });
+  } else if (handle != 0) {
+    // Not primed, or the prime is still in flight: AddFB2 here, outside
+    // the cache lock as in prime(). A prime that finishes first wins the
+    // insert and this frame uses its framebuffer.
+    if (!fbs.add_fb(handle, geom, &fb_id)) fb_id = 0;
+    fb_id = fbs.insert(handle, geom, fb_id, ts0, [this](uint32_t h) { return slot_pins(h); });
+  }
   if (fb_id == 0) {
     ++commit_errors;
     if (release) release(frame);
@@ -1443,9 +1469,15 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
   // up with no primary plane attached at all. The buffer is cleared to fully
   // transparent premultiplied 0x00000000 at allocation, so attaching it
   // early shows nothing.
+  //
+  // `osd_dirty` and `osd_back` are read once for the whole commit:
+  // osd_publish() can land on the housekeeping thread meanwhile, and a
+  // publish this commit did not see must stay pending.
+  const bool osd_pub = osd_dirty.load();
+  const int osd_back_now = osd_back.load();
   const bool osd_ready = osd_plane_id != 0 && osd.ok();
-  bool attach_osd = osd_ready && (osd_dirty || ((do_modeset || splash_handoff) &&
-                                                (osd_on_plane || osd_on_primary)));
+  bool attach_osd = osd_ready && (osd_pub || ((do_modeset || splash_handoff) &&
+                                              (osd_on_plane || osd_on_primary)));
   // ...but never on the commit that would otherwise be the one-shot async
   // probe. An OSD publishing at or above the video frame rate would keep
   // `attach_osd` true forever, `probing_async` never true, and video would
@@ -1454,7 +1486,7 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
   // attach on the first non-modeset commit. The OSD stays dirty and rides
   // the next one, at most ~16 ms later.
   if (!async_probed && !do_modeset && !splash_handoff) attach_osd = false;
-  const int osd_idx = osd_dirty ? osd_back : (osd_back ^ 1);
+  const int osd_idx = osd_pub ? osd_back_now : (osd_back_now ^ 1);
 
   // Factored so that a commit the kernel rejects WITH the OSD attached can
   // be rebuilt without it and retried immediately (a drmModeAtomicReq has no
@@ -1671,9 +1703,9 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
   splash_fail_streak = 0;
   last_video_commit_ms = mono_ms();
   if (attach_osd) {
-    if (osd_dirty) {
-      osd_dirty = false;
-      osd_back ^= 1;  // what we just committed becomes the front buffer
+    if (osd_pub) {
+      osd_back ^= 1;      // what we just committed becomes the front buffer,
+      osd_dirty = false;  // and only then is the back free to draw into
     }
     osd_on_plane = true;
     osd_fail_streak = 0;
@@ -1734,6 +1766,19 @@ bool DrmPresenter::Impl::present(const DmaFrame& frame) {
   return true;
 }
 
+void DrmPresenter::Impl::prime(const DmaFrame& frame) {
+  if (!inited || fd < 0 || frame.dmabuf_fd < 0) return;
+  const FbCache::Geom geom = fb_geom(frame);
+  const uint64_t now = mono_us();
+  uint32_t fb_id = 0, handle = 0;
+  if (fbs.find(frame.dmabuf_fd, geom, now, &fb_id, &handle) || handle == 0) return;
+  if (!fbs.add_fb(handle, geom, &fb_id)) fb_id = 0;
+  // Everything counts as pinned: which framebuffers are on screen or in a
+  // commit is the release thread's to know, so this insert never evicts or
+  // replaces one -- the cache may run over its bound until present() trims.
+  fbs.insert(handle, geom, fb_id, now, [](uint32_t) { return true; });
+}
+
 void DrmPresenter::Impl::poll_events() {
   if (fd < 0) return;
   struct pollfd pfd {
@@ -1745,7 +1790,11 @@ void DrmPresenter::Impl::poll_events() {
     evctx.page_flip_handler2 = &Impl::on_flip_static;
     drmHandleEvent(fd, &evctx);
   }
+  commit_osd_if_pending();
+}
 
+void DrmPresenter::Impl::commit_osd_if_pending() {
+  if (fd < 0) return;
   // No video commit to ride on: show the OSD on its own. Gated on no flip in
   // flight AND on video having been quiet for 100 ms -- present() calls
   // poll_events() while a flip is outstanding, so without the quiet window a
@@ -1846,6 +1895,10 @@ bool DrmPresenter::splash_show() { return impl_->splash_show(); }
 
 bool DrmPresenter::present(const DmaFrame& frame) { return impl_->present(frame); }
 
+void DrmPresenter::prime(const DmaFrame& frame) { impl_->prime(frame); }
+
+int DrmPresenter::event_fd() const { return impl_->fd; }
+
 void DrmPresenter::poll_events() { impl_->poll_events(); }
 
 void DrmPresenter::drop_all() { impl_->drop_all(); }
@@ -1907,6 +1960,10 @@ int DrmPresenter::osd_back_index() const { return impl_->osd_back; }
 void DrmPresenter::osd_publish() {
   if (osd_available()) impl_->osd_dirty = true;
 }
+
+bool DrmPresenter::osd_publish_pending() const { return impl_->osd_dirty; }
+
+void DrmPresenter::commit_osd_if_pending() { impl_->commit_osd_if_pending(); }
 
 uint64_t DrmPresenter::osd_commit_errors() const { return impl_->osd_commit_errors; }
 
