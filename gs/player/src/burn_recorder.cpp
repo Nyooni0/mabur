@@ -29,10 +29,11 @@
 #include "frame_colortrans.h"
 #endif
 
-// The burned-DVR driver: an fps-capped encoder thread fed from the main loop
-// by MPP buffer reference, writing fMP4 through the same DvrMux the raw path
-// uses. See burn_recorder.h for the ownership and threading contracts; the
-// notes below are the implementation-side consequences of them.
+// The burned-DVR driver: an fps-capped encoder thread fed from the
+// decode-output thread by MPP buffer reference, writing fMP4 through the
+// same DvrMux the raw path uses. See burn_recorder.h for the ownership and
+// threading contracts; the notes below are the implementation-side
+// consequences of them.
 //
 // Three things this file exists to get right:
 //
@@ -101,25 +102,47 @@ struct BurnRecorder::Impl {
   bool have_palette = false;   // set_palette() was called
   bool palette_live = false;   // ...and the encoder accepted it
 
-  // --- mailbox (main loop -> recorder thread) ------------------------------
+  // --- mailbox (decode-output thread -> stage or recorder thread) ---------
   struct Mail {
     void* buf = nullptr;  // MppBuffer; non-null means "a reference is held"
     uint32_t pts_us = 0;
     int w = 0, h = 0, stride = 0, vstride = 0;
   };
+  // Two mutexes, never nested except in stop():
+  //
+  //   box_mu  the mailbox `box` and nothing else. submit(), the take of
+  //           `box` (ct thread, or the recorder thread without one) and
+  //           drain_box() hold it for a few field copies, so a submit never
+  //           waits behind set_osd(), whose quantize holds `mu` for up to
+  //           milliseconds.
+  //   mu      everything else shared: the OSD handoff, ct_out, ct_dst_busy.
+  //
+  // `stopping` is written under BOTH (stop() takes them together) and read
+  // under either, so every wait predicate reads only state guarded by the
+  // mutex that wait holds.
+  //
+  // Each condition variable pairs with exactly one mutex: box_cv with
+  // box_mu (a frame in `box`, or stopping), ct_cv with mu (a frame in
+  // ct_out, or stopping). Every writer changes the predicate's state under
+  // that mutex and notifies after releasing it, and every waiter re-checks
+  // the predicate under the same mutex before sleeping, so a notify cannot
+  // fall between a waiter's check and its sleep: no lost wake-up. The OSD
+  // map is not a wake condition at all (it rides along with the next frame),
+  // so nothing waits on `mu`-guarded state through box_cv.
+  std::mutex box_mu;
+  std::condition_variable box_cv;
+  Mail box;                  // box_mu
   std::mutex mu;
-  std::condition_variable cv;
-  Mail box;
-  bool stopping = false;
+  bool stopping = false;     // written under mu AND box_mu, read under either
 
-  // OSD handoff, under the same mutex.
+  // OSD handoff, under mu.
   //
   //   osd_map    the AUTHORITATIVE index map. Persistent across calls and
-  //              updated in place by the main loop, which is what lets a
+  //              updated in place by set_osd()'s thread, which is what lets a
   //              steady-state OSD update cost the cells that changed
   //              instead of 2.07 M pixels (see set_osd()).
   //   osd_dirty  the parts of osd_map the recorder thread has not copied
-  //              out yet -- accumulated, because the main loop publishes at
+  //              out yet -- accumulated, because set_osd() publishes at
   //              the MSP rate and the recorder consumes at the frame rate,
   //              and neither waits for the other.
   //   osd_work   the recorder's own copy, brought up to date under the lock
@@ -131,15 +154,17 @@ struct BurnRecorder::Impl {
   std::vector<DirtyRect> osd_dirty;
   bool osd_full_pending = false;   // osd_dirty is meaningless; copy it whole
   bool osd_pending_valid = false;  // osd_map moved since the last take
-  QuantizeCache qcache;            // main loop only; palette-lifetime memo
+  QuantizeCache qcache;            // set_osd()'s thread only; palette-lifetime memo
 
   std::thread th;
   bool started = false;
   std::atomic<bool> dead{false};        // fatal: stop feeding the encoder
   std::atomic<bool> idr_pending{false};
 
-  // fps cap, main loop only. The policy and why it is schedule-based rather
-  // than last-admit-based live in fps_cap.h (host-tested, test_fps_cap).
+  // fps cap, submit()'s thread only (start() sets it before the first
+  // submit; see the THREADING ordering rule in burn_recorder.h). The policy
+  // and why it is schedule-based rather than last-admit-based live in
+  // fps_cap.h (host-tested, test_fps_cap).
   FpsCap cap;
   std::chrono::steady_clock::time_point cap_epoch;
 
@@ -168,10 +193,10 @@ struct BurnRecorder::Impl {
   // With colortrans on, or an OSD region to fit, the recorder is a
   // two-stage pipeline:
   //
-  //   main loop --box--> ct thread --ct_out--> recorder thread
-  //                      GPU draw + RGA          encode() + mux
-  //                      (or RGA resize)
-  //                      into ct_dst[k]
+  //   decode-output --box--> ct thread --ct_out--> recorder thread
+  //                          GPU draw + RGA          encode() + mux
+  //                          (or RGA resize)
+  //                          into ct_dst[k]
   //
   // SCALE: the encoder lays the OSD index map 1:1 from the picture's top-left
   // and cannot scale either input, while the display scales the video
@@ -208,7 +233,7 @@ struct BurnRecorder::Impl {
   // Recording picture size and its strides, fixed at start() from the OSD
   // surface; 0 = no OSD region, record at the decoded size.
   int out_w = 0, out_h = 0, out_hs = 0, out_vs = 0;
-  std::condition_variable ct_cv;  // ct_out handoff; `cv` stays the box's
+  std::condition_variable ct_cv;  // ct_out handoff, with mu
   CtMail ct_out;                  // mu
   std::thread ct_th;
 
@@ -332,8 +357,8 @@ struct BurnRecorder::Impl {
     for (;;) {
       Mail m;
       {
-        std::unique_lock<std::mutex> lk(mu);
-        cv.wait(lk, [this] { return stopping || box.buf != nullptr; });
+        std::unique_lock<std::mutex> lk(box_mu);
+        box_cv.wait(lk, [this] { return stopping || box.buf != nullptr; });
         if (stopping) break;
         m = box;
         box.buf = nullptr;
@@ -493,26 +518,33 @@ struct BurnRecorder::Impl {
     for (;;) {
       CtMail o;
       bool have_osd = false;
-      {
+      // stop() drains whatever is left in either mailbox after the join, so
+      // this thread never has to decide who releases a half-handled entry.
+      if (ct_on) {
         std::unique_lock<std::mutex> lk(mu);
-        if (ct_on) {
-          ct_cv.wait(lk, [this] { return stopping || ct_out.buf != nullptr; });
-          if (stopping) break;
-          o = ct_out;
-          ct_out.buf = nullptr;
-        } else {
-          // stop() drains whatever is left in the box after the join, so this
-          // thread never has to decide who releases a half-handled entry.
-          cv.wait(lk, [this] { return stopping || box.buf != nullptr; });
-          if (stopping) break;
-          o.buf = box.buf;
-          o.pts_us = box.pts_us;
-          o.w = box.w;
-          o.h = box.h;
-          o.stride = box.stride;
-          o.vstride = box.vstride;
-          box.buf = nullptr;
-        }
+        ct_cv.wait(lk, [this] { return stopping || ct_out.buf != nullptr; });
+        if (stopping) break;
+        o = ct_out;
+        ct_out.buf = nullptr;
+      } else {
+        std::unique_lock<std::mutex> lk(box_mu);
+        box_cv.wait(lk, [this] { return stopping || box.buf != nullptr; });
+        if (stopping) break;
+        o.buf = box.buf;
+        o.pts_us = box.pts_us;
+        o.w = box.w;
+        o.h = box.h;
+        o.stride = box.stride;
+        o.vstride = box.vstride;
+        box.buf = nullptr;
+      }
+      // The OSD is taken after the frame, under mu alone: box_mu is never
+      // held while waiting for mu, so a submit never queues behind a quantize
+      // through this thread either. A map published between the two takes
+      // rides with this frame instead of the next, which is the same
+      // ride-along rule one frame earlier.
+      {
+        std::lock_guard<std::mutex> lk(mu);
         if (osd_pending_valid) {
           take_osd_locked();
           have_osd = true;
@@ -573,7 +605,7 @@ struct BurnRecorder::Impl {
   }
 
   // Recorder thread, mu HELD: brings osd_work up to date with osd_map,
-  // copying only the rows the main loop marked dirty. The full copy is the
+  // copying only the rows set_osd() marked dirty. The full copy is the
   // fallback for a resize, a blank, or a rect list that outgrew its cap --
   // never the steady state.
   void take_osd_locked() {
@@ -593,13 +625,13 @@ struct BurnRecorder::Impl {
     osd_pending_valid = false;
   }
 
-  // Empties the mailbox, releasing the reference it holds. Callable from
-  // either thread (main loop via drop_pending()/stop(); never concurrently
-  // with the recorder thread's own take, which is what the mutex is for).
+  // Empties the mailbox, releasing the reference it holds. Callable from any
+  // thread (drop_pending(), stop()); box_mu serialises it against submit()
+  // and against the stage/recorder thread's own take.
   void drain_box() {
     void* buf = nullptr;
     {
-      std::lock_guard<std::mutex> lk(mu);
+      std::lock_guard<std::mutex> lk(box_mu);
       buf = box.buf;
       box.buf = nullptr;
     }
@@ -782,9 +814,12 @@ void BurnRecorder::submit(const DmaFrame& f) {
   // recycle this buffer until one of the release paths runs.
   mpp_buffer_inc_ref(buf);
 
+  // box_mu, never mu: this runs on the decode-output thread just before it
+  // hands the frame on toward the display, so it must not wait behind
+  // set_osd()'s quantize.
   void* displaced = nullptr;
   {
-    std::lock_guard<std::mutex> lk(im.mu);
+    std::lock_guard<std::mutex> lk(im.box_mu);
     displaced = im.box.buf;  // latest wins
     im.box.buf = buf;
     im.box.pts_us = f.pts_us;
@@ -793,7 +828,7 @@ void BurnRecorder::submit(const DmaFrame& f) {
     im.box.stride = f.stride;
     im.box.vstride = f.vstride;
   }
-  im.cv.notify_one();
+  im.box_cv.notify_one();
   im.frames_in.fetch_add(1);
 
   if (displaced) {
@@ -809,7 +844,7 @@ void BurnRecorder::submit(const DmaFrame& f) {
 void BurnRecorder::set_osd(const Surface& s, const DirtyRect* rects, size_t n_rects) {
   Impl& im = *impl_;
   // No palette => the encoder has no OSD region at all, so quantizing would
-  // be pure waste on the main loop. This is the osd.enable:false path.
+  // be pure waste on the housekeeping loop. This is the osd.enable:false path.
   if (!im.started || !im.palette_live || im.dead.load()) return;
   if (!s.pixels || s.width <= 0 || s.height <= 0) return;
   if (rects && n_rects == 0) return;  // nothing changed; do not even publish
@@ -818,7 +853,8 @@ void BurnRecorder::set_osd(const Surface& s, const DirtyRect* rects, size_t n_re
   // being updated in place, and the alternative (a private map plus a
   // publish copy) puts a 2 MB memcpy back on this loop, which is most of
   // what the incremental path just removed. The recorder thread waits at
-  // most one quantize.
+  // most one quantize; submit() never does -- the mailbox has its own
+  // mutex (box_mu).
   //
   // How long that wait is, measured rather than assumed (the text here used
   // to say "only the rare FULL one is longer than ~10 us", which was wrong
@@ -873,6 +909,9 @@ void BurnRecorder::set_osd(const Surface& s, const DirtyRect* rects, size_t n_re
 void BurnRecorder::request_idr() { impl_->idr_pending.store(true); }
 
 void BurnRecorder::drop_pending() {
+  // drain_box() takes box_mu only; drain_ct_out() takes mu, so from the
+  // decode-output thread this can wait out one set_osd() quantize -- a
+  // flush-time cost, never a per-frame one.
   if (!impl_->started) return;
   impl_->drain_box();
   impl_->drain_ct_out();
@@ -881,11 +920,15 @@ void BurnRecorder::drop_pending() {
 void BurnRecorder::stop() {
   Impl& im = *impl_;
   if (!im.started) return;
+  // The caller has already detached every submit() source (THREADING in
+  // burn_recorder.h), so nothing races the teardown below. `stopping` is
+  // set under both mutexes because the box waiters read it under box_mu
+  // and the ct_out waiter under mu.
   {
-    std::lock_guard<std::mutex> lk(im.mu);
+    std::scoped_lock lk(im.mu, im.box_mu);
     im.stopping = true;
   }
-  im.cv.notify_all();
+  im.box_cv.notify_all();
   im.ct_cv.notify_all();
   // ct thread first: it only ever hands frames DOWN to the encoder thread,
   // so once it is gone ct_out is quiescent for the encoder's own exit.

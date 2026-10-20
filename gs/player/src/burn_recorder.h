@@ -65,10 +65,10 @@ struct BurnCfg {
 // decoupled by MPP's own buffer refcount, NOT by copying and NOT by changing
 // who owns the DmaFrame:
 //
-//   frame_sink(f):  burn->submit(f)       // mpp_buffer_inc_ref() on the
+//   decode output:  burn->submit(f)       // mpp_buffer_inc_ref() on the
 //                                         // frame's buffer, O(1), no copy
-//                   presenter->present(f) // presenter owns the DmaFrame,
-//                                         // exactly as before
+//                   then hands f on       // the presenter side owns the
+//                                         // DmaFrame, exactly as before
 //   presenter later: release_frame(f) -> mpp_frame_deinit -> drops ITS ref
 //   recorder thread: encode from that buffer, then mpp_buffer_put()
 //
@@ -95,8 +95,29 @@ struct BurnCfg {
 //
 // ---------------------------------------------------------------------------
 // THREADING
-//   start() / stop() / submit() / set_osd() / request_idr() / drop_pending()
-//     are all called from the main loop. None of them blocks on the encoder.
+//   submit() runs on the decode-output thread, once per decoded frame, just
+//     before that thread hands the frame on. drop_pending() is callable from
+//     the decode-output thread or from housekeeping. start(), stop(),
+//     set_osd(), set_palette() and request_idr() run on housekeeping (the
+//     main loop). None of them blocks on the encoder.
+//   Two mutexes: the mailbox has its own (held for a few field copies by
+//     submit(), drop_pending() and the thread taking the frame), and
+//     everything else shared -- the OSD map, the stage handoff -- sits under
+//     the other. set_osd() holds the second across its quantize (up to
+//     milliseconds), so submit() never waits behind it. drop_pending() also
+//     empties the stage handoff under the second, so from the decode-output
+//     thread it can wait out one quantize -- a flush-time cost only.
+//   Ordering rule for the decode-output thread: its submit() and
+//     drop_pending() calls are legal only between start() returning and
+//     stop() being called, and the caller orders them against both.
+//     Housekeeping installs the submit hook (DecodePump::
+//     set_recorder_submit) after start() returns and removes it --
+//     set_recorder_submit({}) -- BEFORE stop() and before destroying the
+//     recorder. The pump holds its hook lock for the duration of every
+//     submit() call, so once set_recorder_submit({}) returns no submit() is
+//     in flight and none can start; that lock is also what orders start()'s
+//     writes before the first submit(). Nothing stronger is relied on:
+//     stop() does not itself fence out a concurrent submit().
 //   The recorder thread owns the MppEncoder and the DvrMux outright: every
 //     MppEncoder call except init()/set_palette() (which run inside start(),
 //     before the thread exists) happens there, which is what MppEncoder's
@@ -149,13 +170,14 @@ class BurnRecorder {
   // zero-frame file behind.
   bool start(const BurnCfg& cfg, const std::string& path, const VideoBackend* backend);
 
-  // Main loop, once per decoded frame, BEFORE presenter->present(f). Applies
-  // the fps cap first, so rejected frames cost one clock read and nothing
+  // Decode-output thread, once per decoded frame, BEFORE the frame is handed
+  // on toward the presenter (see THREADING for the ordering rule against
+  // start()/stop()). Applies the fps cap first, so rejected frames cost one clock read and nothing
   // else; admitted frames take an mpp_buffer_inc_ref() and post to the
   // mailbox. O(1), never blocks, never touches pixels.
   void submit(const DmaFrame& f);
 
-  // Main loop, whenever a fresh OSD screen has been rasterized. Quantizes
+  // Housekeeping, whenever a fresh OSD screen has been rasterized. Quantizes
   // `s` against the staged palette on the CALLER's thread and publishes the
   // index map to the recorder thread, which installs it into the encoder's
   // double-buffered OSD slot before its next frame. No-op without a palette.
@@ -177,7 +199,7 @@ class BurnRecorder {
 
   // Makes the recording's next encoded frame an IDR. Sets a flag consumed on
   // the recorder thread (MppEncoder is single-threaded), so it is safe from
-  // the main loop. Use it wherever the decode path is reset -- flush_before,
+  // housekeeping. Use it wherever the decode path is reset -- flush_before,
   // the decode watchdog -- so the recording reseals after a discontinuity.
   void request_idr();
 
