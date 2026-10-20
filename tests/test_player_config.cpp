@@ -292,6 +292,14 @@ TEST(display_vsync_defaults) {
   CHECK(cfg.display.vsync_lead_ms == 5);
 }
 
+TEST(display_section_without_vsync_lead_keeps_the_default) {
+  // A [display] table that omits vsync_lead_ms gets the same default as a
+  // config with no [display] table at all.
+  const auto cfg = maburplay::load_config(write_tmp_play("[display]\n"));
+  CHECK(cfg.display.vsync_lead_ms == maburplay::DisplayCfg{}.vsync_lead_ms);
+  CHECK(cfg.display.vsync_lead_ms == 5);
+}
+
 TEST(rec_vsync_lead_ms_is_not_a_key) {
   // The recording lead switch is gone: a config carrying the removed key
   // must be refused (unknown key), not silently accepted.
