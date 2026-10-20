@@ -15,20 +15,32 @@ true percentiles over the window's frames and rlate/hand as the max of
 each 1 Hz reg.log line's own already-aggregated p99/max (a window p99
 recomputed from raw per-frame samples is not recoverable from reg.log).
 
-`--skip-after-flush N` excludes miss rows in the N frame.log rows
-following a flush/discontinuity from the miss count (not from `frames N`,
-which still counts them). Neither file carries a flush/discontinuity
-event of its own -- no frame.log flag, no reg.log token -- so this uses
-reg.log's cumulative `disconts=` counter as the only observable proxy: a
-rise between two consecutive reg.log lines means a discontinuity
-happened somewhere in that 1-second gap, and the EARLIER line's stamp is
-taken as the flush time (the conservative bound: it widens the skip
-window rather than narrowing it). A discontinuity already reflected in
-the very first reg.log line of a session cannot be detected this way
-(nothing to compare it against) and goes un-skipped.
+Exclusions. Two kinds of event disturb presentation for a few frames
+without saying anything about the release thread, and reg.log counts both
+cumulatively:
+  flush     `flushes=` (every output park: a ring flush, a decode-watchdog
+            reset or recreate, a display hotplug, shutdown) or `disconts=`
+            (an encoder pts discontinuity, a drone restart);
+  recstart  `recstarts=` (a recorder start).
+A rise between two consecutive reg.log lines carrying the counter means
+the event happened somewhere in that gap; the EARLIER line's stamp is
+taken as its time (the conservative bound: it widens the span rather than
+narrowing it). The event's span then covers
+  - misses: the first `--skip-after-flush N` frame.log rows at or after
+    that stamp (they still count in `frames N`), and
+  - pend growth: the growth between those two reg.log lines -- pend is a
+    1 Hz counter, so the gap the event fell in is its finest grain.
+Nothing outside a span is excluded: a miss past the N rows, or pend growth
+in a later gap, counts. What was excluded is reported apart, as
+`excluded: flush M pend P, recstart M pend P` (a row or gap in both kinds
+of span counts once, as flush). An event already reflected in the very
+first reg.log line of a session cannot be detected (nothing to compare it
+against) and goes unexcluded; a counter that goes backwards is a player
+restart, not an event.
 
-`reg.log`'s `rlate=`/`hand=` tokens arrived with reglog 3; `# reglog 2`
-rows (and reglog-2-only "off" lines) lack them and print `-` for both.
+`reg.log`'s `rlate=`/`hand=`/`flushes=`/`recstarts=` tokens arrived with
+reglog 3; `# reglog 2` rows (and reglog-2-only "off" lines) lack them,
+print `-` for rlate and hand, and exclude on `disconts=` alone.
 `frame.log` needs the `t_commit`/`pbits` columns (framelog 3) that misses
 are computed from; an older frame.log is refused as unreadable.
 
@@ -40,8 +52,8 @@ Usage: python3 tools/bench/latchgate.py <session-dir> --from <mono_s>
                        the same clock frame.log's `t_flip` and reg.log's
                        row stamp are already in (no unit conversion, no
                        relative-to-first-row rebasing)
-  --skip-after-flush   frame.log rows after a detected flush to exclude
-                       from the miss count (default 24)
+  --skip-after-flush   frame.log rows after a detected flush or recorder
+                       start to exclude from the miss count (default 24)
 
 All latency figures in the printed line (pend/pdrop excepted, which are
 cumulative counts) are microseconds, frame.log/reg.log's native unit.
@@ -54,9 +66,9 @@ same convention as tools/flightreport.py's `_counter_growth` -- a value
 going backwards contributes its post-restart value, never a negative
 one).
 
-Exit code 1 when `misses + pend-delta > 0` (the brief's literal gate;
-`pdrop` is reported but does not itself trip the gate), 0 otherwise,
-2 if the session directory or its logs can't be read.
+Exit code 1 when `misses + pend-delta > 0`, both net of the exclusions
+(`pdrop` is reported whole and does not itself trip the gate), 0
+otherwise, 2 if the session directory or its logs can't be read.
 
 (tests/test_latchgate.py)
 """
@@ -71,6 +83,12 @@ import session as _session  # tools/session.py
 MISS_US = 12000  # 12 ms
 
 
+def growth_step(prev, v):
+    """One step of a reset-tolerant cumulative counter (see
+    counter_growth)."""
+    return v if v < prev else v - prev
+
+
 def counter_growth(vals):
     """Reset-tolerant delta across a cumulative counter's values in a
     window, same convention as tools/flightreport.py's _counter_growth: a
@@ -83,7 +101,7 @@ def counter_growth(vals):
     prev = None
     for v in vals:
         if prev is not None:
-            total += v if v < prev else v - prev
+            total += growth_step(prev, v)
         prev = v
     return total
 
@@ -123,11 +141,15 @@ def parse_frame_log(path):
     return version, rows
 
 
+COUNTERS = ('pend', 'pdrop', 'disconts', 'flushes', 'recstarts')
+
+
 def parse_reg_log(path):
     """(version, rows); rows = [{'t', 'pend'?, 'pdrop'?, 'disconts'?,
-    'rlate_p99'?, 'rlate_max'?, 'hand_p99'?, 'hand_max'?}], sorted by t.
-    A key is present only when the line carried it (regulator disabled ->
-    no pend/pdrop/disconts; reglog 2 -> no rlate/hand)."""
+    'flushes'?, 'recstarts'?, 'rlate_p99'?, 'rlate_max'?, 'hand_p99'?,
+    'hand_max'?}], sorted by t. A key is present only when the line
+    carried it (regulator disabled -> no pend/pdrop/disconts; reglog 2 ->
+    no rlate/hand/flushes/recstarts)."""
     version = None
     rows = []
     with open(path) as f:
@@ -149,7 +171,7 @@ def parse_reg_log(path):
                 continue
             kv = dict(t.split('=', 1) for t in tok[2:] if '=' in t)
             row = {'t': t}
-            for key in ('pend', 'pdrop', 'disconts'):
+            for key in COUNTERS:
                 if key in kv:
                     try:
                         row[key] = int(kv[key])
@@ -168,33 +190,39 @@ def parse_reg_log(path):
     return version, rows
 
 
-def flush_times(reg_rows):
-    """reg.log rows where `disconts` is both present and comparable with
-    the previous such row: a rise marks a discontinuity in that gap, and
-    the EARLIER row's stamp is kept (the conservative proxy -- see module
-    docstring)."""
-    out = []
-    prev = None
-    for r in reg_rows:
-        if 'disconts' not in r:
-            continue
-        if prev is not None and r['disconts'] > prev['disconts']:
-            out.append(prev['t'])
-        prev = r
-    return out
+def event_gaps(reg_rows, keys):
+    """[(t_a, t_b)] for every rise of any counter in `keys` between two
+    consecutive reg.log rows carrying it: the event happened in (t_a,
+    t_b], and t_a -- the EARLIER row's stamp -- is taken as its time (the
+    conservative proxy -- see module docstring)."""
+    out = set()
+    for key in keys:
+        prev = None
+        for r in reg_rows:
+            if key not in r:
+                continue
+            if prev is not None and r[key] > prev[key]:
+                out.add((prev['t'], r['t']))
+            prev = r
+    return sorted(out)
 
 
-def skip_indices(frame_rows, flushes, n):
+def skip_indices(frame_rows, gaps, n):
     """Indices into `frame_rows` (already sorted by t_flip) that fall in
-    the first `n` rows at-or-after each flush time."""
-    if n <= 0 or not flushes:
+    the first `n` rows at-or-after each gap's start."""
+    if n <= 0 or not gaps:
         return set()
     flips = [r['t_flip'] for r in frame_rows]
     out = set()
-    for ft in flushes:
-        i = bisect.bisect_left(flips, ft)
+    for t_a, _ in gaps:
+        i = bisect.bisect_left(flips, t_a)
         out.update(range(i, min(len(frame_rows), i + n)))
     return out
+
+
+def in_gaps(t0, t1, gaps):
+    """True when the reg.log step (t0, t1] overlaps one of `gaps`."""
+    return any(t0 < t_b and t1 > t_a for t_a, t_b in gaps)
 
 
 def analyze(session_dir, t0_s, t1_s, skip_after_flush=24):
@@ -211,13 +239,22 @@ def analyze(session_dir, t0_s, t1_s, skip_after_flush=24):
         raise ValueError(f"{sess.reg}: no '# reglog N' marker")
 
     lo, hi = t0_s * 1e6, t1_s * 1e6
-    flushes = flush_times(reg_rows)
-    skip = skip_indices(frame_rows, flushes, skip_after_flush)
+    flush_gaps = event_gaps(reg_rows, ('flushes', 'disconts'))
+    rec_gaps = event_gaps(reg_rows, ('recstarts',))
+    skip_flush = skip_indices(frame_rows, flush_gaps, skip_after_flush)
+    skip_rec = skip_indices(frame_rows, rec_gaps, skip_after_flush)
 
     win = [(i, r) for i, r in enumerate(frame_rows) if lo <= r['t_flip'] <= hi]
-    misses = sum(1 for i, r in win
-                 if r['t_commit'] != 0 and r['t_flip'] - r['t_commit'] > MISS_US
-                 and i not in skip)
+    misses = ex_flush_m = ex_rec_m = 0
+    for i, r in win:
+        if r['t_commit'] == 0 or r['t_flip'] - r['t_commit'] <= MISS_US:
+            continue
+        if i in skip_flush:
+            ex_flush_m += 1
+        elif i in skip_rec:
+            ex_rec_m += 1
+        else:
+            misses += 1
     dsp_vals = [r['dsp'] for _, r in win]
     e2e_vals = [r['e2e'] for _, r in win]
 
@@ -227,10 +264,28 @@ def analyze(session_dir, t0_s, t1_s, skip_after_flush=24):
         vals = [r[key] for r in win_reg if key in r]
         return counter_growth(vals) if len(vals) >= 2 else 0
 
+    # pend growth step by step, each step charged to the gate or to the
+    # exclusion whose gap it overlaps.
+    pend = ex_flush_p = ex_rec_p = 0
+    prev = None
+    for r in win_reg:
+        if 'pend' not in r:
+            continue
+        if prev is not None:
+            g = growth_step(prev['pend'], r['pend'])
+            if in_gaps(prev['t'], r['t'], flush_gaps):
+                ex_flush_p += g
+            elif in_gaps(prev['t'], r['t'], rec_gaps):
+                ex_rec_p += g
+            else:
+                pend += g
+        prev = r
+
     rl = [r for r in win_reg if 'rlate_p99' in r]
     return {
         'frames': len(win), 'misses': misses,
-        'pend_delta': delta('pend'), 'pdrop_delta': delta('pdrop'),
+        'pend_delta': pend, 'pdrop_delta': delta('pdrop'),
+        'excluded': {'flush': (ex_flush_m, ex_flush_p), 'recstart': (ex_rec_m, ex_rec_p)},
         'rlate': (max(r['rlate_p99'] for r in rl), max(r['rlate_max'] for r in rl)) if rl else None,
         'hand': (max(r['hand_p99'] for r in rl), max(r['hand_max'] for r in rl)) if rl else None,
         'dsp_p50': pct(dsp_vals, .5),
@@ -251,7 +306,9 @@ def format_line(r):
             f"(late-latch rows, flip-commit > 12 ms)  "
             f"pend +{r['pend_delta']}  pdrop +{r['pdrop_delta']}  "
             f"rlate {fmt_pair(r['rlate'])}  hand {fmt_pair(r['hand'])}  "
-            f"dsp {fmt(r['dsp_p50'])}  e2e {fmt(r['e2e_p50'])}/{fmt(r['e2e_p99'])}")
+            f"dsp {fmt(r['dsp_p50'])}  e2e {fmt(r['e2e_p50'])}/{fmt(r['e2e_p99'])}  "
+            f"excluded: flush {r['excluded']['flush'][0]} pend {r['excluded']['flush'][1]}, "
+            f"recstart {r['excluded']['recstart'][0]} pend {r['excluded']['recstart'][1]}")
 
 
 def main():

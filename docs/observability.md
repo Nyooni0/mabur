@@ -565,7 +565,8 @@ rows for the per-second rate (the `present=`, `rlate=` and `hand=` windows
 are per line already). It exists because `pend`/`pdrop`/`heals` are the
 presenter's side of a missed latch, and `/tmp/maburplay.log` does not
 outlive a power-off. reglog 3 appends the release thread's fields `rlate=
-hand= rt=`; reglog 2 rows end at `ioctl=` and carry the phase-lock fields
+hand= rt=` and the event counters `flushes= recstarts=`; reglog 2 rows end
+at `ioctl=` and carry the phase-lock fields
 `lock= lerr= loff= lctr=` (docs/phase-lock.md); reglog 1 rows end at
 `lslot=` before `present=`.
 
@@ -628,8 +629,9 @@ The 1 Hz `regulator:` line (stderr, and `reg.log` in the session
 directory): `held= late= replaced= disconts= hold_ema=
 present_jitter= vsync= skips= fallback= pend= heals= pdrop= chained= chain=
 chain_max= chains= cuts= alw= lslot= lock= lerr= loff= lctr= present= acq=
-req= ioctl= rlate= hand= rt=` (`regulator: off present_jitter= rlate= hand=
-rt=` with `display.regulate_ms = 0`; `present=` through `ioctl=` only with a
+req= ioctl= rlate= hand= rt= flushes= recstarts=` (`regulator: off
+present_jitter= rlate= hand= rt= flushes= recstarts=` with
+`display.regulate_ms = 0`; `present=` through `ioctl=` only with a
 display).
 
 The release thread (docs/phase-lock.md "Threads") makes every release
@@ -657,6 +659,15 @@ against it, not against the housekeeping loop that prints the line.
 - `rt=1|0` — whether the release thread runs `SCHED_FIFO`
   (`display.rt_priority`; 0 when the priority is 0 or the kernel refused
   it, which maburplay also logs once at start).
+- `flushes=` — output parks, cumulative: every time housekeeping parks the
+  decode-output and release threads and drops what the display holds — a
+  ring flush, a decode-watchdog reset or recreate, a display hotplug
+  acquire, shutdown. `disconts=` counts only encoder pts discontinuities,
+  none of these.
+- `recstarts=` — recorder starts, cumulative: the burned recorder coming
+  up, or a raw recording starting. `tools/bench/latchgate.py` excludes the
+  misses and `pend` growth right after a rise in either counter (its
+  docstring has the spans).
 - `present_jitter=` — |Δ present interval| EMA, ms, on the release
   thread's submission clock.
 - `late=` — frames whose release had already passed when they were

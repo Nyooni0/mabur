@@ -173,7 +173,8 @@ each frame on the spot.
 
 - `reg.log` (`# reglog 3`) regulator line: `lock=<off|wait|acq|lock|oor>
   lerr=<ms>ms loff=<mfps> lctr=<mfps>`, and the release thread's
-  `rlate= hand= rt=` (docs/observability.md "Regulator line").
+  `rlate= hand= rt= flushes= recstarts=` (docs/observability.md
+  "Regulator line").
 - maburplay stderr: `phase-lock: <state> err= off= centre=` on each state
   change.
 - Drone stats line: `snr_off=` (the offset on the sensor); `/tmp/mabur.log`

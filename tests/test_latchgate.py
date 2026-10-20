@@ -5,10 +5,12 @@ synthetic frame.log/reg.log pair and reports missed vsync latches
 --from/--to window.
 
 Covers: a miss plus a pend delta (exit 1), a clean pair (exit 0), `#
-reglog 2` tolerance (no rlate/hand -> `-`), and `--skip-after-flush`
-excluding a miss that falls in the window right after a detected
-discontinuity (a rise in reg.log's cumulative `disconts=`) while still
-counting one further out.
+reglog 2` tolerance (no rlate/hand -> `-`), `--skip-after-flush`
+excluding a miss right after a rise in reg.log's cumulative `disconts=`
+or `flushes=` while still counting one further out, a `recstarts=` rise
+excluding misses and pend growth in its span only, the excluded counts
+reported apart, and the miss threshold following the panel period (with
+the `--miss-ms` override).
 """
 import os
 import subprocess
@@ -33,7 +35,8 @@ def frame_row(t_flip, t_commit, dsp=4000, e2e=9000):
             f"{t_commit} 0x00")
 
 
-def reg_row(t, pend=0, pdrop=0, disconts=0, rlate=None, hand=None):
+def reg_row(t, pend=0, pdrop=0, disconts=0, rlate=None, hand=None, flushes=None,
+            recstarts=None):
     base = (f"{t} regulator: held=1 late=0 replaced=0 disconts={disconts} "
             f"hold_ema=0.00ms present_jitter=0.00ms vsync=locked skips=0 "
             f"fallback=0 pend={pend} heals=0 pdrop={pdrop} chained=0 chain=0 "
@@ -42,6 +45,8 @@ def reg_row(t, pend=0, pdrop=0, disconts=0, rlate=None, hand=None):
             f"ioctl=300/900")
     if rlate is not None:
         base += f" rlate={rlate[0]}/{rlate[1]} hand={hand[0]}/{hand[1]} rt=1"
+    if flushes is not None:
+        base += f" flushes={flushes} recstarts={recstarts}"
     return base
 
 
@@ -50,11 +55,21 @@ def write(d, name, text):
         f.write(text)
 
 
-def run(d, t0=0, t1=2, skip=24):
+def run(d, t0=0, t1=2, skip=24, extra=()):
     return subprocess.run(
         [sys.executable, LATCHGATE, d, '--from', str(t0), '--to', str(t1),
-         '--skip-after-flush', str(skip)],
+         '--skip-after-flush', str(skip), *extra],
         capture_output=True, text=True)
+
+
+def periodic_rows(n, period, misses, miss_latch, clean_latch=5000):
+    """n frame.log rows `period` µs apart; rows in `misses` latch
+    `miss_latch` µs after their commit, the rest `clean_latch`."""
+    rows = []
+    for i in range(n):
+        t_flip = i * period
+        rows.append(frame_row(t_flip, t_flip - (miss_latch if i in misses else clean_latch)))
+    return rows
 
 
 class LatchgateTest(unittest.TestCase):
@@ -125,6 +140,68 @@ class LatchgateTest(unittest.TestCase):
             r = run(d, t0=0, t1=1, skip=24)
         self.assertIn('frames 40', r.stdout, r.stdout)
         self.assertIn('misses 1', r.stdout, r.stdout)
+
+    def test_flushes_rising_excludes_the_near_miss_and_that_gaps_pend(self):
+        # flushes= rises between the lines at 0 and 200000 us (a ring
+        # flush, a watchdog reset or a hotplug parked the output in that
+        # gap): rows 0..23 after the earlier stamp lose their misses, and
+        # the pend growth across that gap (+2) is excluded; the miss at row
+        # 30 is outside the span and still counts, and so does the pend
+        # growth of the next gap (+1).
+        with tempfile.TemporaryDirectory() as d:
+            write(d, 'frame.log', '# framelog 3\n'
+                  + '\n'.join(periodic_rows(40, 16667, (10, 30), 16000)) + '\n')
+            write(d, 'reg.log', '# reglog 3\n'
+                  + reg_row(0, pend=0, rlate=(100, 200), hand=(50, 100),
+                            flushes=0, recstarts=0) + '\n'
+                  + reg_row(200_000, pend=2, rlate=(100, 200), hand=(50, 100),
+                            flushes=1, recstarts=0) + '\n'
+                  + reg_row(600_000, pend=3, rlate=(100, 200), hand=(50, 100),
+                            flushes=1, recstarts=0) + '\n')
+            r = run(d, t0=0, t1=1, skip=24)
+        self.assertIn('frames 40', r.stdout, r.stdout)
+        self.assertIn('misses 1', r.stdout, r.stdout)
+        self.assertIn('pend +1', r.stdout, r.stdout)
+        self.assertIn('excluded: flush 1 pend 2, recstart 0 pend 0', r.stdout, r.stdout)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_recstarts_rising_excludes_misses_and_pend_in_its_span_only(self):
+        # A recorder start between the lines at 0 and 300000 us: the miss
+        # at row 5 (inside the 24 rows after the earlier stamp) and that
+        # gap's pend growth (+3) are excluded and reported as such. The
+        # miss at row 40 and the next gap's pend growth (+1) are outside
+        # the span and still trip the gate.
+        with tempfile.TemporaryDirectory() as d:
+            write(d, 'frame.log', '# framelog 3\n'
+                  + '\n'.join(periodic_rows(60, 16667, (5, 40), 16000)) + '\n')
+            write(d, 'reg.log', '# reglog 3\n'
+                  + reg_row(0, pend=0, rlate=(100, 200), hand=(50, 100),
+                            flushes=0, recstarts=0) + '\n'
+                  + reg_row(300_000, pend=3, rlate=(100, 200), hand=(50, 100),
+                            flushes=0, recstarts=1) + '\n'
+                  + reg_row(700_000, pend=4, rlate=(100, 200), hand=(50, 100),
+                            flushes=0, recstarts=1) + '\n')
+            r = run(d, t0=0, t1=1, skip=24)
+        self.assertIn('misses 1', r.stdout, r.stdout)
+        self.assertIn('pend +1', r.stdout, r.stdout)
+        self.assertIn('excluded: flush 0 pend 0, recstart 1 pend 3', r.stdout, r.stdout)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_an_exclusion_alone_passes_the_gate(self):
+        # Everything bad in the window sits in a recorder start's span.
+        with tempfile.TemporaryDirectory() as d:
+            write(d, 'frame.log', '# framelog 3\n'
+                  + '\n'.join(periodic_rows(40, 16667, (3,), 16000)) + '\n')
+            write(d, 'reg.log', '# reglog 3\n'
+                  + reg_row(0, pend=0, rlate=(100, 200), hand=(50, 100),
+                            flushes=0, recstarts=0) + '\n'
+                  + reg_row(300_000, pend=1, rlate=(100, 200), hand=(50, 100),
+                            flushes=0, recstarts=1) + '\n')
+            r = run(d, t0=0, t1=1, skip=24)
+        self.assertIn('misses 0', r.stdout, r.stdout)
+        self.assertIn('pend +0', r.stdout, r.stdout)
+        self.assertIn('excluded: flush 0 pend 0, recstart 1 pend 1', r.stdout, r.stdout)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     def test_missing_logs_exit_2(self):
         with tempfile.TemporaryDirectory() as d:

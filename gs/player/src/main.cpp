@@ -888,6 +888,13 @@ int main(int argc, char** argv) {
   // record nothing and say so, never quietly leave a raw file behind that
   // the user would mistake for a burned one.
   const bool burned_mode = cfg.dvr.mode == "burned";
+  // The regulator line's flushes=/recstarts=: output parks (a ring flush, a
+  // decode-watchdog reset or recreate, a display hotplug, shutdown) and
+  // recorder starts, cumulative. Both disturb presentation for a few
+  // frames, so a gate that counts missed latches (tools/bench/latchgate.py)
+  // keys its exclusions on them. Housekeeping thread only.
+  [[maybe_unused]] uint64_t output_parks = 0;
+  [[maybe_unused]] uint64_t rec_starts = 0;
 #ifdef MABUR_PLAYER_HW
   // Declared AFTER `presenter` and `backend` so it is destroyed FIRST on
   // unwind: stop() joins the encode thread and releases the decoder buffers
@@ -911,7 +918,8 @@ int main(int argc, char** argv) {
   // displacing one already parked because a flip was in flight) -- 0 when
   // there is no presenter (decode-only, or init failed). Every call closes
   // the release thread's stats window (rlate=, hand=, present_jitter=).
-  auto log_regulator_line = [&regulator, &presenter, &release, &reg_log, &phase_lock]() {
+  auto log_regulator_line = [&regulator, &presenter, &release, &reg_log, &phase_lock,
+                             &output_parks, &rec_starts]() {
     char line[768];
     const maburplay::ReleaseLoop::Stats st = release.take_stats();
     if (regulator.enabled()) {
@@ -975,11 +983,14 @@ int main(int argc, char** argv) {
     {
       // The release thread over the same window (µs p99/max): rlate = a held
       // frame's release behind its schedule, hand = decode stamp to offer;
-      // rt = 1 when it runs SCHED_FIFO.
+      // rt = 1 when it runs SCHED_FIFO. Then the cumulative output parks
+      // and recorder starts (see output_parks above).
       const size_t used = std::strlen(line);
-      std::snprintf(line + used, sizeof(line) - used, " rlate=%u/%u hand=%u/%u rt=%d",
+      std::snprintf(line + used, sizeof(line) - used,
+                    " rlate=%u/%u hand=%u/%u rt=%d flushes=%llu recstarts=%llu",
                     st.rlate_p99_us, st.rlate_max_us, st.hand_p99_us, st.hand_max_us,
-                    release.rt_applied() ? 1 : 0);
+                    release.rt_applied() ? 1 : 0, static_cast<unsigned long long>(output_parks),
+                    static_cast<unsigned long long>(rec_starts));
     }
     std::fprintf(stderr, "%s\n", line);
     reg_log.write(mono_us(), line);
@@ -1071,6 +1082,7 @@ int main(int argc, char** argv) {
     // decode watchdog may destroy and recreate it mid-run.
     if (rec->start(bc, dvr_filename(cfg.dvr.dir), backend.get())) burn = std::move(rec);
     if (!burn) return;
+    ++rec_starts;
     // Raw pointer, not a reference to the unique_ptr. `burn` IS reset --
     // rec_stop() tears the recorder down on a button press -- so the
     // safety comes from ordering instead: rec_stop() removes both hooks
@@ -1180,6 +1192,7 @@ int main(int argc, char** argv) {
   // where bcfg is in scope.
   if (rec_on && rec_gs && !burned_mode) {
     dvr.start(dvr_filename(cfg.dvr.dir), bcfg.width, bcfg.height, cfg.dvr.fragment_ms);
+    ++rec_starts;
     core_ctl.send_line("refresh dvr");
   }
 
@@ -1219,6 +1232,7 @@ int main(int argc, char** argv) {
 #endif
     if (!burned_mode) {
       dvr.start(dvr_filename(cfg.dvr.dir), bcfg.width, bcfg.height, cfg.dvr.fragment_ms);
+      ++rec_starts;
       core_ctl.send_line("refresh dvr");
     }
     std::fprintf(stderr, "maburplay: rec: START (%s)\n", cfg.dvr.mode.c_str());
@@ -1311,6 +1325,7 @@ int main(int argc, char** argv) {
   // that does not park in 2 s is wedged beyond this process: respawn, as
   // for a feed thread that will not park.
   auto park_output = [&](const char* why) {
+    ++output_parks;
     if (!pump.park(std::chrono::seconds(2)) || !release.park(std::chrono::seconds(2))) {
       std::fprintf(stderr,
                    "maburplay: %s -- the decode-output or release thread did not park in 2 s; "
