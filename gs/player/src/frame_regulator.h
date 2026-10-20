@@ -34,23 +34,21 @@ namespace maburplay {
 // time arrives — call it in a loop, since more than one can be due in
 // the same tick.
 //
-// Thread-sharing: the release thread calls offer/release_due/
-// next_release_us/on_flip at its own clock, the decode-output thread calls
-// note_incomplete, and the housekeeping loop reads the counters and calls
-// heal_slip/set_capture_placement/take_margin -- three callers, one
-// instance. Every public method locks mu_ for its whole body (counters'
-// getters included) and no public method calls another, so the lock is
-// never held across more than one method's work and never nests.
+// Thread safety: every public method takes the internal lock for its
+// whole body (the counters' getters included) and no public method calls
+// another, so the lock is never held across more than one method's work
+// and never nests -- callable from any thread.
 //
-// offer()'s two timestamps come from different clocks: arrival_us is the
-// decode stamp (when the frame actually finished decoding, set once at
-// decode time) and now_us is the release thread's own clock at the moment
-// it offers the frame. arrival_us feeds the pts anchor and the capture-time
-// lateness window (both describe the decode pipeline's delivery), while
-// now_us decides everything about "is this late, and relative to what
-// clock does the next release fall" -- the vblank estimator's validity,
-// the next release it computes, and the past-release/implausible-phase
-// clamps.
+// offer()'s two timestamps come from different clocks: arrival_us is when
+// the frame became available (the decode stamp) and now_us is the
+// caller's own clock at the moment it offers the frame. arrival_us feeds
+// the pts anchor, the capture-time lateness window, and the servo's
+// natural-slot lookup (the vblank the frame would land on if nothing were
+// stalled); now_us decides what counts as late and what the grid is
+// allowed to trust right now -- the vblank estimator's validity, the
+// implausible-phase clamps, and the final late check. A frame whose
+// arrival-derived slot has already passed by now_us presents at once
+// instead of being parked on a later one.
 //
 // Queue depth (bench A/B): the old
 // single-slot mailbox meant that once D approached the spacing to the
@@ -90,10 +88,9 @@ class FrameRegulator {
   // Returns true when f should be presented immediately. Returns false
   // when the regulator holds it. Either way, any frame(s) displaced from
   // the queue are returned in *out and must be released by the caller.
-  // arrival_us is the decode stamp (feeds the pts anchor and the
-  // capture-time lateness window); now_us is the release thread's own
-  // clock (decides lateness, and is the clock the vblank estimator's
-  // validity and next release are computed against).
+  // arrival_us is when the frame became available (the decode stamp);
+  // now_us is the caller's own clock at the moment of the call. See the
+  // class comment above for which parts of the placement each one feeds.
   bool offer(const DmaFrame& f, uint64_t arrival_us, uint64_t now_us,
              Displaced* out);
 

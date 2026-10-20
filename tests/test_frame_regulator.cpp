@@ -293,20 +293,28 @@ TEST(servo_falls_back_when_stale_and_recovers) {
 }
 
 TEST(servo_safety_clamp_uses_fallback_rule) {
+  // The natural slot now comes from arrival_us via release_at_or_after,
+  // which (unlike the old next_release(mono_us, ...) call) is designed to
+  // find the right vblank for an arrival far from the estimator's phase --
+  // a single corrupted flip jumping phase into the future no longer trips
+  // this clamp, because the arrival-based slot still lands close to
+  // arrival regardless of where phase sits. What the clamp still guards:
+  // now_us itself sitting implausibly far behind the vblank arrival maps
+  // to (more than 2 periods + lead) -- the grid cannot be trusted to serve
+  // THIS now, so the frame falls back to the pts+D rule.
   FrameRegulator reg(12, true, 3);
   warm(reg);
-  // Corrupt-phase stand-in: an estimator whose next release lands
-  // > 2*period + lead away must NOT be trusted for this frame.
-  // Constructed via a phase far in the future: feed one exact flip 10
-  // periods ahead (k=10 updates phase), then offer a frame "now".
   const uint64_t phase = kT0 + 7 * kVb;
-  reg.on_flip(phase + 10 * kVb, true);
+  const uint64_t arrival = phase + kVb - 9'000;  // an ordinary, reachable slot
+  const uint64_t release = phase + kVb - kLead;  // the slot arrival maps to
+  const uint64_t clamp = 2 * kVb + kLead;
+  const uint64_t now = release - clamp - 1'000;  // now is unreachably far behind
   FrameRegulator::Displaced disp;
   DmaFrame out;
-  const uint64_t t_dec = phase + 10 * kVb - 60'000;  // 60 ms before phase
-  CHECK(!reg.offer(frame(0), t_dec, t_dec, &disp));
+  CHECK(!reg.offer(frame(0), arrival, now, &disp));
   CHECK(reg.fallback_frames() == 1);  // clamp routed to fallback
-  CHECK(reg.release_due(t_dec + kD, &out));
+  CHECK(!reg.release_due(arrival + kD - 1, &out));
+  CHECK(reg.release_due(arrival + kD, &out));
 }
 
 TEST(mixed_fallback_and_servo_targets_all_hold) {
@@ -1128,17 +1136,78 @@ TEST(arrival_feeds_the_window_and_now_decides_lateness) {
                               /*now*/ kT0 + 12'000, &d);
   CHECK(!now_);
   CHECK(reg.next_release_us() >= kT0 + 12'000);
-  // Push `now` more than kStalePeriods*period past the last flip (the last
-  // warm-up flip sits at kT0 + 7*kVb): est_.valid(now) goes false, so this
-  // offer takes the fallback rule (pts anchor + D) instead of the vblank
-  // grid -- a rule next_release() can never classify as late by
-  // construction (its release is always >= its own `now`). The frame's
-  // arrival is barely past the first one (still near kT0), but `now` is
-  // far enough ahead that the fallback release is already behind it:
+  // The frame's natural slot comes from arrival (barely past the first
+  // one, still near kT0) via release_at_or_after, landing near-term; but
+  // `now` is pushed well past that slot's release (still inside the
+  // estimator's staleness window, so the servo stays engaged -- this is
+  // not the stale/fallback case). A hand-over this late presents at once:
   // `now`, not `arrival`, decides lateness.
-  CHECK(reg.offer(frame(1000 + kFrame), kT0 + 10'000 + kFrame, kT0 + 700'000,
+  CHECK(reg.offer(frame(1000 + kFrame), kT0 + 10'000 + kFrame, kT0 + 200'000,
                  &d));
   CHECK(reg.late_count() == 1);
+  CHECK(reg.servo_locked());  // still on the grid, not the stale fallback
+}
+
+TEST(servo_handover_past_its_release_presents_now_not_held_a_period) {
+  // The specific pump-stall shape: arrival maps to vblank V1 (a normal,
+  // reachable slot), but the hand-over to offer() doesn't happen until
+  // `now` has already slid past V1's release -- into the lead window
+  // before V1 itself. The old next_release(now, ...) path would always
+  // find a release >= now, parking this frame on V2 (a guaranteed
+  // one-period-late repeat); the fix takes the natural slot from arrival
+  // instead, so V1's already-past release is what the late check sees.
+  FrameRegulator reg(12, true, 3);
+  warm(reg);
+  const uint64_t phase = kT0 + 7 * kVb;
+  const uint64_t arrival = phase + kVb - 9'000;    // maps to V1
+  const uint64_t v1_release = phase + kVb - kLead;  // V1 - lead
+  const uint64_t now = v1_release + 1'000;          // past release, before V1
+  FrameRegulator::Displaced disp;
+  CHECK(now > v1_release && now < phase + kVb);
+  CHECK(reg.offer(frame(0), arrival, now, &disp));  // presented now
+  CHECK(reg.late_count() == 1);
+  CHECK(!reg.holding());  // not parked on V2
+}
+
+TEST(capture_window_and_lateness_split_between_arrival_and_now) {
+  // Pins BOTH halves of the split against the failure mode of collapsing
+  // them back into one clock. Frame A's arrival is on time (it matches
+  // the capture floor the window settles on) but its hand-over (`now`) is
+  // 50 ms late; frame B's roles are swapped -- its arrival is 5 ms late,
+  // its hand-over is on time. Passing `now` everywhere would seed the
+  // transit window from frame A's late `now` and frame B's on-time `now`
+  // -- the ~5 ms spread that actually happened (frame A on time, frame B
+  // late) would read as ~0, and frame A would win a capture slot instead
+  // of presenting at once, late (its `now`-derived "arrival" wouldn't
+  // look late to place_by_capture any more). Passing `arrival` everywhere
+  // would judge frame A's lateness against its own on-time arrival
+  // instead of its late hand-over, so it would ALSO wrongly win a slot.
+  FrameRegulator reg(12, true, 3, 3, 16);
+  warm(reg);
+  const uint64_t phase = kT0 + 7 * kVb;
+  FrameRegulator::Displaced disp;
+  double margin = 0.0;
+
+  // Frame A: arrival on time, hand-over 50 ms late.
+  const uint64_t arrival_a = phase;
+  const uint64_t now_a = phase + 50'000;
+  CHECK(reg.offer(frame(0), arrival_a, now_a, &disp));  // late: presented at once
+  CHECK(reg.late_count() == 1);
+  CHECK(!reg.holding());
+  REQUIRE(reg.take_margin(&margin));  // capture_slot still ran and set one
+  CHECK(margin > 12'000.0 && margin < 13'000.0);
+
+  // Frame B: arrival 5 ms late, hand-over on time.
+  const uint64_t arrival_b = arrival_a + kFrame + 5'000;
+  const uint64_t now_b = arrival_a + kFrame;
+  CHECK(!reg.offer(frame(kFrame), arrival_b, now_b, &disp));  // held
+  // Window now holds frame A's (on-time) and frame B's (5 ms late)
+  // transit: the spread reads ~5 ms if arrival fed it, not the ~0 either
+  // wrong wiring would see (both frames' `now` values are mutually
+  // consistent with each other, not with either frame's real transit).
+  CHECK(reg.allowance_ms() > 4.0);
+  CHECK(reg.allowance_ms() < 8.0);
+  CHECK(reg.next_release_us() == phase + 30'334);  // the slot its OWN arrival maps to
 }
 
 TEST(getters_are_safe_under_concurrent_offers) {

@@ -178,7 +178,16 @@ bool FrameRegulator::offer(const DmaFrame& f, uint64_t arrival_us,
     }
   }
   if (servo_now_ && !by_capture) {
-    const auto r = est_.next_release(now_us, lead_us_);
+    // The natural slot comes from arrival_us, not now_us: release_at_or_after
+    // (unlike next_release) accepts a time before the last flip and returns
+    // the vblank the frame would actually land on if the pipeline weren't
+    // stalled. A hand-over whose own slot has already gone by (a pump
+    // stall between decode and offer) reads release_us in the past; the
+    // late check below then presents it at once instead of parking it on
+    // the NEXT slot, which next_release(now_us, ...) would always have
+    // forced (its release is >= now_us by construction) -- a guaranteed
+    // one-period-late repeat for every stalled hand-over.
+    const auto r = est_.release_at_or_after(arrival_us, lead_us_);
     const uint64_t clamp =
         static_cast<uint64_t>(2.0 * est_.period_us()) + lead_us_;
     if (r.release_us > now_us + clamp) {
