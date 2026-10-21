@@ -129,9 +129,13 @@ timestamps are kernel CLOCK_MONOTONIC (`DRM_CAP_TIMESTAMP_MONOTONIC`, as
 on every DRM driver), so the latency log's `dsp` segment is exact.
 
 Decode keeps up with 1080p60: Cedrus decodes a whole AU in about 7 ms
-(`lat:` `dec`; 4 ms after completion when streamed, "Streamed decode"),
-and the GS OSD layer costs no measurable frame rate.
-Bench record: `docs/findings/2026-10-12-opi-zero2w-bringup.md`.
+(`lat:` `dec`), and streamed ("Streamed decode") the picture is out
+1.65 ms after the AU completes at the median, 3.6 ms at p99, with the
+decode-output thread waiting inside `poll()` for it; the GS OSD layer
+costs no measurable frame rate. Lead 4 (`display.vsync_lead_ms`) holds
+on this board with no missed latches, there being no burned recorder to
+disturb it. Bench records: `docs/findings/2026-10-12-opi-zero2w-bringup.md`,
+`docs/findings/2026-10-21-opi-release-thread-ab.md`.
 
 ## Build and deploy
 
