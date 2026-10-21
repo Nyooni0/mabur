@@ -137,10 +137,9 @@ anything slower than itself:
   and returns released frames to the decoder -- the decoder's whole
   output side. Per decoded frame, in order: the frame's submit notes
   (`lat` submit stamps, incomplete-AU flags for the lateness window),
-  `lat.on_decoded`, the source-rate sample, the burned recorder's
-  `submit()`, the hand-over to the release thread, and then the
-  framebuffer prime, so the release thread's present() finds the
-  frame's framebuffer cached. It also takes the submit notes after every
+  `lat.on_decoded`, the source-rate sample, the hand-over to the
+  release thread, and then the framebuffer prime, so the release
+  thread's present() finds the frame's framebuffer cached. It also takes the submit notes after every
   poll round, frame or not, so they never queue up in the feed while the
   decoder emits nothing.
 - **Release thread** (`ReleaseLoop`, `release_loop.h`, `SCHED_FIFO` at
@@ -150,18 +149,26 @@ anything slower than itself:
   flip events. Each wake: reap flips, release due frames, offer
   newly handed-over frames (a late one is presented at once), set the
   presenter's paced mode, run the chain-break heal, and commit a pending
-  OSD on its own when no frame is held. It never calls the decoder:
-  displaced frames and frames the display is done with go back through a
-  release queue the decode-output thread drains. Each offer's phase
+  OSD on its own when no frame is held. A completed flip also feeds the
+  burned recorder: the flip sink runs `RecorderTap::on_flip`
+  (`recorder_tap.h`), which calls `BurnRecorder::submit()` on each recorded
+  slot of the vblank grid (one buffer reference and a mailbox post). It
+  never calls the decoder: displaced frames and frames the display is
+  done with go back through a release queue the decode-output thread
+  drains. Each offer's phase
   margin is queued for housekeeping.
 - **Housekeeping** (the main loop, 2 ms): delivery notes (raw DVR, OSD
   figures), the record button, the phase lock itself (it takes the
   release thread's margins while the source and panel rates match, ticks
   and sends the offset), the rate match, OSD composition, the 1 Hz
   stats, `lat.log`/`frame.log`/`reg.log`, the decode watchdog and the
-  display hotplug retry. It composes the OSD only while no publish is
-  pending, so it never draws into a buffer that is on screen or about to
-  be. A flush, a watchdog reset or re-creation, a hotplug reacquire and
+  display hotplug retry. It composes the screen's OSD only while no
+  publish is pending, so it never draws into a buffer that is on screen
+  or about to be; the burned recording's overlay, a canvas of its own at
+  the record size, composes from the same input whether a publish is
+  pending or not. It also installs and removes the recorder tap's hook
+  (`RecorderTap::set` after `BurnRecorder::start()`, `clear()` before
+  `stop()`), so no record start or stop runs on the release thread. A flush, a watchdog reset or re-creation, a hotplug reacquire and
   shutdown park the decode-output thread and then the release thread
   (which drops everything the display and the regulator hold), return
   every frame to the decoder, and resume them after; a thread that does

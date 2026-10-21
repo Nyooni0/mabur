@@ -52,6 +52,7 @@
 #include "frame_regulator.h"  // phase-aware pts+D display release
 #include "phase_lock.h"  // PhaseLock, the sensor-rate controller for the phase lock
 #include "rate_match.h"  // RateMatch: is the panel within the phase lock's reach
+#include "recorder_tap.h"  // the burned DVR's hook on the display's flip
 #include "release_loop.h"  // the release thread: regulator decisions and every present()
 #include "wake_queue.h"    // the hand-over and release queues between the threads
 #include "gs_draw.h"         // set_colour_inverse() for the GS overlay pre-invert
@@ -144,9 +145,10 @@ void usage() {
                "  fps/frames with no presenter fields). With dvr.mode\n"
                "  \"burned\" and the recorder running, six more fields are\n"
                "  APPENDED: burn_in/burn_enc/burn_drop/burn_flush/burn_err/\n"
-               "  burn_osdrej -- frames past the fps cap / encode() calls\n"
-               "  that produced a packet / frames DISPLACED in the recorder's\n"
-               "  mailbox, i.e. the overload signal / frames released by a\n"
+               "  burn_osdrej -- flips tapped on the vblank grid after\n"
+               "  dvr.burned.every thinning / encode() calls that produced a\n"
+               "  packet / flips DISPLACED in a recorder mailbox or refused\n"
+               "  a reference, i.e. the overload signal / frames released by a\n"
                "  flush or reset, i.e. hygiene, NOT overload / frames the\n"
                "  encoder refused / OSD index maps refused for disagreeing\n"
                "  with the encoder's OSD region (nonzero means the file has\n"
@@ -342,7 +344,7 @@ std::string dvr_filename(const std::string& dir) {
 }
 
 // Parses player_config's "WIDTHxHEIGHT@RATE" screen_mode (mode_pick.h);
-// the burn encoder gets the rate rounded to whole fps. Falls back to
+// the backend gets the rate rounded to whole fps. Falls back to
 // BackendCfg's default (1920x1080@60) if malformed.
 maburplay::BackendCfg parse_screen_mode(const std::string& s) {
   maburplay::BackendCfg cfg;
@@ -652,6 +654,13 @@ int main(int argc, char** argv) {
                                       cfg.display.vsync_lead_ms,
                                       cfg.display.chain_budget,
                                       cfg.display.sched_cap_ms);
+  // The burned DVR's hook on the flip (recorder_tap.h): both flip-sink
+  // closures end in tap.on_flip(), on the release thread. Declared ahead of
+  // the presenter for the same reason as the regulator, and so it outlives
+  // every closure that captures it. Without an installed hook it does
+  // nothing; housekeeping installs one after the recorder starts and clears
+  // it before the recorder stops.
+  maburplay::RecorderTap tap;
   // Phase lock (display.phase_lock; phase_lock.h): steers the drone's
   // sensor rate through maburgs and the RCF, and owns capture-time placement
   // while it holds.
@@ -763,9 +772,10 @@ int main(int argc, char** argv) {
                      "the lead for this mode\n",
                      cfg.display.vsync_lead_ms, panel_us / 1000.0);
       presenter->set_flip_sink(
-          [&lat, &regulator](const maburplay::DmaFrame& f, uint64_t t, bool ex) {
+          [&lat, &regulator, &tap](const maburplay::DmaFrame& f, uint64_t t, bool ex) {
             lat.on_flip(f.pts_us, t, ex);
             regulator.on_flip(t, ex);
+            tap.on_flip(f, t);
           });
     }
   }
@@ -880,13 +890,13 @@ int main(int argc, char** argv) {
     std::fprintf(stderr,
                  "maburplay: rec: core control socket failed -- the drone recorder will not "
                  "follow the button and refresh reports will not reach maburgs\n");
-  // dvr.mode "burned": the recording is produced by re-encoding decoded
-  // frames with the OSD composited in by the hardware encoder, so the
-  // BurnRecorder owns the file and the raw remux in the ring sink below is
-  // SKIPPED. This flag -- not "the recorder actually started" -- is what
-  // gates that skip: a burned run whose encoder refused to come up must
-  // record nothing and say so, never quietly leave a raw file behind that
-  // the user would mistake for a burned one.
+  // dvr.mode "burned": the recording is produced by re-encoding the frames
+  // the display flips to, with the OSD composited in by the hardware
+  // encoder, so the BurnRecorder owns the file and the raw remux in the ring
+  // sink below is SKIPPED. This flag -- not "the recorder actually started"
+  // -- is what gates that skip: a burned run whose encoder refused to come
+  // up must record nothing and say so, never quietly leave a raw file
+  // behind that the user would mistake for a burned one.
   const bool burned_mode = cfg.dvr.mode == "burned";
   // The regulator line's flushes=/recstarts=: output parks (a ring flush, a
   // decode-watchdog reset or recreate, a display hotplug, shutdown) and
@@ -900,14 +910,20 @@ int main(int argc, char** argv) {
   // unwind: stop() joins the encode thread and releases the decoder buffers
   // it still holds while the decoder that owns them is still alive.
   std::unique_ptr<maburplay::BurnRecorder> burn;
+  // The recorder is started with the record size `dvr.burned.size` names,
+  // and "" means the decoded picture's size -- unknown until the first frame
+  // decodes. A start that needs it before then is DEFERRED, not refused:
+  // this is set, nothing is logged as a failure, and housekeeping retries
+  // start_burn_if_needed() on the first iteration that sees a frame.
+  bool burn_deferred = false;
   // The decode-output thread and the release thread (decode_pump.h,
   // release_loop.h). Declared AFTER `burn`, `presenter` and `backend` so
   // they are destroyed FIRST on unwind (each destructor stops and joins):
-  // neither may outlive the recorder the pump's submit hook calls, the
-  // presenter the release thread presents to and the pump primes, or the
-  // decoder the pump polls. Both exist in every hardware run but start only
-  // in the display run below: --decode-only keeps its one-thread loop and
-  // inline sink, and --oneshot never decodes.
+  // neither may outlive the recorder the release thread's flip tap
+  // submits to, the presenter the release thread presents to and the pump
+  // primes, or the decoder the pump polls. Both exist in every hardware run
+  // but start only in the display run below: --decode-only keeps its
+  // one-thread loop and inline sink, and --oneshot never decodes.
   maburplay::DecodePump pump(lat, regulator, handover, releases);
   maburplay::ReleaseLoop release(regulator, lat, handover, releases, presenter.get(),
                                  maburplay::ReleaseLoop::Cfg{cfg.display.rt_priority});
@@ -1014,11 +1030,6 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "%s\n", line);
     reg_log.write(mono_us(), line);
   };
-  // Idempotent, and deliberately callable more than once: the display may be
-  // acquired late (see the hotplug retry in the run loop), and the recorder
-  // is sized from presenter->osd_back_surface(), so it cannot be built before
-  // a presenter exists. Leaving it unbuilt on that path would mean a lit
-  // screen, playing video, and nothing recorded.
   // The encoder-side OSD palette, built once per input set and memoised.
   // build_palette() histograms the whole MSP atlas (~2 M px through a hash
   // map) and runs a 255-step median cut: ~150 ms on the A55, all of it on
@@ -1062,38 +1073,85 @@ int main(int argc, char** argv) {
     return m.pal;
   };
 
+  // Tears a running burned recorder down, in the order its hooks need: the
+  // flip tap first -- once clear() returns no submit() is in flight on the
+  // release thread and none can start, which stop() relies on -- then the
+  // composer's sink, both of which hold a RAW pointer to the recorder; then
+  // the recorder itself, and only then the composer's burn size, which
+  // returns the burn canvas to following the screen. Housekeeping only.
+  // Returns the recording's encoded-frame count.
+  auto stop_burn = [&]() -> uint64_t {
+    burn_deferred = false;
+    if (!burn) return 0;
+    tap.clear();
+    composer.set_burn_sink({});
+    const uint64_t n = burn->frames_encoded();
+    burn->stop();
+    burn.reset();
+    std::string err;
+    if (!composer.set_burn_size(0, 0, &err)) {
+      // Re-laying the GS burn layer back at the screen size failed, so the
+      // composer dropped all three GS layers: the screen's GS overlay is off.
+      std::fprintf(stderr, "maburplay: gs osd disabled -- %s\n", err.c_str());
+      gs_src.reset();  // the live gate; the overlays are already dropped
+    }
+    return n;
+  };
+
+  // Idempotent, and deliberately callable more than once. The recording
+  // samples the display's vblank grid, so there is no recorder without a
+  // presenter: a display acquired late starts it from the hotplug retry in
+  // the run loop. With dvr.burned.size "" the record size is the decoded
+  // picture's, so there is none before the first decoded frame either: the
+  // start is deferred (burn_deferred) and housekeeping retries it on the
+  // first iteration that sees a frame. Leaving it unbuilt on either path
+  // would mean a lit screen, playing video, and nothing recorded.
   auto start_burn_if_needed = [&]() {
     if (burn || !burned_mode || !rec_on || !rec_gs || !presenter) return;
+    // The record size: dvr.burned.size, or (0x0) the decoded picture's
+    // size now. A later change of the decoded size (a rung change) does not
+    // restart the recorder: its stage scales every frame of another size to
+    // this one (burn_recorder.h BurnCfg).
+    int rw = cfg.dvr.burned.size_w;
+    int rh = cfg.dvr.burned.size_h;
+    if (rw <= 0 || rh <= 0) {
+      rw = pump.video_w();
+      rh = pump.video_h();
+      if (rw <= 0 || rh <= 0) {
+        if (!burn_deferred)
+          std::fprintf(stderr,
+                       "maburplay: rec: START deferred -- waiting for the first decoded "
+                       "frame\n");
+        burn_deferred = true;
+        return;
+      }
+    }
+    burn_deferred = false;
     auto rec = std::make_unique<maburplay::BurnRecorder>();
     maburplay::BurnCfg bc;
+    bc.width = rw;
+    bc.height = rh;
     // Palette (and with it the encoder's OSD region) whenever EITHER overlay
-    // is live AND the presenter really allocated an OSD surface. Gating on
-    // osd_raster alone -- as this did before the GS overlay existed -- leaves
-    // a GS-only topology recording pixels the encoder has no entries for,
-    // i.e. a burned file with no overlay at all, indistinguishable from a
-    // deliberate plain transcode. With neither overlay there is no palette
-    // and set_osd() costs nothing, which IS the plain transcode.
+    // is live. Gating on osd_raster alone would leave a GS-only topology
+    // recording pixels the encoder has no entries for, i.e. a burned file
+    // with no overlay at all, indistinguishable from a deliberate plain
+    // transcode. The burned overlay is composed at the record size
+    // (set_burn_size below), not at the panel's OSD surface, so the region
+    // is the record size and does not depend on the panel having an OSD
+    // plane. With neither overlay there is no palette and set_osd() costs
+    // nothing, which IS the plain transcode.
     // MUST precede start(), which uploads it before the thread exists.
-    const maburplay::Surface osd_surf = presenter->osd_back_surface();
-    if ((osd_raster || composer.gs_present()) && osd_surf.pixels && osd_surf.width > 0 &&
-        osd_surf.height > 0) {
-      // The region is sized from the SURFACE, not from screen_mode: the
-      // connector may not have offered that mode, in which case
-      // DrmPresenter fell back to another one and allocated the OSD at THAT
-      // size. A region built from the config would then reject every index
-      // map the quantizer produces -- a recording with no OSD at all, which
-      // looks exactly like a deliberate plain transcode.
-      bc.osd_width = osd_surf.width;
-      bc.osd_height = osd_surf.height;
+    if (osd_raster || composer.gs_present()) {
+      bc.osd_width = rw;
+      bc.osd_height = rh;
       rec->set_palette(burn_palette());  // memoised; see burn_palette above
     }
-    // Track-header FALLBACK only. The encoded picture size is the DECODED
-    // frame's, latched by MppEncoder on the first frame it sees: it comes
-    // from the bitstream, and screen_mode is an unrelated quantity that only
-    // coincides with it on this bench.
-    bc.width = bcfg.width;
-    bc.height = bcfg.height;
-    bc.fps_cap = cfg.dvr.burned.fps_cap;
+    // The vblank grid the tap samples: the committed mode's exact period,
+    // thinned to one flip in `every`. A presenter is only ever acquired
+    // while none exists, and the recorder needs one, so this period holds
+    // for the recorder's whole life.
+    bc.period_us = presenter->mode_period_us();
+    bc.every = cfg.dvr.burned.every;
     bc.bitrate_kbps = cfg.dvr.burned.bitrate_kbps;
     bc.fragment_ms = cfg.dvr.fragment_ms;
     bc.colortrans = cfg.colortrans.enable ? &ct : nullptr;
@@ -1102,22 +1160,46 @@ int main(int argc, char** argv) {
     if (rec->start(bc, dvr_filename(cfg.dvr.dir), backend.get())) burn = std::move(rec);
     if (!burn) return;
     ++rec_starts;
+    // The burn canvas and the GS burn layer at the record size: the OSD
+    // surface set_osd() is handed must be exactly osd_width x osd_height.
+    // A failed GS layout drops all three GS layers (the composer's
+    // all-or-none rule), the screen's GS overlay included.
+    {
+      std::string err;
+      if (!composer.set_burn_size(rw, rh, &err)) {
+        std::fprintf(stderr,
+                     "maburplay: rec: GS overlay layout at the record size %dx%d failed -- %s; "
+                     "the GS overlay is off (screen and recording) and the burned recorder is "
+                     "stopped -- NOTHING is being recorded\n",
+                     rw, rh, err.c_str());
+        gs_src.reset();  // the live gate; the overlays are already dropped
+        stop_burn();
+        return;
+      }
+    }
     // Raw pointer, not a reference to the unique_ptr. `burn` IS reset --
     // rec_stop() tears the recorder down on a button press -- so the
-    // safety comes from ordering instead: rec_stop() removes the hook
+    // safety comes from ordering instead: stop_burn() removes both hooks
     // BEFORE it stops and destroys the recorder. The composer runs on this
-    // (housekeeping) thread.
+    // (housekeeping) thread; the tap's hook runs on the release thread, and
+    // RecorderTap's lock is the fence against it: the hook goes in only
+    // after start() returned, and once tap.clear() returns no submit() is
+    // in flight (burn_recorder.h THREADING).
     maburplay::BurnRecorder* b = burn.get();
     composer.set_burn_sink([b](const maburplay::Surface& s, const maburplay::DirtyRect* r,
                                size_t n) { b->set_osd(s, r, n); });
+    tap.set([b](const maburplay::DmaFrame& f, uint64_t pts) { b->submit(f, pts); },
+            bc.period_us, bc.every);
+    std::fprintf(stderr, "maburplay: rec: burned %dx%d every=%d\n", rw, rh, bc.every);
   };
   // Warm the palette memo now, while nothing is on screen yet, so the
   // first record start does not pay for it on the housekeeping loop.
   if (burned_mode && presenter && (osd_raster || composer.gs_present())) burn_palette();
   start_burn_if_needed();
   // rec_gs: with dvr.target "vtx" the GS recorder is never started, so
-  // its absence is not news.
-  if (rec_on && rec_gs && burned_mode && !burn) {
+  // its absence is not news. Nor is a deferred start's (it waits for the
+  // first decoded frame and said so).
+  if (rec_on && rec_gs && burned_mode && !burn && !burn_deferred) {
     if (presenter) {
       // A real recorder failure: BurnRecorder::start() already logged why.
       std::fprintf(stderr,
@@ -1153,8 +1235,8 @@ int main(int argc, char** argv) {
     have_decoded_pts = true;
     last_decoded_pts = f.pts_us;
     // The DECODED picture size, which is what the OSD's res: field means --
-    // not screen_mode (the panel) and not bcfg (the burn encoder), both of
-    // which stay at 1080p while the drone streams 720p.
+    // not screen_mode (the panel) and not bcfg (the backend's configured
+    // size), both of which stay at 1080p while the drone streams 720p.
     gs_ps.vid_w = f.width;
     gs_ps.vid_h = f.height;
     const auto now = std::chrono::steady_clock::now();
@@ -1226,6 +1308,10 @@ int main(int argc, char** argv) {
     if (burned_mode) {
       start_burn_if_needed();
       if (!burn) {
+        // Deferred: no frame has decoded yet to size the recording from.
+        // start_burn_if_needed() said so, and housekeeping starts it on the
+        // first decoded frame.
+        if (burn_deferred) return;
         // Same discrimination as the startup path above: with a presenter
         // already in hand, start_burn_if_needed() ran for real and the
         // recorder REFUSED -- and nothing will retry it (the hotplug retry
@@ -1270,21 +1356,16 @@ int main(int argc, char** argv) {
     }
 #ifdef MABUR_PLAYER_HW
     if (burn) {
-      // The hook holds a RAW pointer to the recorder (see
-      // start_burn_if_needed), so it goes first, while the object it
-      // points at is still alive.
-      composer.set_burn_sink({});
-      const uint64_t n = burn->frames_encoded();
-      burn->stop();
-      burn.reset();
+      const uint64_t n = stop_burn();
       std::fprintf(stderr, "maburplay: rec: STOP (%llu frames)\n",
                    static_cast<unsigned long long>(n));
       return;
     }
+    burn_deferred = false;  // a deferred start never ran; it must not run now
 #endif
     // There was no recorder to tear down: START was deferred (no display
-    // yet) or refused (the encoder would not come up), or this is a build
-    // with no encoder at all. Say so anyway -- a press that leaves NO line
+    // or no decoded frame yet) or refused (the encoder would not come up),
+    // or this is a build with no encoder at all. Say so anyway -- a press that leaves NO line
     // in /tmp/maburplay.log is the worst case for a post-flight read.
     std::fprintf(stderr, "maburplay: rec: STOP (no recorder was running)\n");
   };
@@ -1364,7 +1445,8 @@ int main(int argc, char** argv) {
       std::vector<maburplay::FeedNote> stale;
       feed_ptr->take_submit_notes(&stale);
     }
-    // The pump is parked: no submit() can race this (burn_recorder.h).
+    // The release thread is parked (park_output), so its flip tap cannot
+    // submit() into this (burn_recorder.h).
     if (burn) {
       burn->drop_pending();
       burn->request_idr();
@@ -1718,6 +1800,12 @@ int main(int argc, char** argv) {
     // Every iteration: sends on change, re-sends each second (CoreControlClient).
     core_ctl.tick(rec_on && rec_vtx, mono_ms());
 #ifdef MABUR_PLAYER_HW
+    // A burned start deferred for want of a decoded frame to size the
+    // recording from runs as soon as one exists.
+    if (burn_deferred && pump.have_frame()) {
+      burn_deferred = false;
+      start_burn_if_needed();
+    }
     // The phase margin of every offer the release thread made since the
     // last iteration, oldest first. The lock takes them only while it
     // runs: with the source and panel rates out of its reach (rate
@@ -1728,8 +1816,8 @@ int main(int argc, char** argv) {
       for (const maburplay::ReleaseLoop::MarginSample& m : margins)
         phase_lock->on_margin(m.margin_us, m.period_us, m.t_us);
     // The DECODED picture size, which is what the OSD's res: field means --
-    // not screen_mode (the panel) and not bcfg (the burn encoder), both of
-    // which stay at 1080p while the drone streams 720p.
+    // not screen_mode (the panel) and not bcfg (the backend's configured
+    // size), both of which stay at 1080p while the drone streams 720p.
     gs_ps.vid_w = pump.video_w();
     gs_ps.vid_h = pump.video_h();
     // Drone fps vs panel Hz, once a second, whether or not the GS OSD (the
@@ -1834,9 +1922,10 @@ int main(int argc, char** argv) {
           release.take_margins(&margins);
           margins.clear();
           presenter->set_flip_sink(
-              [&lat, &regulator](const maburplay::DmaFrame& f, uint64_t t, bool ex) {
+              [&lat, &regulator, &tap](const maburplay::DmaFrame& f, uint64_t t, bool ex) {
                 lat.on_flip(f.pts_us, t, ex);
                 regulator.on_flip(t, ex);
+                tap.on_flip(f, t);
               });
           // Startup-only, and this is where that invariant is enforced for the
           // hotplug path: if this process has ever decoded a frame, the aircraft is
@@ -1850,13 +1939,14 @@ int main(int argc, char** argv) {
           resume_output();
           std::fprintf(stderr, "maburplay: display acquired after %.1f s\n",
                        (now_ms - display_retry_t0_ms) / 1000.0);
-          // The recorder is sized from the OSD surface, so it could not exist
-          // before this moment.
+          // The recorder samples this display's vblank grid, so it could not
+          // exist before this moment.
           start_burn_if_needed();
           // rec_on, not burned_mode alone: a player deliberately stopped (or
           // never started -- autostart:false) has nothing to report here, and
-          // saying otherwise would be a false alarm on every late display.
-          if (rec_on && rec_gs && burned_mode && !burn)
+          // saying otherwise would be a false alarm on every late display. A
+          // deferred start (no decoded frame yet) said so and is retried.
+          if (rec_on && rec_gs && burned_mode && !burn && !burn_deferred)
             std::fprintf(stderr,
                          "maburplay: display acquired but the burned recorder did not start -- "
                          "NOTHING is being recorded\n");
@@ -1946,7 +2036,7 @@ int main(int argc, char** argv) {
         // Recording state. Both the samples and the thing that would make
         // them advance differ by mode: the raw path muxes complete AUs
         // straight off the ring and does not care whether anything decodes,
-        // while burned mode encodes decoded frames.
+        // while burned mode encodes the decoded frames the display flips to.
         maburplay::RecTracker::Inputs rin;
         // dvr.samples() still holds the SEALED file's count until the next
         // open(), so a stopped raw recorder would keep the OSD at REC.
@@ -2108,14 +2198,17 @@ int main(int argc, char** argv) {
 #ifdef MABUR_PLAYER_HW
     // Re-checked every iteration, never cached: the presenter switches the
     // OSD off mid-session after repeated commit failures, and from that point
-    // osd_back_surface() is a null Surface. Composition starts only while
+    // osd_back_surface() is a null Surface. The screen composes only while
     // no publish is pending: a published back buffer belongs to the release
     // thread until a commit takes it, and the buffer that commit swaps in as
     // the new back is still on screen until its flip completes -- the
     // presenter keeps osd_publish_pending() true through both, so this never
     // draws into a buffer that is on screen or about to be.
-    if (presenter && presenter->osd_available() && !presenter->osd_publish_pending()) {
-      const maburplay::Surface surf = presenter->osd_back_surface();
+    {
+      const bool screen_ok =
+          presenter && presenter->osd_available() && !presenter->osd_publish_pending();
+      const maburplay::Surface surf =
+          screen_ok ? presenter->osd_back_surface() : maburplay::Surface{};
       if (surf.pixels && composer.gs_present() && !gs_laid_out) {
         // Deferred to the first real surface: its size is the DRM buffer's,
         // which DrmPresenter may have allocated at a mode the connector
@@ -2128,36 +2221,43 @@ int main(int argc, char** argv) {
           gs_laid_out = true;
         }
       }
-      if (surf.pixels) {
-        maburplay::OsdComposeIn in;
-        if (osd_src && osd_raster) {
-          in.screen = &osd_src->screen();
-          in.msp_fresh = msp_ready;
-          in.msp_stale = msp_stale;
-        }
-        if (gs_src) {
-          in.snap = &gs_src->snapshot();
-          in.gs_stale = gs_stale;
-          in.gs_ps = gs_ps;
-          in.gs_dirty = gs_needs_render;
-        }
+      maburplay::OsdComposeIn in;
+      if (osd_src && osd_raster) {
+        in.screen = &osd_src->screen();
+        in.msp_fresh = msp_ready;
+        in.msp_stale = msp_stale;
+      }
+      if (gs_src) {
+        in.snap = &gs_src->snapshot();
+        in.gs_stale = gs_stale;
+        in.gs_ps = gs_ps;
+        in.gs_dirty = gs_needs_render;
+      }
+      const bool want = composer.wants(in);
+      // The recording's overlay, at the record size, on its own trigger: the
+      // same input the screen would compose, whether or not the screen can
+      // compose this iteration -- a pending publish holds the screen back,
+      // never the recording. It runs BEFORE the screen half clears
+      // msp_ready/gs_needs_render, and does not clear them itself: a screen
+      // held back by a pending publish still consumes them on its next
+      // composition. A repeat of the same sample draws nothing.
+      if (burn && want) composer.compose_burn(in);
+      if (surf.pixels && want) {
         const int idx = presenter->osd_back_index();
-        if (composer.wants(in)) {
-          const maburplay::OsdComposeOut out = composer.compose(idx, surf, in);
-          gs_needs_render = false;
-          msp_ready = false;
-          // Unconditional whenever a composition ran, even if it drew
-          // nothing: "nothing differs from this buffer" does not mean the
-          // screen is right -- the screen is the OTHER buffer. With a value
-          // that alternates (fps 60/59/60, an RSSI wobbling by one) each
-          // buffer keeps matching its own last composition, and a publish
-          // gated on "something changed" strands the front buffer on the
-          // wrong sample forever.
-          if (out.published) presenter->osd_publish();
-          if (out.announce_blank)
-            std::fprintf(stderr, "maburplay: osd blanked after %d ms without a snapshot\n",
-                         cfg.osd.stale_ms);
-        }
+        const maburplay::OsdComposeOut out = composer.compose_screen(idx, surf, in);
+        gs_needs_render = false;
+        msp_ready = false;
+        // Unconditional whenever a composition ran, even if it drew
+        // nothing: "nothing differs from this buffer" does not mean the
+        // screen is right -- the screen is the OTHER buffer. With a value
+        // that alternates (fps 60/59/60, an RSSI wobbling by one) each
+        // buffer keeps matching its own last composition, and a publish
+        // gated on "something changed" strands the front buffer on the
+        // wrong sample forever.
+        if (out.published) presenter->osd_publish();
+        if (out.announce_blank)
+          std::fprintf(stderr, "maburplay: osd blanked after %d ms without a snapshot\n",
+                       cfg.osd.stale_ms);
       }
     }
 #endif
@@ -2390,6 +2490,10 @@ int main(int argc, char** argv) {
   // queue into `releases`, give every frame back to the decoder, then stop
   // them. stop_and_join() alone returns no frames.
   park_output("shutdown");
+  // The tap's hook holds a raw pointer to the recorder, which unwinds
+  // after this; the release thread is parked, so nothing is in flight.
+  tap.clear();
+  composer.set_burn_sink({});
   release.stop_and_join();
   pump.stop_and_join();
   // Final tally -- same line the 1 Hz stats block above already printed all

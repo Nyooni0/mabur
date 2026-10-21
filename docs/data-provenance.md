@@ -115,7 +115,13 @@ Chronological; each line names the section below that carries the detail.
   `dsp` and `e2e` against live view), one from after runs the one
   `vsync_lead_ms` throughout.
 - 2026-10-22 — `# reglog 4` appends `burn_in= burn_enc= burn_drop=`; reglog
-  3 rows end at `recstarts=`.
+  3 rows end at `recstarts=`. Burned DVR files from this build record the
+  frames the display flipped to, stamped on the panel's vblank grid
+  thinned by `dvr.burned.every`, at `dvr.burned.size` (default the decoded
+  size); `dvr.burned.fps_cap` is removed. A burned file's sample
+  timestamps and durations therefore measure the display (holds are whole
+  grid periods), no longer the link: before this build they were the
+  drone's pts of decoded frames, capped by `fps_cap`.
 
 ## 2026-09-23 — `link.pre_fec_loss` scale break, twice
 

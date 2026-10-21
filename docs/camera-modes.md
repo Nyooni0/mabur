@@ -91,8 +91,10 @@ panel, e.g. a panel a hair faster than a mode's ceiling) the fps cell turns
 caution without the `/`.
 
 A picture whose aspect differs from the panel (mode 4 on 16:9) is
-letterboxed with black bars on the screen and in the burned DVR, never
-stretched (`gs/player/src/fit_rect.h`).
+letterboxed with black bars on the screen, and in the burned DVR when its
+size (`dvr.burned.size`) has another aspect, never stretched
+(`gs/player/src/fit_rect.h`). The burned DVR's default size is the
+decoded picture's own, which needs no letterbox.
 
 ## The SD recorder above 90 fps
 

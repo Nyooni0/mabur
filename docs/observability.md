@@ -907,7 +907,24 @@ in whichever `dvr.mode` is configured:
   GS's local recording): a complete IRAP (`au_is_irap()`) once VPS+SPS+PPS
   are known. Older raw files that open on a non-IRAP need repair — see
   `docs/findings/2026-09-29-web-gs-raw-dvr-irap-sync.md`.
-- **burned** resumes at the next decoded frame (`docs/colortrans.md`).
+- **burned** re-encodes what the display scans out, with the OSD burnt
+  in. The recorder taps the display's flip on the release thread
+  (`RecorderTap`, `gs/player/src/recorder_tap.h`) and records one flip in
+  every `dvr.burned.every` vblank periods, stamped with its slot on the
+  panel's vblank grid (`glass_cadence.h`): a frame the display held for
+  several vblanks is one sample whose duration is that many grid periods
+  — a hold, not a gap. The picture is `dvr.burned.size` (`""`, the
+  default, is the decoded size when the recording starts; a later rung
+  change is scaled to it, letterboxed if the aspect differs), and the
+  OSD is composed at that size. With `size = ""` a start before the
+  first decoded frame is deferred (`maburplay: rec: START deferred --
+  waiting for the first decoded frame`) and the recorder comes up on the
+  first frame; a start logs `maburplay: rec: burned WxH every=N`. The
+  file check is `tools/bench/dvrcadence.py FILE.mp4`: it prints the
+  sample durations in grid units and exits 1 if any is not a whole
+  number of grid periods. `burn_drop=` on the regulator line (`reg.log`,
+  above) is the recording's stutter signal. The colour stage and the
+  scaling: `docs/colortrans.md`.
 
 Files are `record-NNNN.mp4` under `dvr.dir`, indexed one past the highest
 `record-NNNN` already on the card (`common/include/mabur/dvr_name.h`) — no
