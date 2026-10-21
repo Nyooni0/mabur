@@ -105,6 +105,11 @@ add_mtest(test_hevc_skip_slice test_hevc_skip_slice.cpp)
 add_executable(slicefill ${CMAKE_SOURCE_DIR}/tools/slices/slicefill.cpp)
 target_link_libraries(slicefill PRIVATE mabur_common)
 add_mtest(test_dvr_mux test_dvr_mux.cpp)
+# Fixture paths for tools/bench/dvrcadence.py's own test (test_dvrcadence,
+# registered below): dvr_mux_writes_the_cadence_fixture writes them when
+# set, and is a no-op otherwise.
+set_tests_properties(test_dvr_mux PROPERTIES
+  ENVIRONMENT "MABUR_DVRCADENCE_FIXTURE_CLEAN=${CMAKE_BINARY_DIR}/tests/dvrcadence_clean.mp4;MABUR_DVRCADENCE_FIXTURE_OFFGRID=${CMAKE_BINARY_DIR}/tests/dvrcadence_offgrid.mp4")
 add_mtest(test_raw_dvr test_raw_dvr.cpp)
 add_mtest(test_dvr_name test_dvr_name.cpp)
 add_mtest(test_threaded_sink test_threaded_sink.cpp)
@@ -421,6 +426,11 @@ if(Python3_EXECUTABLE)
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   add_test(NAME test_maburcal
            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_maburcal.py)
+  add_test(NAME test_dvrcadence
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_dvrcadence.py
+            ${CMAKE_BINARY_DIR}/tests/dvrcadence_clean.mp4
+            ${CMAKE_BINARY_DIR}/tests/dvrcadence_offgrid.mp4)
+  set_tests_properties(test_dvrcadence PROPERTIES DEPENDS test_dvr_mux)
 endif()
 
 if(MABUR_BUILD_LINKBENCH)

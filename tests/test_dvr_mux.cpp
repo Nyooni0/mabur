@@ -511,4 +511,39 @@ TEST(prefixed_path_writes_byte_identical_files) {
   std::remove(pb.c_str());
 }
 
+// tools/bench/dvrcadence.py's own test (test_dvrcadence) drives this file's
+// output against the tool as a subprocess rather than re-deriving a trun
+// layout in Python; writing the fixture here, from the real muxer, is what
+// keeps that gate honest if DvrMux's trun shape ever changes. A no-op
+// outside that gate (neither env var set) so this file still runs standalone.
+TEST(dvr_mux_writes_the_cadence_fixture) {
+  const char* clean_path = std::getenv("MABUR_DVRCADENCE_FIXTURE_CLEAN");
+  const char* offgrid_path = std::getenv("MABUR_DVRCADENCE_FIXTURE_OFFGRID");
+  if (!clean_path && !offgrid_path) return;
+
+  std::vector<uint8_t> hvcc(23, 0x5A);
+  std::vector<uint8_t> au = fake_au(0x77);
+
+  auto write_fixture = [&](const char* path, const std::vector<uint32_t>& pts) {
+    DvrMux mux;
+    REQUIRE(mux.open(path, hvcc, 1920, 1080));
+    for (size_t i = 0; i < pts.size(); ++i) {
+      mux.write_sample(au.data(), au.size(), pts[i], /*key=*/i == 0);
+    }
+    mux.close();
+  };
+
+  // On-grid cadence at a 20000us grid: durations 1,1,2,1,3 grid units.
+  // Six samples, not five -- the LAST sample's own trun duration has no
+  // real successor to measure against (it's dropped by the tool, same as
+  // any DvrMux file), so it takes a 6th pts to produce 5 measured
+  // durations.
+  if (clean_path) write_fixture(clean_path, {0, 20000, 40000, 80000, 100000, 160000});
+
+  // Same cadence, one extra sample whose duration (30000us, 1.5 grid
+  // units) lands off grid.
+  if (offgrid_path)
+    write_fixture(offgrid_path, {0, 20000, 40000, 80000, 100000, 160000, 190000});
+}
+
 MTEST_MAIN
