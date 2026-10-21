@@ -212,6 +212,7 @@ if(MABUR_BUILD_GS)
   add_mtest(test_decode_pump test_decode_pump.cpp LIBS mabur_player_core pthread)
   add_mtest(test_release_loop test_release_loop.cpp LIBS mabur_player_core pthread)
   add_mtest(test_osd_font test_osd_font.cpp LIBS mabur_player_core)
+  add_mtest(test_glass_cadence test_glass_cadence.cpp LIBS mabur_player_core)
   add_mtest(test_gs_font test_gs_font.cpp LIBS mabur_player_core)
   add_dependencies(test_gs_font gsfont_fixtures)
   target_compile_definitions(test_gs_font PRIVATE
