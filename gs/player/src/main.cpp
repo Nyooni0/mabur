@@ -2054,8 +2054,11 @@ int main(int argc, char** argv) {
           rin.samples = burn ? burn->frames_encoded() : 0;
           rin.open = burn != nullptr;
           // Only a MISSING recorder we are supposed to have is broken. A
-          // deliberately stopped one is ARMED, not FAULT.
-          rin.broken = rec_on && burn == nullptr;
+          // deliberately stopped one is ARMED, not FAULT, and so is a start
+          // deferred until the first decoded frame sizes the recording: it
+          // is waiting for video, like the raw path waiting for a sync
+          // point, and comes up on its own.
+          rin.broken = rec_on && burn == nullptr && !burn_deferred;
 #else
           rin.samples = 0;
           rin.open = false;
