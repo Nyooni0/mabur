@@ -1166,6 +1166,58 @@ TEST(gs_layout_leaves_the_burn_layer_at_the_burn_size) {
   CHECK(got_w == 1280);
 }
 
+// A record size the GS bar cannot be laid out at refuses the recording
+// and nothing else: set_burn_size() fails, the burn size is cleared, and
+// the screen's GS overlay -- gs_[0]/gs_[1] and gs_[2] put back at the
+// screen size -- keeps drawing. A later, fitting record size still works.
+TEST(a_record_size_the_gs_bar_cannot_fit_refuses_only_the_recording) {
+  // Precondition: 320x240 really is too small for the bar with this font.
+  {
+    GsCompactBar probe(gsfont());
+    std::string perr;
+    REQUIRE(!probe.layout(320, 240, &perr));
+  }
+  Rig r(/*with_msp=*/false, /*with_gs=*/true);  // GS laid out at 1920x1080
+  std::string err;
+  CHECK(!r.comp.set_burn_size(320, 240, &err));
+  CHECK(!err.empty());
+  CHECK(r.comp.gs_present());
+  CHECK(r.comp.gs_live());
+
+  // The screen composition still draws the GS layer, identical to a rig
+  // that never saw the refused size.
+  const OsdComposeIn in = r.fresh_gs_in();
+  const OsdComposeOut out = r.comp.compose(0, r.buf[0].s, in);
+  CHECK(out.gs_drawn > 0);
+  CHECK(diff_px(r.buf[0].px, reference(in, false, true)) == 0);
+
+  // The burn canvas follows the screen again, with gs_[2] laid out there.
+  int got_w = 0, got_h = 0, calls = 0;
+  r.comp.set_burn_sink([&](const Surface& s, const DirtyRect*, size_t) {
+    got_w = s.width;
+    got_h = s.height;
+    ++calls;
+  });
+  r.comp.compose(1, r.buf[1].s, r.fresh_gs_in());
+  CHECK(calls == 1 && got_w == W && got_h == H);
+
+  REQUIRE(r.comp.set_burn_size(1280, 720, &err));
+  CHECK(r.comp.gs_live());
+}
+
+// Without a screen layout yet the refusal leaves all three un-laid, as
+// set_gs() left them; gs_layout() then lays them out together.
+TEST(a_refused_record_size_before_any_screen_layout_keeps_all_three_unlaid) {
+  OsdComposer comp;
+  comp.set_gs(make_gs_layer(gsfont()), make_gs_layer(gsfont()), make_gs_layer(gsfont()));
+  std::string err;
+  CHECK(!comp.set_burn_size(320, 240, &err));
+  CHECK(comp.gs_present());
+  CHECK(!comp.gs_live());
+  REQUIRE(comp.gs_layout(W, H, &err));
+  CHECK(comp.gs_live());
+}
+
 // Pins the burn's OWN blank, independent of screen_blank_: with the screen
 // half never run at all, a fresh MSP screen composed into the burn canvas,
 // then a stale input. The first stale composition is the transition and

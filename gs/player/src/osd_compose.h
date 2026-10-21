@@ -105,10 +105,13 @@ class OsdComposer {
   void set_burn_sink(BurnSink s);
 
   // Sizes the burn canvas (and lays gs_[2] out) at w x h, independent of
-  // the screen surface; 0x0 (the default) makes it follow the screen as
-  // before -- the size compose_screen() was last given, or nothing yet if
+  // the screen surface; 0x0 (the default) makes it follow the screen --
+  // the size compose_screen() was last given, or nothing yet if
   // compose_screen() has never run. Resets the burn lineages, same shape
-  // as set_burn_sink(). Housekeeping, at recorder start: not a call the
+  // as set_burn_sink(). False (with *err) when the GS bar does not fit
+  // w x h: the burn size is left cleared and gs_[2] re-laid at the screen
+  // size, so the screen's GS overlay carries on and only the recording is
+  // refused. Housekeeping, at recorder start: not a call the
   // per-iteration path makes.
   bool set_burn_size(int w, int h, std::string* err);
 
@@ -151,6 +154,9 @@ class OsdComposer {
   OsdComposeOut compose(int idx, const Surface& s, const OsdComposeIn& in);
 
  private:
+  // Drops all three GS lineages: the all-or-none rule of gs_layout().
+  void drop_gs();
+
   OsdRaster* raster_ = nullptr;
   std::unique_ptr<GsLayer> gs_[3];
   BurnSink burn_;

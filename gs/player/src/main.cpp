@@ -1162,17 +1162,20 @@ int main(int argc, char** argv) {
     ++rec_starts;
     // The burn canvas and the GS burn layer at the record size: the OSD
     // surface set_osd() is handed must be exactly osd_width x osd_height.
-    // A failed GS layout drops all three GS layers (the composer's
-    // all-or-none rule), the screen's GS overlay included.
+    // A GS bar that does not fit the record size refuses the recording:
+    // the composer puts the GS burn layer back at the screen size, so the
+    // screen's GS overlay carries on.
     {
       std::string err;
       if (!composer.set_burn_size(rw, rh, &err)) {
         std::fprintf(stderr,
-                     "maburplay: rec: GS overlay layout at the record size %dx%d failed -- %s; "
-                     "the GS overlay is off (screen and recording) and the burned recorder is "
-                     "stopped -- NOTHING is being recorded\n",
+                     "maburplay: rec: recording refused -- the GS bar does not fit the record "
+                     "size %dx%d (%s); the burned recorder is stopped, NOTHING is being "
+                     "recorded; the screen's GS overlay is unaffected\n",
                      rw, rh, err.c_str());
-        gs_src.reset();  // the live gate; the overlays are already dropped
+        // Only if putting the burn layer back at the screen size failed
+        // too, which drops all three layers (the all-or-none rule).
+        if (!composer.gs_present()) gs_src.reset();
         stop_burn();
         return;
       }

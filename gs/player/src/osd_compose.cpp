@@ -76,23 +76,36 @@ bool OsdComposer::set_burn_size(int w, int h, std::string* err) {
     // laid-out GS layer instead of one pinned to the stale burn size.
     if (gs_[2] && gs_screen_w_ > 0 && gs_screen_h_ > 0)
       ok = gs_[2]->layout(gs_screen_w_, gs_screen_h_, err);
+    if (!ok) drop_gs();
   } else if (gs_[2]) {
-    ok = gs_[2]->layout(w, h, err);
-    burn_w_ = ok ? w : 0;
-    burn_h_ = ok ? h : 0;
+    if (gs_[2]->layout(w, h, err)) {
+      burn_w_ = w;
+      burn_h_ = h;
+    } else {
+      // The GS bar does not fit the record size: the recording is refused
+      // (false, burn size cleared), the screen overlay is not. gs_[2] goes
+      // back to the screen layout gs_layout() last made, so all three stay
+      // laid out together. With gs_layout() never run (or not run since
+      // set_gs()), gs_laid_out_ is false and gs_[2] stays un-laid like its
+      // siblings until gs_layout() lays out all three.
+      ok = false;
+      burn_w_ = burn_h_ = 0;
+      if (gs_laid_out_ && !gs_[2]->layout(gs_screen_w_, gs_screen_h_, nullptr)) drop_gs();
+    }
   } else {
     burn_w_ = w;
     burn_h_ = h;
   }
-  if (!ok) {
-    // All three or none, same rule as gs_layout(): a run with gs_[2] alone
-    // dropped would leave gs_[0]/gs_[1] laid out against a sibling that
-    // no longer agrees with them on existing at all.
-    for (auto& o : gs_) o.reset();
-    gs_laid_out_ = false;
-  }
   realloc_burn_canvas(burn_w_ ? burn_w_ : screen_w_, burn_h_ ? burn_h_ : screen_h_);
   return ok;
+}
+
+void OsdComposer::drop_gs() {
+  // All three or none, same rule as gs_layout(): a run with gs_[2] alone
+  // dropped would leave gs_[0]/gs_[1] laid out against a sibling that no
+  // longer agrees with them on existing at all.
+  for (auto& o : gs_) o.reset();
+  gs_laid_out_ = false;
 }
 
 bool OsdComposer::gs_layout(int screen_w, int screen_h, std::string* err) {
@@ -107,8 +120,7 @@ bool OsdComposer::gs_layout(int screen_w, int screen_h, std::string* err) {
     if (!gs_[i]->layout(w, h, err)) {
       // All three or none: a run with two of them laid out would compose a
       // buffer against a shadow that was never given any geometry.
-      for (auto& o : gs_) o.reset();
-      gs_laid_out_ = false;
+      drop_gs();
       return false;
     }
   }

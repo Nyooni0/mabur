@@ -920,7 +920,10 @@ in whichever `dvr.mode` is configured:
   OSD is composed at that size. With `size = ""` a start before the
   first decoded frame is deferred (`maburplay: rec: START deferred --
   waiting for the first decoded frame`) and the recorder comes up on the
-  first frame; a start logs `maburplay: rec: burned WxH every=N`. The
+  first frame; a start logs `maburplay: rec: burned WxH every=N`. A
+  `size` too small for the GS bar refuses the recording (`maburplay: rec:
+  recording refused -- the GS bar does not fit the record size ...`, OSD
+  REC field FAULT); the screen's GS overlay is unaffected. The
   file check is `tools/bench/dvrcadence.py FILE.mp4`: it fits the grid
   period to the file (a fractional period such as 16666.667 µs stamps
   durations one microsecond apart; `--grid-us` gives it exactly instead),
