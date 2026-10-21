@@ -13,12 +13,26 @@ for that claim, the same role tools/bench/ausniff.py plays for the AU
 ring.
 
 Usage:
-  python3 dvrcadence.py FILE.mp4 [--grid-us N]
+  python3 dvrcadence.py FILE.mp4 [--grid-us US]
 
-The grid defaults to the minimum measured sample duration in the file.
-A duration counts as on grid when it is within 2us either way of an
-integer multiple of the grid; anything else is reported under "off-grid"
-together with the (0-based) index of the sample whose duration missed.
+The recorder stamps sample k at llround(k * period) us, and a vblank
+period is rarely a whole number of microseconds (1080p60 CEA:
+16666.667 us), so one grid unit measures 16666 or 16667 us and a hold of
+n units is n * period within the rounding of its two endpoints. The grid
+is therefore fitted, not read off one sample: it starts at the minimum
+measured duration, each duration takes k = round(d / grid) units, and the
+grid becomes sum(d) / sum(k) over the durations within a twentieth of a
+period of a whole multiple (a genuine miss, half a period out, is left
+out of the fit), repeated until it settles. --grid-us US skips the fit
+and uses the period given (fractional allowed, e.g. 16666.667).
+
+A duration counts as on grid when it is within 2 ticks of the file's
+timescale (2 us for DvrMux's microsecond timescale) of k grid periods:
+one tick for the rounding of its two endpoints together, one more for
+the fitted grid's own error, which over a hold of k units is at most
+k / K ticks with K the units fitted (never more than one). Anything
+else is reported under "off-grid" together with the (0-based) index of
+the sample whose duration missed.
 
 The file's LAST sample has no successor to measure a duration against --
 its trun entry only exists because some players require a nonzero one --
@@ -165,12 +179,37 @@ def to_us(duration, timescale):
     return duration * 1_000_000 / timescale
 
 
+def fit_grid(durations_us, grid_us, tolerance_us):
+    """Least-squares-free grid fit: sum(d) / sum(k) over the durations
+    near a whole multiple of the current grid, until it stops moving.
+    Summing whole durations makes the endpoint rounding telescope, so the
+    fitted period is off by at most one tick over all K units fitted."""
+    for _ in range(8):
+        near = max(tolerance_us, grid_us / 20)
+        sum_d = 0.0
+        sum_k = 0
+        for d in durations_us:
+            k = round(d / grid_us)
+            if k >= 1 and abs(d - k * grid_us) <= near:
+                sum_d += d
+                sum_k += k
+        if sum_k == 0:
+            break
+        refined = sum_d / sum_k
+        if abs(refined - grid_us) < 1e-6:
+            grid_us = refined
+            break
+        grid_us = refined
+    return grid_us
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("file")
     ap.add_argument("--grid-us", type=float, default=None,
-                     help="grid period in us (default: the minimum measured sample duration)")
+                     help="grid period in us, fractional allowed (default: fitted to the "
+                          "file's durations)")
     args = ap.parse_args()
 
     try:
@@ -190,20 +229,27 @@ def main():
     # against (see module docstring).
     durations_us = [to_us(d, timescale) for d in raw_durations[:-1]]
 
+    # Two ticks: see the module docstring.
+    tolerance_us = 2 * max(1.0, 1_000_000 / timescale)
+
     if args.grid_us is not None:
+        if args.grid_us <= 0:
+            sys.exit("--grid-us must be positive")
         grid_us = args.grid_us
         grid_source = "given"
     else:
         if not durations_us:
             sys.exit(f"{args.file}: only one sample -- nothing to measure a grid from")
-        grid_us = min(durations_us)
+        if min(durations_us) <= 0:
+            sys.exit(f"{args.file}: a zero sample duration -- no grid to fit")
+        grid_us = fit_grid(durations_us, min(durations_us), tolerance_us)
         grid_source = "inferred"
 
     histogram = {}
     off_grid_positions = []
     for i, d in enumerate(durations_us):
         k = round(d / grid_us)
-        if k < 1 or abs(d - k * grid_us) > 2:
+        if k < 1 or abs(d - k * grid_us) > tolerance_us:
             off_grid_positions.append(i)
             continue
         histogram[k] = histogram.get(k, 0) + 1
@@ -211,7 +257,7 @@ def main():
     longest_hold = max(histogram) if histogram else 0
 
     print(f"samples {total_samples}  timescale {timescale}  "
-          f"grid {grid_us:g} us ({grid_source})")
+          f"grid {grid_us:.3f} us ({grid_source})")
     counts = " ".join(f"x{k}={histogram.get(k, 0)}" for k in range(1, longest_hold + 1))
     print(f"durations: {counts}{' ' if counts else ''}longest hold {longest_hold} grid")
     if off_grid_positions:

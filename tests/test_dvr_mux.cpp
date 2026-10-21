@@ -1,3 +1,4 @@
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -519,7 +520,8 @@ TEST(prefixed_path_writes_byte_identical_files) {
 TEST(dvr_mux_writes_the_cadence_fixture) {
   const char* clean_path = std::getenv("MABUR_DVRCADENCE_FIXTURE_CLEAN");
   const char* offgrid_path = std::getenv("MABUR_DVRCADENCE_FIXTURE_OFFGRID");
-  if (!clean_path && !offgrid_path) return;
+  const char* fractional_path = std::getenv("MABUR_DVRCADENCE_FIXTURE_FRACTIONAL");
+  if (!clean_path && !offgrid_path && !fractional_path) return;
 
   std::vector<uint8_t> hvcc(23, 0x5A);
   std::vector<uint8_t> au = fake_au(0x77);
@@ -544,6 +546,19 @@ TEST(dvr_mux_writes_the_cadence_fixture) {
   // units) lands off grid.
   if (offgrid_path)
     write_fixture(offgrid_path, {0, 20000, 40000, 80000, 100000, 160000, 190000});
+
+  // A fractional period, stamped the way the recorder stamps it
+  // (llround(slot * period)): 1080p60's 16666.667us at slots
+  // 0,1,2,3,7,8,18,19, i.e. holds of 1,1,1,4,1,10 units plus the final
+  // unmeasured sample. Every duration is 16666 or 16667us per unit, so a
+  // grid read off the shortest one drifts out of tolerance on the long
+  // holds.
+  if (fractional_path) {
+    std::vector<uint32_t> pts;
+    for (int slot : {0, 1, 2, 3, 7, 8, 18, 19})
+      pts.push_back(static_cast<uint32_t>(std::llround(slot * 16666.667)));
+    write_fixture(fractional_path, pts);
+  }
 }
 
 MTEST_MAIN

@@ -109,7 +109,7 @@ add_mtest(test_dvr_mux test_dvr_mux.cpp)
 # registered below): dvr_mux_writes_the_cadence_fixture writes them when
 # set, and is a no-op otherwise.
 set_tests_properties(test_dvr_mux PROPERTIES
-  ENVIRONMENT "MABUR_DVRCADENCE_FIXTURE_CLEAN=${CMAKE_BINARY_DIR}/tests/dvrcadence_clean.mp4;MABUR_DVRCADENCE_FIXTURE_OFFGRID=${CMAKE_BINARY_DIR}/tests/dvrcadence_offgrid.mp4")
+  ENVIRONMENT "MABUR_DVRCADENCE_FIXTURE_CLEAN=${CMAKE_BINARY_DIR}/tests/dvrcadence_clean.mp4;MABUR_DVRCADENCE_FIXTURE_OFFGRID=${CMAKE_BINARY_DIR}/tests/dvrcadence_offgrid.mp4;MABUR_DVRCADENCE_FIXTURE_FRACTIONAL=${CMAKE_BINARY_DIR}/tests/dvrcadence_fractional.mp4")
 add_mtest(test_raw_dvr test_raw_dvr.cpp)
 add_mtest(test_dvr_name test_dvr_name.cpp)
 add_mtest(test_threaded_sink test_threaded_sink.cpp)
@@ -428,7 +428,8 @@ if(Python3_EXECUTABLE)
   add_test(NAME test_dvrcadence
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_dvrcadence.py
             ${CMAKE_BINARY_DIR}/tests/dvrcadence_clean.mp4
-            ${CMAKE_BINARY_DIR}/tests/dvrcadence_offgrid.mp4)
+            ${CMAKE_BINARY_DIR}/tests/dvrcadence_offgrid.mp4
+            ${CMAKE_BINARY_DIR}/tests/dvrcadence_fractional.mp4)
   set_tests_properties(test_dvrcadence PROPERTIES DEPENDS test_dvr_mux)
 endif()
 

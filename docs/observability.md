@@ -921,9 +921,11 @@ in whichever `dvr.mode` is configured:
   first decoded frame is deferred (`maburplay: rec: START deferred --
   waiting for the first decoded frame`) and the recorder comes up on the
   first frame; a start logs `maburplay: rec: burned WxH every=N`. The
-  file check is `tools/bench/dvrcadence.py FILE.mp4`: it prints the
-  sample durations in grid units and exits 1 if any is not a whole
-  number of grid periods. `burn_drop=` on the regulator line (`reg.log`,
+  file check is `tools/bench/dvrcadence.py FILE.mp4`: it fits the grid
+  period to the file (a fractional period such as 16666.667 µs stamps
+  durations one microsecond apart; `--grid-us` gives it exactly instead),
+  prints the sample durations in grid units and exits 1 if any is not a
+  whole number of grid periods within 2 µs. `burn_drop=` on the regulator line (`reg.log`,
   above) is the recording's stutter signal. The colour stage and the
   scaling: `docs/colortrans.md`.
 
