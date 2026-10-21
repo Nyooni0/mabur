@@ -192,7 +192,6 @@ if(MABUR_BUILD_GS)
   target_compile_definitions(test_player_config PRIVATE
     MABUR_PLAY_BUNDLE_DIR="${CMAKE_SOURCE_DIR}/gs/player/bundle")
   add_mtest(test_colortrans test_colortrans.cpp LIBS mabur_player_core)
-  add_mtest(test_fps_cap test_fps_cap.cpp LIBS mabur_player_core)
   add_mtest(test_frame_regulator test_frame_regulator.cpp LIBS mabur_player_core)
   add_mtest(test_phase_lock test_phase_lock.cpp LIBS mabur_player_core)
   add_mtest(test_mode_pick test_mode_pick.cpp LIBS mabur_player_core)

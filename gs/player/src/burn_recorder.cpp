@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdio>
@@ -18,9 +19,9 @@
 #include "mabur/dvr_mux.h"
 #include "mabur/hevc_params.h"
 #include "mabur/threaded_sink.h"
-#include "fps_cap.h"
 #include "mpp_backend.h"
 #include "mpp_encoder.h"
+#include "pi_mutex.h"
 
 #ifdef MABUR_PLAYER_GPU
 #include <rga/im2d.h>
@@ -29,11 +30,11 @@
 #include "frame_colortrans.h"
 #endif
 
-// The burned-DVR driver: an fps-capped encoder thread fed from the
-// decode-output thread by MPP buffer reference, writing fMP4 through the
-// same DvrMux the raw path uses. See burn_recorder.h for the ownership and
-// threading contracts; the notes below are the implementation-side
-// consequences of them.
+// The burned-DVR driver: an encoder thread fed from the display's flip (the
+// release thread, through RecorderTap) by MPP buffer reference, on the
+// vblank grid, writing fMP4 through the same DvrMux the raw path uses. See
+// burn_recorder.h for the ownership and threading contracts; the notes below
+// are the implementation-side consequences of them.
 //
 // Three things this file exists to get right:
 //
@@ -42,7 +43,10 @@
 //     that is easy to miss -- and that costs a decoder buffer per occurrence,
 //     stalling decode after ~24 -- is the mailbox DISPLACEMENT: overwriting a
 //     pending entry is the normal steady-state behaviour under overload, and
-//     the displaced entry still holds a reference.
+//     the displaced entry still holds a reference. submit() runs on the
+//     SCHED_FIFO release thread, which must never run mpp_buffer_put, so a
+//     displaced entry is parked on a bounded list and released by whichever
+//     thread next takes the mailbox.
 //
 //  2. MppEncoder is single-threaded by contract (set_osd() and encode() from
 //     ONE thread, see mpp_encoder.h). init()/set_palette() run on the caller's
@@ -66,8 +70,8 @@ namespace {
 // Consecutive refusals, with nothing ever encoded, after which the recorder
 // gives up for good. MppEncoder's documented permanent-refusal signature is
 // errors() climbing while frames() stays 0 (a picture size disagreeing with
-// EncCfg, or strides smaller than the picture); retrying that at 30 fps
-// forever would only flood the log. ~2 s at the default cap.
+// EncCfg, or strides smaller than the picture); retrying that at the
+// recording's rate forever would only flood the log. 1 s on a 60 fps grid.
 constexpr uint64_t kMaxInitialFailures = 60;
 
 // The same backstop for a recording that HAD been working and then stopped --
@@ -75,12 +79,12 @@ constexpr uint64_t kMaxInitialFailures = 60;
 // class the decode watchdog exists for. Without it, a persistent failure in
 // MppEncoder's MPP-error branches (mpp_frame_init / packet init /
 // encode_put_frame / encode_get_packet, none of them rate-limited) is fed at
-// fps_cap forever: ~2 KB/s into /tmp/maburplay.log, which is an unrotated `>`
-// redirect on tmpfs, plus a decoder-buffer round-trip per frame for nothing.
-// BurnRecorder is the right place to bound that because it owns the feed rate.
-// Looser than kMaxInitialFailures on purpose (~20 s at the default cap): an
-// established recording is worth some patience, and whatever was recorded
-// before the stall is still closed cleanly by stop().
+// the recording's rate forever: ~2 KB/s into /tmp/maburplay.log, which is an
+// unrotated `>` redirect on tmpfs, plus a decoder-buffer round-trip per
+// frame for nothing. BurnRecorder is the right place to bound that because
+// it owns the feed rate. Looser than kMaxInitialFailures on purpose (10 s on
+// a 60 fps grid): an established recording is worth some patience, and
+// whatever was recorded before the stall is still closed cleanly by stop().
 constexpr uint64_t kMaxRunningFailures = 600;
 
 }  // namespace
@@ -102,19 +106,25 @@ struct BurnRecorder::Impl {
   bool have_palette = false;   // set_palette() was called
   bool palette_live = false;   // ...and the encoder accepted it
 
-  // --- mailbox (decode-output thread -> stage or recorder thread) ---------
+  // --- mailbox (release thread -> stage or recorder thread) ---------------
   struct Mail {
     void* buf = nullptr;  // MppBuffer; non-null means "a reference is held"
-    uint32_t pts_us = 0;
+    uint64_t pts_us = 0;
     int w = 0, h = 0, stride = 0, vstride = 0;
   };
   // Two mutexes, never nested except in stop():
   //
-  //   box_mu  the mailbox `box` and nothing else. submit(), the take of
-  //           `box` (ct thread, or the recorder thread without one) and
-  //           drain_box() hold it for a few field copies, so a submit never
-  //           waits behind set_osd(), whose quantize holds `mu` for up to
-  //           milliseconds.
+  //   box_mu  the mailbox `box`, the displaced list, and nothing else.
+  //           submit(), the take of `box` (ct thread, or the recorder thread
+  //           without one) and drain_box() hold it for a few field copies --
+  //           plus, in submit(), one mpp_buffer_inc_ref -- and never release
+  //           a buffer under it. A PiMutex because submit() runs on the
+  //           SCHED_FIFO release thread: a normal-priority holder (the
+  //           taker, a drain) that CFS preempted mid-section would otherwise
+  //           make the release thread wait out a scheduler slice; priority
+  //           inheritance runs the holder to its unlock instead. Separate
+  //           from `mu` so a submit never waits behind set_osd(), whose
+  //           quantize holds `mu` for up to milliseconds.
   //   mu      everything else shared: the OSD handoff, ct_out, ct_dst_busy.
   //
   // `stopping` is written under BOTH (stop() takes them together) and read
@@ -128,10 +138,23 @@ struct BurnRecorder::Impl {
   // the predicate under the same mutex before sleeping, so a notify cannot
   // fall between a waiter's check and its sleep: no lost wake-up. The OSD
   // map is not a wake condition at all (it rides along with the next frame),
-  // so nothing waits on `mu`-guarded state through box_cv.
-  std::mutex box_mu;
-  std::condition_variable box_cv;
-  Mail box;                  // box_mu
+  // so nothing waits on `mu`-guarded state through box_cv, which is a
+  // condition_variable_any only because box_mu is a PiMutex.
+  //
+  // displaced[]: entries a newer submit() pushed out of `box`. The release
+  // thread may not run mpp_buffer_put, so they wait here, still holding
+  // their references, until the next take of `box` or drain_box() copies
+  // them out under box_mu and releases them outside it. Every take of
+  // `box` empties the list too, so a non-empty list implies a full `box`.
+  // When the list is full submit() takes no reference at all (a refusal,
+  // counted in frames_dropped), which is what bounds the buffers this class
+  // can hold.
+  static constexpr int kDisplaced = 2;
+  PiMutex box_mu;
+  std::condition_variable_any box_cv;
+  Mail box;                      // box_mu
+  Mail displaced[kDisplaced];    // box_mu
+  int n_displaced = 0;           // box_mu
   std::mutex mu;
   bool stopping = false;     // written under mu AND box_mu, read under either
 
@@ -161,16 +184,9 @@ struct BurnRecorder::Impl {
   std::atomic<bool> dead{false};        // fatal: stop feeding the encoder
   std::atomic<bool> idr_pending{false};
 
-  // fps cap, submit()'s thread only (start() sets it before the first
-  // submit; see the THREADING ordering rule in burn_recorder.h). The policy
-  // and why it is schedule-based rather than last-admit-based live in
-  // fps_cap.h (host-tested, test_fps_cap).
-  FpsCap cap;
-  std::chrono::steady_clock::time_point cap_epoch;
-
   std::atomic<uint64_t> frames_in{0};
   std::atomic<uint64_t> frames_encoded{0};
-  std::atomic<uint64_t> frames_dropped{0};   // displaced or dead: OVERLOAD
+  std::atomic<uint64_t> frames_dropped{0};   // displaced, refused or dead: OVERLOAD
   std::atomic<uint64_t> frames_flushed{0};   // drop_pending()/stop(): HYGIENE
   std::atomic<uint64_t> encode_errors{0};
   std::atomic<uint64_t> osd_rejects{0};
@@ -190,24 +206,22 @@ struct BurnRecorder::Impl {
   }
   // --- stage thread (colortrans and/or scale) and its handoff -------------
   //
-  // With colortrans on, or an OSD region to fit, the recorder is a
-  // two-stage pipeline:
+  // In a MABUR_PLAYER_GPU build the recorder is a two-stage pipeline:
   //
-  //   decode-output --box--> ct thread --ct_out--> recorder thread
-  //                          GPU draw + RGA          encode() + mux
-  //                          (or RGA resize)
-  //                          into ct_dst[k]
+  //   release --box--> ct thread --ct_out--> recorder thread
+  //                    GPU draw + RGA          encode() + mux
+  //                    (or RGA resize)
+  //                    into ct_dst[k]
   //
-  // SCALE: the encoder lays the OSD index map 1:1 from the picture's top-left
-  // and cannot scale either input, while the display scales the video
-  // plane to the mode (letterboxed, fit_rect.h) under an OSD drawn at the
-  // mode's size. So a
-  // picture smaller than the OSD surface (a 720p drone on a 1080p panel)
-  // recorded the 1080p OSD offset toward the bottom-right and clipped. The
-  // stage therefore scales every frame to the OSD SURFACE's size (out_w x
-  // out_h), which is the recording's picture size: what was on the glass.
-  // With colortrans the shader draw scales for free; without it, one RGA
-  // resize. A frame already at the OSD size passes through flat.
+  // SCALE: the encoder latches its picture size from the first frame and
+  // rejects every frame of another size after that, and it lays the OSD
+  // index map 1:1 from the picture's top-left. The stage therefore scales
+  // every frame to the recording's own size (out_w x out_h = BurnCfg
+  // width x height), letterboxed if the aspect differs (fit_rect.h), so a
+  // decoded size that changes mid-recording keeps recording and the overlay,
+  // composed at the record size, stays in place. With colortrans the shader
+  // draw scales for free; without it, one RGA resize. A frame already at
+  // the record size passes through flat.
   //
   // Both stages are hardware waits (GPU/RGA ~13-22 ms, rkvenc ~13 ms at
   // 1080p) and serialising them on one thread capped the burned DVR at
@@ -221,21 +235,40 @@ struct BurnRecorder::Impl {
   // worst case: one destination being rendered, one waiting in ct_out, one
   // inside encode(). ct_dst_busy[] (under mu) says which are taken.
   //
-  // With neither (no colortrans, no OSD region) or a build without the stage
-  // there is no ct thread and the recorder thread consumes `box` directly.
+  // A build without the stage has no ct thread: the recorder thread
+  // consumes `box` directly, at the decoded size.
   struct CtMail {
     void* buf = nullptr;  // MppBuffer: ct_dst[dst_idx], or the SOURCE when dst_idx < 0
     int dst_idx = -1;     // < 0 = flat: buf is a held decoder reference
-    uint32_t pts_us = 0;
+    uint64_t pts_us = 0;
     int w = 0, h = 0, stride = 0, vstride = 0;
   };
-  bool ct_on = false;  // start(): the stage thread runs (colortrans and/or OSD fit)
-  // Recording picture size and its strides, fixed at start() from the OSD
-  // surface; 0 = no OSD region, record at the decoded size.
+  bool ct_on = false;  // start(): the stage thread runs (every MABUR_PLAYER_GPU build)
+  // Recording picture size and its strides, fixed at start() from BurnCfg
+  // width x height; 0 = no stage, record at the decoded size.
   int out_w = 0, out_h = 0, out_hs = 0, out_vs = 0;
   std::condition_variable ct_cv;  // ct_out handoff, with mu
   CtMail ct_out;                  // mu
   std::thread ct_th;
+
+  // box_mu HELD: moves the displaced list into `out` (kDisplaced entries)
+  // and empties it; returns how many `out` now holds. The caller releases
+  // them with put_mails() after dropping box_mu -- never under it, since
+  // mpp_buffer_put takes MPP's own lock and submit() waits on box_mu from
+  // the release thread.
+  int take_displaced_locked(Mail* out) {
+    const int n = n_displaced;
+    for (int i = 0; i < n; ++i) {
+      out[i] = displaced[i];
+      displaced[i] = Mail{};
+    }
+    n_displaced = 0;
+    return n;
+  }
+  // box_mu NOT held: releases the references `n` mailbox entries hold.
+  static void put_mails(const Mail* m, int n) {
+    for (int i = 0; i < n; ++i) mpp_buffer_put(static_cast<MppBuffer>(m[i].buf));
+  }
 
   // Releases whatever a CtMail holds: a destination goes back to the free
   // set, a flat source reference goes back to the decoder pool.
@@ -356,12 +389,23 @@ struct BurnRecorder::Impl {
   void run_ct() {
     for (;;) {
       Mail m;
+      Mail old[kDisplaced];
+      int n_old = 0;
       {
-        std::unique_lock<std::mutex> lk(box_mu);
+        std::unique_lock<PiMutex> lk(box_mu);
         box_cv.wait(lk, [this] { return stopping || box.buf != nullptr; });
         if (stopping) break;
         m = box;
         box.buf = nullptr;
+        n_old = take_displaced_locked(old);
+      }
+      if (n_old) {
+        // REF-DISPLACE, released: flips a newer one pushed out of `box`
+        // while this thread was busy. Released here, by the taker, because
+        // the release thread that displaced them may not run
+        // mpp_buffer_put.
+        put_mails(old, n_old);
+        frames_dropped.fetch_add(static_cast<uint64_t>(n_old));
       }
       if (dead.load()) {
         // REF-DEAD, ct side: the encoder gave up; nothing downstream wants this.
@@ -378,11 +422,11 @@ struct BurnRecorder::Impl {
       o.stride = m.stride;
       o.vstride = m.vstride;
 
-      // Output geometry: the OSD surface's when there is one, else the
-      // frame's own (colortrans only, same size and strides as before).
+      // Output geometry: the record size for a frame of any other size,
+      // else the frame's own (colortrans only, same size and strides).
       const bool scale = out_w > 0 && (m.w != out_w || m.h != out_h);
       const int ow = scale ? out_w : m.w, oh = scale ? out_h : m.h;
-      // A picture of another aspect than the OSD surface is letterboxed,
+      // A picture of another aspect than the record size is letterboxed,
       // as the display shows it, never stretched.
       const maburplay::Rect fit = maburplay::fit_rect(m.w, m.h, ow, oh);
       const maburplay::Rect* box = (scale && (fit.w != ow || fit.h != oh)) ? &fit : nullptr;
@@ -430,16 +474,16 @@ struct BurnRecorder::Impl {
       }
       if (want_ct && !ct_done) colortrans_fallbacks.fetch_add(1);
 
-      CtMail displaced;
+      CtMail prev_out;
       {
         std::lock_guard<std::mutex> lk(mu);
-        displaced = ct_out;  // latest wins, same rule as the box
+        prev_out = ct_out;  // latest wins, same rule as the box
         ct_out = o;
       }
       ct_cv.notify_one();
-      if (displaced.buf) {
+      if (prev_out.buf) {
         // REF-DISPLACE, ct side: the encoder is the slow stage right now.
-        release_ct(displaced);
+        release_ct(prev_out);
         frames_dropped.fetch_add(1);
       }
     }
@@ -485,9 +529,10 @@ struct BurnRecorder::Impl {
         dead.store(true);
         return;
       }
-      // Track header from the LATCHED picture size -- the decoded frame's,
-      // which is the only thing the samples actually are. cfg.width/height
-      // is a fallback that cannot be reached today (this sink only runs from
+      // Track header from the LATCHED picture size, which is the only thing
+      // the samples actually are: the record size the stage scaled to, or
+      // the decoded size in a build without the stage. cfg.width/height is
+      // a fallback that cannot be reached today (this sink only runs from
       // inside encode(), after the latch).
       int tw = 0, th = 0;
       enc->picture_size(&tw, &th);
@@ -518,8 +563,9 @@ struct BurnRecorder::Impl {
     for (;;) {
       CtMail o;
       bool have_osd = false;
-      // stop() drains whatever is left in either mailbox after the join, so
-      // this thread never has to decide who releases a half-handled entry.
+      // stop() drains whatever is left in either mailbox (and the displaced
+      // list) after the join, so this thread never has to decide who
+      // releases a half-handled entry.
       if (ct_on) {
         std::unique_lock<std::mutex> lk(mu);
         ct_cv.wait(lk, [this] { return stopping || ct_out.buf != nullptr; });
@@ -527,16 +573,26 @@ struct BurnRecorder::Impl {
         o = ct_out;
         ct_out.buf = nullptr;
       } else {
-        std::unique_lock<std::mutex> lk(box_mu);
-        box_cv.wait(lk, [this] { return stopping || box.buf != nullptr; });
-        if (stopping) break;
-        o.buf = box.buf;
-        o.pts_us = box.pts_us;
-        o.w = box.w;
-        o.h = box.h;
-        o.stride = box.stride;
-        o.vstride = box.vstride;
-        box.buf = nullptr;
+        Mail old[kDisplaced];
+        int n_old = 0;
+        {
+          std::unique_lock<PiMutex> lk(box_mu);
+          box_cv.wait(lk, [this] { return stopping || box.buf != nullptr; });
+          if (stopping) break;
+          o.buf = box.buf;
+          o.pts_us = box.pts_us;
+          o.w = box.w;
+          o.h = box.h;
+          o.stride = box.stride;
+          o.vstride = box.vstride;
+          box.buf = nullptr;
+          n_old = take_displaced_locked(old);
+        }
+        if (n_old) {
+          // REF-DISPLACE, released: same as the ct thread's take.
+          put_mails(old, n_old);
+          frames_dropped.fetch_add(static_cast<uint64_t>(n_old));
+        }
       }
       // The OSD is taken after the frame, under mu alone: box_mu is never
       // held while waiting for mu, so a submit never queues behind a quantize
@@ -625,15 +681,24 @@ struct BurnRecorder::Impl {
     osd_pending_valid = false;
   }
 
-  // Empties the mailbox, releasing the reference it holds. Callable from any
-  // thread (drop_pending(), stop()); box_mu serialises it against submit()
-  // and against the stage/recorder thread's own take.
+  // Empties the mailbox and the displaced list, releasing every reference
+  // they hold (outside box_mu). Called from housekeeping (drop_pending(),
+  // stop()); box_mu serialises it against submit() and against the
+  // stage/recorder thread's own take.
   void drain_box() {
     void* buf = nullptr;
+    Mail old[kDisplaced];
+    int n_old = 0;
     {
-      std::lock_guard<std::mutex> lk(box_mu);
+      std::lock_guard<PiMutex> lk(box_mu);
       buf = box.buf;
       box.buf = nullptr;
+      n_old = take_displaced_locked(old);
+    }
+    if (n_old) {
+      // REF-DRAIN, displaced list: flush hygiene too, counted as such.
+      put_mails(old, n_old);
+      frames_flushed.fetch_add(static_cast<uint64_t>(n_old));
     }
     if (buf) {
       // REF-DRAIN: displaced by a drop_pending()/stop() rather than by a
@@ -693,16 +758,16 @@ bool BurnRecorder::start(const BurnCfg& cfg, const std::string& path,
                  "(decoded frames carry no MppFrame otherwise); recording disabled\n");
     return false;
   }
-  if (cfg.width <= 0 || cfg.height <= 0 || cfg.fps_cap <= 0 || cfg.bitrate_kbps <= 0) {
-    std::fprintf(stderr, "BurnRecorder: bad BurnCfg %dx%d cap %d fps %d kbps\n", cfg.width,
-                 cfg.height, cfg.fps_cap, cfg.bitrate_kbps);
+  // !(period_us > 0) rather than <= 0 so a NaN period is refused too.
+  if (cfg.width <= 0 || cfg.height <= 0 || cfg.every < 1 || !(cfg.period_us > 0) ||
+      cfg.bitrate_kbps <= 0) {
+    std::fprintf(stderr, "BurnRecorder: bad BurnCfg %dx%d every %d period %.3f ms %d kbps\n",
+                 cfg.width, cfg.height, cfg.every, cfg.period_us / 1000.0, cfg.bitrate_kbps);
     return false;
   }
 
   im.cfg = cfg;
   im.path = path;
-  im.cap.reset(cfg.fps_cap);
-  im.cap_epoch = std::chrono::steady_clock::now();
   im.mux_open = false;
   im.mux_failed = false;
   im.dead.store(false);
@@ -716,12 +781,14 @@ bool BurnRecorder::start(const BurnCfg& cfg, const std::string& path,
   im.stopping = false;
 
   EncCfg ec;
-  ec.fps = cfg.fps_cap;  // the encoder's rc: rate IS the capped rate
+  // The encoder's rc rate IS the recorded grid's: one frame per `every`
+  // vblank periods. At least 1 so an absurd period cannot hand MPP a zero.
+  ec.fps = std::max(1, static_cast<int>(std::llround(1e6 / (cfg.period_us * cfg.every))));
   ec.bitrate_kbps = cfg.bitrate_kbps;
-  // The OSD region follows the OSD SURFACE, never the picture and never the
-  // configured screen mode. The picture size is not passed at all: the
-  // encoder latches it from the first frame it is handed, which the stage
-  // thread has already scaled to the OSD surface's size (see Impl).
+  // The OSD region follows the overlay's SURFACE, which the caller composes
+  // at the record size. The picture size is not passed at all: the encoder
+  // latches it from the first frame it is handed, which the stage thread
+  // has already scaled to the record size (see Impl).
   ec.osd_width = cfg.osd_width;
   ec.osd_height = cfg.osd_height;
 
@@ -753,28 +820,28 @@ bool BurnRecorder::start(const BurnCfg& cfg, const std::string& path,
   im.idr_pending.store(true);  // consumed before the first encode
   im.ct_out = Impl::CtMail{};
   for (int i = 0; i < Impl::kCtDst; ++i) im.ct_dst_busy[i] = false;
+  im.box = Impl::Mail{};
+  for (int i = 0; i < Impl::kDisplaced; ++i) im.displaced[i] = Impl::Mail{};
+  im.n_displaced = 0;
 #ifdef MABUR_PLAYER_GPU
-  // Fit the picture to the OSD region: the region follows the OSD surface,
-  // so the picture does too (see the stage comment in Impl). Strides at the
+  // The record size: every frame of another size is scaled to it (see the
+  // stage comment in Impl), whatever the OSD region. Strides at the
   // encoder's 16-px alignment; 1080 rows become a 1088-row buffer.
-  if (cfg.osd_width > 0 && cfg.osd_height > 0) {
-    im.out_w = cfg.osd_width;
-    im.out_h = cfg.osd_height;
-    im.out_hs = (cfg.osd_width + 15) & ~15;
-    im.out_vs = (cfg.osd_height + 15) & ~15;
-  } else {
-    im.out_w = im.out_h = im.out_hs = im.out_vs = 0;
-  }
-  im.ct_on = cfg.colortrans != nullptr || im.out_w > 0;
+  im.out_w = cfg.width;
+  im.out_h = cfg.height;
+  im.out_hs = (cfg.width + 15) & ~15;
+  im.out_vs = (cfg.height + 15) & ~15;
+  im.ct_on = true;
   im.ct_failed = false;
   im.dst_failed = false;
   im.scale_fail_logs = 0;
 #else
+  im.out_w = im.out_h = im.out_hs = im.out_vs = 0;
   im.ct_on = false;
-  if (cfg.osd_width > 0)
-    std::fprintf(stderr, "BurnRecorder: this build has no scale stage; a picture smaller than "
-                         "the %dx%d OSD records it misplaced\n",
-                 cfg.osd_width, cfg.osd_height);
+  std::fprintf(stderr, "BurnRecorder: this build has no scale stage; it records at the decoded "
+                       "size, and a decoded size other than %dx%d is unsupported (its OSD "
+                       "records misplaced)\n",
+               cfg.width, cfg.height);
 #endif
   im.started = true;
   im.th = std::thread([pim] { pim->run(); });
@@ -782,63 +849,62 @@ bool BurnRecorder::start(const BurnCfg& cfg, const std::string& path,
   if (im.ct_on) im.ct_th = std::thread([pim] { pim->run_ct(); });
 #endif
   std::fprintf(stderr,
-               "BurnRecorder: started cap %d fps %d kbps frag %d ms osd=%s (%dx%d px region) "
-               "colortrans=%s picture=%s -> %s\n",
-               cfg.fps_cap, cfg.bitrate_kbps, cfg.fragment_ms, im.palette_live ? "on" : "off",
-               cfg.osd_width, cfg.osd_height, cfg.colortrans ? "on" : "off",
-               im.out_w > 0 ? "scaled to the OSD region" : "decoded size (latches on frame 0)",
-               path.c_str());
+               "BurnRecorder: start %dx%d every=%d fps=%d period=%.3fms osd=%dx%d ct=%s "
+               "(%d kbps, frag %d ms, palette %s) -> %s\n",
+               cfg.width, cfg.height, cfg.every, ec.fps, cfg.period_us / 1000.0, cfg.osd_width,
+               cfg.osd_height, cfg.colortrans ? "on" : "off", cfg.bitrate_kbps, cfg.fragment_ms,
+               im.palette_live ? "live" : "off", path.c_str());
   return true;
 }
 
-void BurnRecorder::submit(const DmaFrame& f) {
+void BurnRecorder::submit(const DmaFrame& f, uint64_t pts_us) {
   Impl& im = *impl_;
   if (!im.started || im.dead.load()) return;
 
-  // Cap before anything costs: a rejected frame is two field reads and a
-  // clock read -- no reference, no lock, no allocation. steady_clock rather
-  // than f.pts_us deliberately: the cap is about how hard the ENCODER is
-  // driven, and it must not depend on the decoder's pts round-trip being sane
-  // (a stuck pts would otherwise wedge the cap shut and record a single
-  // frame). pts_us is still what the recording is stamped with, further down.
+  // Thinning already happened in RecorderTap: every call here is a recorded
+  // flip, stamped with its grid slot. No clock read, no rate decision.
   MppFrame frame = static_cast<MppFrame>(f.opaque);
   if (!frame) return;
   MppBuffer buf = mpp_frame_get_buffer(frame);
   if (!buf) return;
-  const int64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                             std::chrono::steady_clock::now() - im.cap_epoch)
-                             .count();
-  if (!im.cap.admit(now_us)) return;
-
-  // REF-SUBMIT: from here the recorder owns a reference; the decoder cannot
-  // recycle this buffer until one of the release paths runs.
-  mpp_buffer_inc_ref(buf);
-
-  // box_mu, never mu: this runs on the decode-output thread just before it
-  // hands the frame on toward the display, so it must not wait behind
-  // set_osd()'s quantize.
-  void* displaced = nullptr;
-  {
-    std::lock_guard<std::mutex> lk(im.box_mu);
-    displaced = im.box.buf;  // latest wins
-    im.box.buf = buf;
-    im.box.pts_us = f.pts_us;
-    im.box.w = f.width;
-    im.box.h = f.height;
-    im.box.stride = f.stride;
-    im.box.vstride = f.vstride;
-  }
-  im.box_cv.notify_one();
   im.frames_in.fetch_add(1);
 
-  if (displaced) {
-    // REF-DISPLACE: the single most important put in this file. Dropping the
-    // entry without releasing leaks one decoder pool buffer per drop, and the
-    // pool is 24 deep. Done outside the lock: mpp_buffer_put takes MPP's own
-    // service lock and there is no reason to hold both.
-    mpp_buffer_put(static_cast<MppBuffer>(displaced));
-    im.frames_dropped.fetch_add(1);
+  // box_mu (a PiMutex), never mu: this runs on the SCHED_FIFO release
+  // thread and must not wait behind set_osd()'s quantize. Nothing is
+  // released here -- the release thread never runs mpp_buffer_put -- so a
+  // displaced entry moves to the displaced list for the next taker.
+  bool refused = false;
+  {
+    std::lock_guard<PiMutex> lk(im.box_mu);
+    if (im.box.buf && im.n_displaced == Impl::kDisplaced) {
+      // REF-REFUSE: the taker has not emptied the mailbox for three
+      // recorded flips. Holding another buffer would break the bound, so
+      // no reference is taken and nothing is posted.
+      refused = true;
+    } else {
+      // REF-SUBMIT: from here the recorder owns a reference; the decoder
+      // cannot recycle this buffer until one of the release paths runs.
+      // Taken only once refusal is ruled out, and before the frame is
+      // visible to a taker.
+      mpp_buffer_inc_ref(buf);
+      // REF-DISPLACE, deferred: latest wins, and the displaced entry keeps
+      // its reference until the next take or drain releases it. Dropping
+      // it without that leaks one decoder pool buffer per displacement,
+      // and the pool is 24 deep.
+      if (im.box.buf) im.displaced[im.n_displaced++] = im.box;
+      im.box.buf = buf;
+      im.box.pts_us = pts_us;
+      im.box.w = f.width;
+      im.box.h = f.height;
+      im.box.stride = f.stride;
+      im.box.vstride = f.vstride;
+    }
   }
+  if (refused) {
+    im.frames_dropped.fetch_add(1);
+    return;
+  }
+  im.box_cv.notify_one();
 }
 
 void BurnRecorder::set_osd(const Surface& s, const DirtyRect* rects, size_t n_rects) {
@@ -909,9 +975,10 @@ void BurnRecorder::set_osd(const Surface& s, const DirtyRect* rects, size_t n_re
 void BurnRecorder::request_idr() { impl_->idr_pending.store(true); }
 
 void BurnRecorder::drop_pending() {
-  // drain_box() takes box_mu only; drain_ct_out() takes mu, so from the
-  // decode-output thread this can wait out one set_osd() quantize -- a
-  // flush-time cost, never a per-frame one.
+  // Housekeeping, with the release thread parked (the caller's guarantee,
+  // burn_recorder.h). drain_box() takes box_mu only; drain_ct_out() takes
+  // mu, so this can wait out one set_osd() quantize -- a flush-time cost,
+  // never a per-frame one.
   if (!impl_->started) return;
   impl_->drain_box();
   impl_->drain_ct_out();
@@ -920,8 +987,8 @@ void BurnRecorder::drop_pending() {
 void BurnRecorder::stop() {
   Impl& im = *impl_;
   if (!im.started) return;
-  // The caller has already detached every submit() source (THREADING in
-  // burn_recorder.h), so nothing races the teardown below. `stopping` is
+  // The caller has already cleared the tap's hook (THREADING in
+  // burn_recorder.h), so no submit() races the teardown below. `stopping` is
   // set under both mutexes because the box waiters read it under box_mu
   // and the ct_out waiter under mu.
   {
@@ -937,7 +1004,7 @@ void BurnRecorder::stop() {
   // After the joins nothing else touches the mailboxes, but the drains lock
   // anyway -- they are the code path drop_pending() uses and correctness
   // here must not depend on the joins having happened.
-  im.drain_box();     // REF-STOP
+  im.drain_box();     // REF-STOP: the mailbox and the displaced list
   im.drain_ct_out();  // REF-STOP, ct side
 #ifdef MABUR_PLAYER_GPU
   im.ct_free_dst();

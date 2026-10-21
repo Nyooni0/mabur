@@ -26,15 +26,18 @@ The H618's 3×4 is derived from `kColorTrans3` at startup, so a retune needs
 no extra edit there; a retune to `gamma != 1` is not affine and leaves the
 H618 flat (logged).
 
-The ct thread also SCALES: the burned DVR's picture is the OSD surface's
-size, not the decoded size, because the encoder lays the OSD 1:1 from the
-top-left while the panel scales the video under it — recording at the
-decoded size would put the OSD offset and clipped on a 720p drone with a
-1080p panel. With colortrans the shader draw scales (target = OSD size,
-LINEAR sampler); without it, one RGA NV12 resize. So the ct thread runs
-whenever there is an OSD region, colortrans or not, and a 720p drone
-records a 1080p file. A picture of another aspect ratio than the panel
-(1728x816 on 16:9) is letterboxed like the screen shows it (`fit_rect.h`):
+The ct thread also SCALES: the burned DVR's picture is the recording's own
+size (`dvr.burned.size`, default the decoded size when the recording
+starts), and every frame of another size is scaled to it — the encoder
+latches its picture size from the first frame and lays the OSD 1:1 from
+the top-left, and the burned overlay is composed at the record size, so a
+decoded size that changes mid-recording (a rung change) or a `size` set
+apart from the drone's (a 720p drone recorded at 1080p) keeps recording
+with the OSD in place. With colortrans the shader draw scales (target =
+record size, LINEAR sampler); without it, one RGA NV12 resize. So the ct
+thread runs in every GPU build, colortrans or not. A picture of another
+aspect ratio than the record size (1728x816 into 1920x1080) is
+letterboxed like the screen shows it (`fit_rect.h`):
 the shader clears to black and draws into the centred sub-rectangle; the
 RGA path fills the bars once per destination buffer and scales into it.
 
@@ -155,14 +158,16 @@ A recording must not cost the live picture a vsync. What makes that hold:
   `IN_FENCE_FD` on every video-plane commit, so the plane helper takes no
   implicit fence. Startup log:
   `DrmPresenter: video plane commits carry an explicit IN_FENCE_FD (...)`.
-- **Submit on the decode-output thread.** `BurnRecorder::submit()` runs
-  on maburplay's decode-output thread (`DecodePump`, docs/phase-lock.md
-  "Threads"), right after the frame is decoded and before it is handed to
-  the release thread: an fps-cap check, a buffer reference and a mailbox
-  post, never a copy. Record start and stop install and remove that hook
-  from the housekeeping loop (`DecodePump::set_recorder_submit`, removed
-  before `stop()`), so neither ever runs on the thread that releases
-  frames to the display.
+- **An O(1) tap on the flip.** `BurnRecorder::submit()` runs on the
+  `SCHED_FIFO` release thread (docs/phase-lock.md "Threads"), from the
+  display's flip through `RecorderTap` (`recorder_tap.h`), on each
+  recorded slot of the vblank grid: one buffer reference and a mailbox
+  post under a `PiMutex`, never a copy and never a buffer release. A
+  displaced mailbox entry waits on a two-deep list for the stage thread to
+  release it; with the list full the flip takes no reference and counts as
+  dropped. Record start and stop install and remove the hook from the
+  housekeeping loop (`RecorderTap::set`/`clear`, cleared before `stop()`),
+  so neither runs on the release thread.
 - **Pipelined ct thread.** The stage runs on its own thread (EGL is
   thread-bound) with three destination buffers and a latest-wins handoff to
   the encode thread (`burn_recorder.h`, THREADING).
@@ -175,10 +180,12 @@ A recording must not cost the live picture a vsync. What makes that hold:
 - **Palette memoised at boot** (`maburplay: burn palette built: N entries`),
   so a record start does not histogram the MSP atlas on the housekeeping
   loop. A record start/stop still costs a one-shot GPU bring-up/teardown.
-- **Schedule-based `dvr.burned.fps_cap`** (`gs/player/src/fps_cap.h`,
-  `test_fps_cap`): a frame is admitted when its slot is due and slots
-  advance one interval per admit, so a source at or under the cap passes
-  whole even though decoded frames arrive in pairs.
+- **`dvr.burned.every`: counted thinning on the vblank grid**
+  (`gs/player/src/glass_cadence.h`, `test_glass_cadence`): the recorder is
+  fed from the display's flip, and one flip per `every` vblank periods is
+  recorded, stamped with its ideal grid time; the encoder's rate is
+  `round(1e6 / (period × every))`. No wall clock or rate estimate decides
+  which frames go in, so the file samples exactly what the glass showed.
 - **File I/O off the encode thread.** The mux writes through
   `mabur::ThreadedSink` (`common/include/mabur/threaded_sink.h`,
   `test_threaded_sink`). A closing fragment is ~2.5 MB at 20 Mbit/s and
