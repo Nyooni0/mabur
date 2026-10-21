@@ -20,7 +20,13 @@ struct DvrCfg {
   std::string mode = "raw";
   struct BurnedCfg {
     int bitrate_kbps = 12000;
-    int fps_cap = 30;   // encode is capped independently of display rate
+    // Record every N-th screen refresh: 1 = the panel's rate, 2 = half of
+    // it, ... up to 10.
+    int every = 1;
+    // Recording's picture size; 0x0 = the decoded (drone-sent) size, no
+    // scaling. Both dimensions even, W in 320-4096, H in 240-2304.
+    int size_w = 0;
+    int size_h = 0;
   } burned;
   // Where the record button records:
   // "gs" = this GS's DVR only, "vtx" = the drone's SD card only, "both".

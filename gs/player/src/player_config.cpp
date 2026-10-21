@@ -1,5 +1,6 @@
 #include "player_config.h"
 
+#include <cstdio>
 #include <fstream>
 #include <stdexcept>
 
@@ -130,11 +131,27 @@ Config load_config(const std::string& path, std::vector<std::string>* defaulted)
       fail("dvr.target", "must be \"gs\", \"vtx\" or \"both\"");
     if (r.contains("burned")) {
       const Value& b = r["burned"];
-      check_keys(b, "dvr.burned", {"bitrate_kbps", "fps_cap"});
+      check_keys(b, "dvr.burned", {"bitrate_kbps", "every", "size"});
       c.dvr.burned.bitrate_kbps =
           static_cast<int>(get_int(b, "bitrate_kbps", 12000, 500, 100000, "dvr.burned"));
-      c.dvr.burned.fps_cap =
-          static_cast<int>(get_int(b, "fps_cap", 30, 1, 120, "dvr.burned"));
+      c.dvr.burned.every =
+          static_cast<int>(get_int(b, "every", 1, 1, 10, "dvr.burned"));
+      const std::string size = get_str(b, "size", "", "dvr.burned");
+      if (size.empty()) {
+        c.dvr.burned.size_w = 0;
+        c.dvr.burned.size_h = 0;
+      } else {
+        int w = 0, h = 0, n = 0;
+        if (std::sscanf(size.c_str(), "%dx%d%n", &w, &h, &n) != 2 ||
+            static_cast<size_t>(n) != size.size() ||
+            w % 2 != 0 || h % 2 != 0 ||
+            w < 320 || w > 4096 || h < 240 || h > 2304) {
+          fail("dvr.burned.size",
+               "WxH, both even, 320-4096 x 240-2304, or \"\" for the decoded size");
+        }
+        c.dvr.burned.size_w = w;
+        c.dvr.burned.size_h = h;
+      }
     } else {
       // Whole sub-table absent: one line, same style as a missing top-level
       // section, rather than two separate per-key lines the operator would

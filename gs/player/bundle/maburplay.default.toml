@@ -19,7 +19,8 @@ target      = "gs"         # where the record button records: "gs" = here, "vtx"
 # Recording settings for mode = "burned".
 [dvr.burned]
 bitrate_kbps = 8000
-fps_cap      = 60          # highest recorded frame rate
+every        = 1           # record every N-th screen refresh: 1 = the panel's rate, 2 = half of it
+size         = ""          # "WxH" picture size of the recording; "" = the size the drone sends (no scaling)
 
 # Flight-controller OSD (from the drone, relayed by maburgs).
 [osd]

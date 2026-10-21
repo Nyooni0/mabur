@@ -12,6 +12,12 @@ static std::string write_tmp_play(const char* text) {
   return path;
 }
 
+static bool load_throws(const char* text) {
+  try { maburplay::load_config(write_tmp_play(text)); }
+  catch (const std::exception&) { return true; }
+  return false;
+}
+
 // dvr.target (VTX recorder): which recorders the record button drives. Default
 // "gs" (identical to pre-feature behaviour).
 TEST(dvr_target_values_and_strictness) {
@@ -98,16 +104,39 @@ TEST(dvr_mode_defaults_to_raw) {
   auto c = maburplay::load_config(write_tmp_play("backend = \"null\"\n"));
   CHECK(c.dvr.mode == "raw");
   CHECK(c.dvr.burned.bitrate_kbps == 12000);
-  CHECK(c.dvr.burned.fps_cap == 30);
 }
 
-TEST(dvr_burned_block_parses) {
+TEST(dvr_burned_defaults) {
+  auto c = maburplay::load_config(write_tmp_play("backend = \"null\"\n"));
+  CHECK(c.dvr.burned.every == 1);
+  CHECK(c.dvr.burned.size_w == 0 && c.dvr.burned.size_h == 0);
+}
+
+TEST(dvr_burned_every_and_size_parse) {
   auto c = maburplay::load_config(write_tmp_play(
       "backend = \"null\"\n\n[dvr]\nmode = \"burned\"\n\n"
-      "[dvr.burned]\nbitrate_kbps = 20000\nfps_cap = 60\n"));
+      "[dvr.burned]\nbitrate_kbps = 20000\nevery = 2\nsize = \"1728x972\"\n"));
   CHECK(c.dvr.mode == "burned");
   CHECK(c.dvr.burned.bitrate_kbps == 20000);
-  CHECK(c.dvr.burned.fps_cap == 60);
+  CHECK(c.dvr.burned.every == 2);
+  CHECK(c.dvr.burned.size_w == 1728 && c.dvr.burned.size_h == 972);
+}
+
+TEST(dvr_burned_fps_cap_is_unknown) {
+  CHECK(load_throws("backend = \"null\"\n[dvr.burned]\nfps_cap = 60\n"));
+}
+
+TEST(dvr_burned_every_bounds) {
+  CHECK(load_throws("backend = \"null\"\n[dvr.burned]\nevery = 0\n"));
+  CHECK(load_throws("backend = \"null\"\n[dvr.burned]\nevery = 11\n"));
+}
+
+TEST(dvr_burned_size_bounds) {
+  CHECK(load_throws("backend = \"null\"\n[dvr.burned]\nsize = \"1727x972\"\n"));   // odd
+  CHECK(load_throws("backend = \"null\"\n[dvr.burned]\nsize = \"300x240\"\n"));    // W < 320
+  CHECK(load_throws("backend = \"null\"\n[dvr.burned]\nsize = \"1920x2306\"\n"));  // H > 2304
+  CHECK(load_throws("backend = \"null\"\n[dvr.burned]\nsize = \"1920\"\n"));       // no x
+  CHECK(!load_throws("backend = \"null\"\n[dvr.burned]\nsize = \"\"\n"));
 }
 
 TEST(dvr_rejects_bad_mode_and_unknown_keys) {
@@ -122,18 +151,8 @@ TEST(dvr_rejects_bad_mode_and_unknown_keys) {
   CHECK(threw == true);
 }
 
-TEST(dvr_burned_bounds_are_enforced) {
-  bool threw = false;
-  try { maburplay::load_config(write_tmp_play(
-      "[dvr.burned]\nfps_cap = 0\n")); }
-  catch (const std::exception&) { threw = true; }
-  CHECK(threw == true);
-
-  threw = false;
-  try { maburplay::load_config(write_tmp_play(
-      "[dvr.burned]\nbitrate_kbps = 500000\n")); }
-  catch (const std::exception&) { threw = true; }
-  CHECK(threw == true);
+TEST(dvr_burned_bitrate_bound_is_enforced) {
+  CHECK(load_throws("[dvr.burned]\nbitrate_kbps = 500000\n"));
 }
 
 TEST(gs_osd_defaults_are_off_on_8302) {
@@ -541,12 +560,6 @@ TEST(unsupported_on_build_names_available_backends) {
         "backend \"mpp\" is not in this build (Rockchip MPP decoder); this build has: null, v4l2req");
   CHECK(maburplay::unsupported_on_build(c, host) ==
         "backend \"mpp\" is not in this build (Rockchip MPP decoder); this build has: null");
-}
-
-static bool load_throws(const char* text) {
-  try { maburplay::load_config(write_tmp_play(text)); }
-  catch (const std::exception&) { return true; }
-  return false;
 }
 
 TEST(display_phase_lock_keys) {
