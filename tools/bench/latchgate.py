@@ -49,7 +49,9 @@ restart, not an event.
 
 `reg.log`'s `rlate=`/`hand=`/`flushes=`/`recstarts=` tokens arrived with
 reglog 3; `# reglog 2` rows (and reglog-2-only "off" lines) lack them,
-print `-` for rlate and hand, and exclude on `disconts=` alone.
+print `-` for rlate and hand, and exclude on `disconts=` alone. Reglog 4
+appends `burn_in=`/`burn_enc=`/`burn_drop=` (the burned DVR's cumulative
+counters); this gate parses them but does not gate on them.
 `frame.log` needs the `t_commit`/`pbits` columns (framelog 3) that misses
 are computed from; an older frame.log is refused as unreadable.
 
@@ -154,15 +156,17 @@ def parse_frame_log(path):
     return version, rows
 
 
-COUNTERS = ('pend', 'pdrop', 'disconts', 'flushes', 'recstarts')
+COUNTERS = ('pend', 'pdrop', 'disconts', 'flushes', 'recstarts',
+            'burn_in', 'burn_enc', 'burn_drop')
 
 
 def parse_reg_log(path):
     """(version, rows); rows = [{'t', 'pend'?, 'pdrop'?, 'disconts'?,
-    'flushes'?, 'recstarts'?, 'rlate_p99'?, 'rlate_max'?, 'hand_p99'?,
-    'hand_max'?}], sorted by t. A key is present only when the line
-    carried it (regulator disabled -> no pend/pdrop/disconts; reglog 2 ->
-    no rlate/hand/flushes/recstarts)."""
+    'flushes'?, 'recstarts'?, 'burn_in'?, 'burn_enc'?, 'burn_drop'?,
+    'rlate_p99'?, 'rlate_max'?, 'hand_p99'?, 'hand_max'?}], sorted by t. A
+    key is present only when the line carried it (regulator disabled -> no
+    pend/pdrop/disconts; reglog 2 -> no rlate/hand/flushes/recstarts;
+    reglog <4 -> no burn_in/burn_enc/burn_drop)."""
     version = None
     rows = []
     with open(path) as f:

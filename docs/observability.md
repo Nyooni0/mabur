@@ -556,17 +556,21 @@ vsync-paced two-plane commit), `0x02` `PAGE_FLIP_ASYNC` was set, `0x04`
 parked, `0x08` the commit failed, `0x10` a blocking modeset commit.
 `framelog 2` and earlier rows end at `exact`.
 
-### `reg.log` (`# reglog 3`)
+### `reg.log` (`# reglog 4`)
 
 The 1 Hz `regulator:` line ("Regulator line" below), written by the same
 follow-the-marker writer as `lat.log`: `<mono_us> regulator: held= ...`.
-Its counters are cumulative since maburplay started; difference adjacent
-rows for the per-second rate (the `present=`, `rlate=` and `hand=` windows
-are per line already). It exists because `pend`/`pdrop`/`heals` are the
-presenter's side of a missed latch, and `/tmp/maburplay.log` does not
-outlive a power-off. reglog 3 appends the release thread's fields `rlate=
-hand= rt=` and the event counters `flushes= recstarts=`; reglog 2 rows end
-at `ioctl=` and carry the phase-lock fields
+Its counters are cumulative since maburplay started (the burned-DVR
+counters below are cumulative since the current recording started
+instead, and zero with none running); difference adjacent rows for the
+per-second rate (the `present=`, `rlate=` and `hand=` windows are per line
+already). It exists because `pend`/`pdrop`/`heals` are the presenter's
+side of a missed latch, and `/tmp/maburplay.log` does not outlive a
+power-off. reglog 4 appends the burned recorder's counters `burn_in=
+burn_enc= burn_drop=`; reglog 3 rows end at `recstarts=` and carry the
+release thread's fields `rlate= hand= rt=` and the event counters
+`flushes= recstarts=`; reglog 2 rows end at `ioctl=` and carry the
+phase-lock fields
 `lock= lerr= loff= lctr=` (docs/phase-lock.md); reglog 1 rows end at
 `lslot=` before `present=`.
 
@@ -629,10 +633,10 @@ The 1 Hz `regulator:` line (stderr, and `reg.log` in the session
 directory): `held= late= replaced= disconts= hold_ema=
 present_jitter= vsync= skips= fallback= pend= heals= pdrop= chained= chain=
 chain_max= chains= cuts= alw= lslot= lock= lerr= loff= lctr= present= acq=
-req= ioctl= rlate= hand= rt= flushes= recstarts=` (`regulator: off
-present_jitter= rlate= hand= rt= flushes= recstarts=` with
-`display.regulate_ms = 0`; `present=` through `ioctl=` only with a
-display).
+req= ioctl= rlate= hand= rt= flushes= recstarts= burn_in= burn_enc=
+burn_drop=` (`regulator: off present_jitter= rlate= hand= rt= flushes=
+recstarts= burn_in= burn_enc= burn_drop=` with `display.regulate_ms = 0`;
+`present=` through `ioctl=` only with a display).
 
 The release thread (docs/phase-lock.md "Threads") makes every release
 decision and every present() call, so the timing fields below all read
@@ -668,6 +672,13 @@ against it, not against the housekeeping loop that prints the line.
   up, or a raw recording starting. `tools/bench/latchgate.py` excludes the
   misses and `pend` growth right after a rise in either counter (its
   docstring has the spans).
+- `burn_in= burn_enc= burn_drop=` — the burned recorder's flips tapped
+  after thinning, frames encoded, and frames dropped because the stage or
+  the encoder fell behind (`burn_recorder.h`'s `frames_in`/
+  `frames_encoded`/`frames_dropped`); cumulative since the current
+  recording started, zero while no burned recording is running. A rising
+  `burn_drop` is the recording's own stutter signal, independent of the
+  display's `pdrop=` above.
 - `present_jitter=` — |Δ present interval| EMA, ms, on the release
   thread's submission clock.
 - `late=` — frames whose release had already passed when they were

@@ -9,9 +9,11 @@ reglog 2` tolerance (no rlate/hand -> `-`), `--skip-after-flush`
 excluding a miss right after a rise in reg.log's cumulative `disconts=`
 or `flushes=` while still counting one further out, a `recstarts=` rise
 excluding misses and pend growth in its span only, the excluded counts
-reported apart, and the miss threshold following the panel period (with
-the `--miss-ms` override).
+reported apart, the miss threshold following the panel period (with the
+`--miss-ms` override), and `# reglog 4`'s `burn_in=`/`burn_enc=`/
+`burn_drop=` tokens parsing through without tripping the gate.
 """
+import importlib.util
 import os
 import subprocess
 import sys
@@ -20,6 +22,12 @@ import unittest
 
 LATCHGATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..',
                           'tools', 'bench', 'latchgate.py')
+
+# Loaded by path (not a package import) so parse_reg_log can be asserted on
+# directly, next to the subprocess-level checks the rest of this file uses.
+_spec = importlib.util.spec_from_file_location('latchgate', LATCHGATE)
+latchgate = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(latchgate)
 
 
 def frame_row(t_flip, t_commit, dsp=4000, e2e=9000):
@@ -250,6 +258,27 @@ class LatchgateTest(unittest.TestCase):
         self.assertIn('pdrop +1', r.stdout, r.stdout)
         self.assertNotIn('+-', r.stdout, r.stdout)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_reglog_4_rows_parse(self):
+        # reglog 4 appends burn_in=/burn_enc=/burn_drop= (the burned DVR's
+        # cumulative counters); the gate parses them and still runs clean on
+        # an otherwise-clean pair.
+        with tempfile.TemporaryDirectory() as d:
+            rows = [
+                frame_row(1_000_000, 995_000),
+                frame_row(1_016_666, 1_011_666),
+            ]
+            write(d, 'frame.log', '# framelog 3\n' + '\n'.join(rows) + '\n')
+            write(d, 'reg.log', '# reglog 4\n'
+                  + reg_row(1_000_000, rlate=(100, 200), hand=(50, 100))
+                  + ' burn_in=1 burn_enc=1 burn_drop=0\n'
+                  + reg_row(1_500_000, rlate=(100, 200), hand=(50, 100))
+                  + ' burn_in=1 burn_enc=1 burn_drop=0\n')
+            _, reg_rows = latchgate.parse_reg_log(os.path.join(d, 'reg.log'))
+            r = run(d)
+        self.assertEqual(reg_rows[0]['burn_drop'], 0)
+        self.assertIn('misses 0', r.stdout, r.stdout)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
 
 if __name__ == '__main__':

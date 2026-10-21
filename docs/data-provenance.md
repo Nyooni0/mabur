@@ -114,6 +114,8 @@ Chronological; each line names the section below that carries the detail.
   from before ran the regulator's lead at 8 ms while recording (+3 ms on
   `dsp` and `e2e` against live view), one from after runs the one
   `vsync_lead_ms` throughout.
+- 2026-10-22 — `# reglog 4` appends `burn_in= burn_enc= burn_drop=`; reglog
+  3 rows end at `recstarts=`.
 
 ## 2026-09-23 — `link.pre_fec_loss` scale break, twice
 

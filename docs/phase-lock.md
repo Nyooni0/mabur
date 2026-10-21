@@ -173,9 +173,10 @@ each frame on the spot.
 
 ## Observability
 
-- `reg.log` (`# reglog 3`) regulator line: `lock=<off|wait|acq|lock|oor>
+- `reg.log` (`# reglog 4`) regulator line: `lock=<off|wait|acq|lock|oor>
   lerr=<ms>ms loff=<mfps> lctr=<mfps>`, and the release thread's
-  `rlate= hand= rt= flushes= recstarts=` (docs/observability.md
+  `rlate= hand= rt= flushes= recstarts=` plus the burned recorder's
+  `burn_in= burn_enc= burn_drop=` (docs/observability.md
   "Regulator line").
 - maburplay stderr: `phase-lock: <state> err= off= centre=` on each state
   change.

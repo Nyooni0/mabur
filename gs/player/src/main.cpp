@@ -911,6 +911,19 @@ int main(int argc, char** argv) {
   maburplay::DecodePump pump(lat, regulator, handover, releases);
   maburplay::ReleaseLoop release(regulator, lat, handover, releases, presenter.get(),
                                  maburplay::ReleaseLoop::Cfg{cfg.display.rt_priority});
+  // burn_in/burn_enc/burn_drop on the regulator line: the burned recorder's
+  // cumulative frames_in/frames_encoded/frames_dropped (burn_recorder.h),
+  // zero while `burn` holds no recorder -- no burned recording running, or
+  // a build whose BurnRecorder is the v4l2req stub that never starts one.
+  struct BurnCounts {
+    uint64_t in = 0, enc = 0, drop = 0;
+  };
+  auto burn_counts = [&burn]() -> BurnCounts {
+#ifdef MABUR_PLAYER_HW
+    if (burn) return {burn->frames_in(), burn->frames_encoded(), burn->frames_dropped()};
+#endif
+    return {};
+  };
   // Regulator stderr line: printed both at 1 Hz from the housekeeping loop's
   // stats block (below) and once more at exit as the final tally -- same
   // format either way, factored here so the two call sites can't drift.
@@ -919,7 +932,7 @@ int main(int argc, char** argv) {
   // there is no presenter (decode-only, or init failed). Every call closes
   // the release thread's stats window (rlate=, hand=, present_jitter=).
   auto log_regulator_line = [&regulator, &presenter, &release, &reg_log, &phase_lock,
-                             &output_parks, &rec_starts]() {
+                             &output_parks, &rec_starts, &burn_counts]() {
     char line[768];
     const maburplay::ReleaseLoop::Stats st = release.take_stats();
     if (regulator.enabled()) {
@@ -984,13 +997,19 @@ int main(int argc, char** argv) {
       // The release thread over the same window (µs p99/max): rlate = a held
       // frame's release behind its schedule, hand = decode stamp to offer;
       // rt = 1 when it runs SCHED_FIFO. Then the cumulative output parks
-      // and recorder starts (see output_parks above).
+      // and recorder starts (see output_parks above), and the burned
+      // recorder's own cumulative counters (burn_counts above).
       const size_t used = std::strlen(line);
+      const BurnCounts bc = burn_counts();
       std::snprintf(line + used, sizeof(line) - used,
-                    " rlate=%u/%u hand=%u/%u rt=%d flushes=%llu recstarts=%llu",
+                    " rlate=%u/%u hand=%u/%u rt=%d flushes=%llu recstarts=%llu "
+                    "burn_in=%llu burn_enc=%llu burn_drop=%llu",
                     st.rlate_p99_us, st.rlate_max_us, st.hand_p99_us, st.hand_max_us,
                     release.rt_applied() ? 1 : 0, static_cast<unsigned long long>(output_parks),
-                    static_cast<unsigned long long>(rec_starts));
+                    static_cast<unsigned long long>(rec_starts),
+                    static_cast<unsigned long long>(bc.in),
+                    static_cast<unsigned long long>(bc.enc),
+                    static_cast<unsigned long long>(bc.drop));
     }
     std::fprintf(stderr, "%s\n", line);
     reg_log.write(mono_us(), line);

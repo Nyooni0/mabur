@@ -2145,6 +2145,7 @@ class ReleaseReportTest(unittest.TestCase):
         self.assertEqual(len(rows), 3)
         self.assertEqual(rows[1]["rlate_max"], 2100)
         self.assertEqual(rows[2]["hand_p99"], 70)
+        self.assertEqual(rows[0]["burn_drop"], 0)  # reglog 3 carries no burn_* tokens
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             flightreport.print_release_report(rows)
@@ -2153,6 +2154,33 @@ class ReleaseReportTest(unittest.TestCase):
         self.assertIn("rows=3 rt=SCHED_FIFO", text)
         self.assertIn("rlate p99 per s p50/p90/max=120/150/150 us, worst frame=2100 us", text)
         self.assertIn("hand p99 per s p50/p90/max=80/90/90 us, worst frame=300 us", text)
+        self.assertNotIn("burn drop=", text)  # no burn_in>0 row, no burn line
+
+    REG4 = (
+        "# reglog 4\n"
+        "1000000 regulator: held=1 alw=2.0ms lslot=0 lock=lock lerr=0.10ms loff=8 lctr=7.0 "
+        "present=60 acq=1/2 req=1/2 ioctl=300/900 rlate=120/400 hand=80/250 rt=1 "
+        "burn_in=600 burn_enc=598 burn_drop=2\n"
+        "2000000 regulator: held=2 alw=2.0ms lslot=0 lock=lock lerr=0.20ms loff=8 lctr=7.0 "
+        "present=60 acq=1/2 req=1/2 ioctl=300/900 rlate=150/2100 hand=90/300 rt=1 "
+        "burn_in=1200 burn_enc=1196 burn_drop=4\n"
+    )
+
+    def test_reglog_4_rows_and_burn_line(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "reg.log")
+            with open(p, "w") as f:
+                f.write(self.REG4)
+            rows = flightreport.load_reglog_release(p)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1]["burn_drop"], 4)
+        self.assertEqual(rows[1]["burn_in"], 1200)
+        self.assertEqual(rows[1]["burn_enc"], 1196)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            flightreport.print_release_report(rows)
+        text = out.getvalue()
+        self.assertIn("burn drop=4", text)
 
     def test_reglog_2_prints_no_release_section(self):
         with tempfile.TemporaryDirectory() as d:

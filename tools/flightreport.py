@@ -907,10 +907,10 @@ def refresh_span_ms(rr, ctl=None, fec_rows=None):
 def load_reglog_lock(path):
     """reg.log phase-lock fields per 1 Hz regulator line (`# reglog 2` and
     later): `lock=<off|wait|acq|lock|oor> lerr=<ms>ms loff=<mfps>
-    lctr=<mfps>`. Other key=value tokens (reglog 3's `rlate= hand= rt=`
-    among them) are ignored. Rows without the lock fields (reglog 1, before
-    the phase lock) are skipped, so an empty list means the recording has
-    no lock data."""
+    lctr=<mfps>`. Other key=value tokens (reglog 3's `rlate= hand= rt=` and
+    reglog 4's `burn_in= burn_enc= burn_drop=` among them) are ignored. Rows
+    without the lock fields (reglog 1, before the phase lock) are skipped,
+    so an empty list means the recording has no lock data."""
     rows = []
     with open(path) as f:
         for line in f:
@@ -927,10 +927,14 @@ def load_reglog_lock(path):
 
 
 def load_reglog_release(path):
-    """reg.log release-thread fields per 1 Hz regulator line (`# reglog 3`):
-    `rlate=<p99>/<max> hand=<p99>/<max> rt=<0|1>`, µs over the line's own
-    window. Rows without them (reglog 1/2, before the release thread) are
-    skipped, so an empty list means the recording has none."""
+    """reg.log release-thread fields per 1 Hz regulator line (`# reglog 3`
+    and later): `rlate=<p99>/<max> hand=<p99>/<max> rt=<0|1>`, µs over the
+    line's own window, plus reglog 4's burned-DVR counters `burn_in=
+    burn_enc= burn_drop=` (the recorder's cumulative frames tapped,
+    encoded and dropped; 0 on a reglog 3 file, or when the line predates
+    them, or while no burned recording is running). Rows without
+    rlate/hand (reglog 1/2, before the release thread) are skipped, so an
+    empty list means the recording has none."""
     rows = []
     with open(path) as f:
         for line in f:
@@ -946,7 +950,10 @@ def load_reglog_release(path):
             except ValueError:
                 continue
             rows.append({"t_us": int(tok[0]), "rlate_p99": rp99, "rlate_max": rmax,
-                         "hand_p99": hp99, "hand_max": hmax, "rt": kv.get("rt") == "1"})
+                         "hand_p99": hp99, "hand_max": hmax, "rt": kv.get("rt") == "1",
+                         "burn_in": int(kv.get("burn_in", 0)),
+                         "burn_enc": int(kv.get("burn_enc", 0)),
+                         "burn_drop": int(kv.get("burn_drop", 0))})
     return rows
 
 
@@ -954,7 +961,12 @@ def print_release_report(rows):
     """RELEASE section from load_reglog_release rows: the release thread's
     lateness behind each held frame's scheduled release (rlate) and the
     decode-to-offer hand-over (hand), per-second p99s summarised over the
-    recording, plus the worst single frame. Silent without reglog 3 rows."""
+    recording, plus the worst single frame. Silent without reglog 3 rows.
+    When any row's burn_in > 0 (a burned recording ran), one more line
+    gives the final burn_in/burn_enc/burn_drop tally and burn_drop per
+    recording minute, the minute count taken from the burn_in > 0 rows
+    (reglog is 1 Hz, so their count is the recording's own span in
+    seconds) -- the stutter signal for that recording."""
     if not rows:
         return
     n = len(rows)
@@ -966,6 +978,13 @@ def print_release_report(rows):
         worst = max(r[key + "_max"] for r in rows)
         print(f"  {label} p99 per s p50/p90/max={_pct(p99s, 0.5)}/{_pct(p99s, 0.9)}/"
               f"{max(p99s)} us, worst frame={worst} us")
+    active = [r for r in rows if r["burn_in"] > 0]
+    if active:
+        last = active[-1]
+        minutes = len(active) / 60.0
+        per_min = last["burn_drop"] / minutes if minutes > 0 else 0.0
+        print(f"  burn drop={last['burn_drop']} (in={last['burn_in']} "
+              f"enc={last['burn_enc']}, {per_min:.1f}/min over {len(active)}s)")
 
 
 def print_lock_report(rows):
