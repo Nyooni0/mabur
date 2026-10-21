@@ -966,8 +966,7 @@ def _burn_recordings(rows):
     after the previous one, no gap) or a run of burn_in == 0 rows
     (recording stopped) is followed by burn_in > 0 again. Returns each
     recording's last row, in order; a session with one continuous
-    recording returns a single-element list, same as before this split
-    existed."""
+    recording returns a single-element list."""
     recs = []
     cur = []
     for r in rows:

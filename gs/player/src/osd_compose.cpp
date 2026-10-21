@@ -62,7 +62,7 @@ void OsdComposer::set_burn_sink(BurnSink s) {
   // Blank the canvas too: pixels from the previous recording outside the
   // fresh restate's rects would otherwise linger in it, and a later rect
   // that happens to cover them would quantize stale content into the new
-  // recording's map. Same size as before -- only the lineage resets.
+  // recording's map. The canvas keeps its size -- only the lineage resets.
   realloc_burn_canvas(burn_canvas_.width, burn_canvas_.height);
 }
 
@@ -275,8 +275,8 @@ OsdComposeOut OsdComposer::compose_screen(int idx, const Surface& s, const OsdCo
 
 // Composed into the burn CANVAS -- the composer's own cached mirror --
 // never read back out of a DRM buffer: those are write-combine mappings
-// and quantize reading one was the burned-recording latency regression
-// (see osd_compose.h). The canvas runs the SAME algorithm as the display
+// and quantize reading one costs milliseconds per OSD update on the pump
+// loop (see osd_compose.h). The canvas runs the SAME algorithm as the display
 // path in compose_screen(), against the burn's own lineages (burn_shadow_,
 // gs_[2]), so it renders the same picture the screen shows: MSP first, GS
 // repainted over any cell that hit a field box, vacated card rows erased

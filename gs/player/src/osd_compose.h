@@ -74,8 +74,8 @@ struct OsdComposeOut {
 // canvas costs one extra cached draw per update and 4 bytes/px of heap;
 // reads out of it run at the benched speed. It is single (not per DRM
 // buffer), and it has ITS OWN size and ITS OWN trigger: set_burn_size()
-// pins it to the recording's own dimensions (0x0, the default, falls back
-// to following the screen surface, as it always did), and compose_burn()
+// pins it to the recording's own dimensions (0x0, the default, follows
+// the screen surface), and compose_burn()
 // draws it independently of compose_screen() -- the burn's cadence is
 // whatever the live recorder's housekeeping loop calls it at, not the
 // screen's publish state.
@@ -138,7 +138,6 @@ class OsdComposer {
 
   // The screen half of compose(): MSP draw-or-blank, GS collision reclaim,
   // GS update into buffer idx. Leaves buffer `idx` current in both layers.
-  // Unchanged behaviour from the old compose().
   OsdComposeOut compose_screen(int idx, const Surface& s, const OsdComposeIn& in);
 
   // The burn half: the burn lineages into the canvas, then the burn sink.
