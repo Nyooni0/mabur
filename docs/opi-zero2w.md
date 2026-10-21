@@ -16,10 +16,15 @@ to `avcodec_send_packet` whole (no parser) or, by default, slice by slice
 NV12 either way and are handed to `DrmPresenter` unchanged.
 
 - **One thread for libav.** Decode and frame frees run on the feed
-  thread; `poll()`/`release_frame()` on main only touch a locked handoff
-  (`frame_handoff.h`). Released frames are freed before the next decode.
-  `abort()` can also run on main while the feed thread is parked, same as
-  `flush()`.
+  thread; `poll()`/`release_frame()` on the decode-output thread
+  (`DecodePump`, `docs/phase-lock.md` "Threads") only touch a locked
+  handoff (`frame_handoff.h`). Released frames are freed before the next
+  decode. `abort()` can also run on the housekeeping thread while the feed
+  thread is parked, same as `flush()`.
+- **Blocking poll.** The backend implements `PollWait`: the decode-output
+  thread waits inside `poll()` (up to the pump's 4 ms) for the feed
+  thread's next frame, so a decoded picture is handed over the moment it
+  lands in the ready queue rather than at the pump's next 1 ms round.
 - **Entry gate.** After init and every flush, AUs are dropped until the
   first entry point (`mabur::au_is_entry_point`: an IRAP, or an AU carrying
   an SPS), counted as `gated`. With `venc.gop_s` nonzero the drone's

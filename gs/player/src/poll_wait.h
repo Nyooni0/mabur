@@ -8,8 +8,9 @@ namespace maburplay {
 // dynamic_cast (like StreamDecoder). DecodePump sets it so its thread sleeps
 // inside the decoder until a frame is ready, rather than spinning or adding
 // a fixed sleep's worth of latency to every frame. MppBackend implements it
-// (MPP_SET_OUTPUT_TIMEOUT); a backend without it gets the pump's own short
-// sleep between empty polls.
+// (MPP_SET_OUTPUT_TIMEOUT) and so does V4l2ReqBackend (a timed wait on its
+// ready queue); a backend without it gets the pump's own short sleep
+// between empty polls.
 class PollWait {
  public:
   virtual ~PollWait() = default;
