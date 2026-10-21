@@ -32,10 +32,8 @@ namespace maburplay {
 //     The notes are also drained after every poll round, frame or not, so
 //     they never pile up in the feed while the decoder emits nothing;
 //  2. lat.on_decoded, the source-rate sample and the stats atomics;
-//  3. the recorder hook (it only takes a buffer reference; it must see the
-//     frame before anyone downstream can release it);
-//  4. the hand-over: out.push({f, t_decoded});
-//  5. the prime hook, after the hand-over so it never delays it.
+//  3. the hand-over: out.push({f, t_decoded});
+//  4. the prime hook, after the hand-over so it never delays it.
 //
 // Loop: checkpoint (park) -> releases into the backend -> poll() -> submit
 // notes. A backend that implements PollWait blocks in poll() up to
@@ -46,7 +44,7 @@ namespace maburplay {
 // burst cannot outlast the decoder's buffer pool, which those releases refill.
 //
 // Threads: set_feed/set_prime before start(); set_backend before start() or
-// while parked; set_recorder_submit and the reads below from anywhere.
+// while parked; the reads below from anywhere.
 class DecodePump {
  public:
   static constexpr int kPollTimeoutMs = 4;
@@ -74,8 +72,6 @@ class DecodePump {
   void set_backend(VideoBackend* b);
   // Before start(): runs after the hand-over.
   void set_prime(std::function<void(const DmaFrame&)> fn);
-  // Any time; empty = none. Held under its own lock only for the call.
-  void set_recorder_submit(std::function<void(const DmaFrame&)> fn);
 
   void start();
   // true = the thread sits outside every backend call (or has ended), and
@@ -116,9 +112,6 @@ class DecodePump {
   std::function<void(const DmaFrame&)> prime_;
   std::vector<FeedNote> notes_;
   std::vector<DmaFrame> rel_;
-
-  std::mutex rec_mu_;
-  std::function<void(const DmaFrame&)> rec_submit_;
 
   mutable std::mutex src_mu_;
   SourceRate source_rate_;

@@ -47,11 +47,6 @@ void DecodePump::set_backend(VideoBackend* b) {
 
 void DecodePump::set_prime(std::function<void(const DmaFrame&)> fn) { prime_ = std::move(fn); }
 
-void DecodePump::set_recorder_submit(std::function<void(const DmaFrame&)> fn) {
-  std::lock_guard<std::mutex> lk(rec_mu_);
-  rec_submit_ = std::move(fn);
-}
-
 double DecodePump::source_hz() const {
   std::lock_guard<std::mutex> lk(src_mu_);
   return source_rate_.hz();
@@ -85,10 +80,6 @@ void DecodePump::on_frame_(const DmaFrame& f) {
   video_h_.store(f.height);
   have_frame_.store(true);
   frames_.fetch_add(1);  // last: a reader that sees the count sees the rest
-  {
-    std::lock_guard<std::mutex> lk(rec_mu_);
-    if (rec_submit_) rec_submit_(f);
-  }
   out_.push(HandedFrame{f, now});
   if (prime_) prime_(f);
 }

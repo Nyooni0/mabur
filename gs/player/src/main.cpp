@@ -763,8 +763,8 @@ int main(int argc, char** argv) {
                      "the lead for this mode\n",
                      cfg.display.vsync_lead_ms, panel_us / 1000.0);
       presenter->set_flip_sink(
-          [&lat, &regulator](uint32_t p, uint64_t t, bool ex) {
-            lat.on_flip(p, t, ex);
+          [&lat, &regulator](const maburplay::DmaFrame& f, uint64_t t, bool ex) {
+            lat.on_flip(f.pts_us, t, ex);
             regulator.on_flip(t, ex);
           });
     }
@@ -1104,17 +1104,12 @@ int main(int argc, char** argv) {
     ++rec_starts;
     // Raw pointer, not a reference to the unique_ptr. `burn` IS reset --
     // rec_stop() tears the recorder down on a button press -- so the
-    // safety comes from ordering instead: rec_stop() removes both hooks
+    // safety comes from ordering instead: rec_stop() removes the hook
     // BEFORE it stops and destroys the recorder. The composer runs on this
-    // (housekeeping) thread; the submit hook runs on the decode-output
-    // thread, and set_recorder_submit() is the fence against it: the pump
-    // calls the hook under the lock that call takes, so the hook goes in
-    // only after start() returned and, once removed, no submit() is in
-    // flight (burn_recorder.h THREADING).
+    // (housekeeping) thread.
     maburplay::BurnRecorder* b = burn.get();
     composer.set_burn_sink([b](const maburplay::Surface& s, const maburplay::DirtyRect* r,
                                size_t n) { b->set_osd(s, r, n); });
-    pump.set_recorder_submit([b](const maburplay::DmaFrame& f) { b->submit(f); });
   };
   // Warm the palette memo now, while nothing is on screen yet, so the
   // first record start does not pay for it on the housekeeping loop.
@@ -1275,13 +1270,9 @@ int main(int argc, char** argv) {
     }
 #ifdef MABUR_PLAYER_HW
     if (burn) {
-      // Both hooks hold a RAW pointer to the recorder (see
-      // start_burn_if_needed), so they go first: the submit hook before
-      // stop() (submit() is legal only between start() and stop(), and once
-      // set_recorder_submit({}) returns none is in flight on the
-      // decode-output thread), then the composer's, both while the object
-      // they point at is still alive.
-      pump.set_recorder_submit({});
+      // The hook holds a RAW pointer to the recorder (see
+      // start_burn_if_needed), so it goes first, while the object it
+      // points at is still alive.
       composer.set_burn_sink({});
       const uint64_t n = burn->frames_encoded();
       burn->stop();
@@ -1843,8 +1834,8 @@ int main(int argc, char** argv) {
           release.take_margins(&margins);
           margins.clear();
           presenter->set_flip_sink(
-              [&lat, &regulator](uint32_t pts, uint64_t t, bool ex) {
-                lat.on_flip(pts, t, ex);
+              [&lat, &regulator](const maburplay::DmaFrame& f, uint64_t t, bool ex) {
+                lat.on_flip(f.pts_us, t, ex);
                 regulator.on_flip(t, ex);
               });
           // Startup-only, and this is where that invariant is enforced for the
@@ -2399,7 +2390,6 @@ int main(int argc, char** argv) {
   // queue into `releases`, give every frame back to the decoder, then stop
   // them. stop_and_join() alone returns no frames.
   park_output("shutdown");
-  pump.set_recorder_submit({});
   release.stop_and_join();
   pump.stop_and_join();
   // Final tally -- same line the 1 Hz stats block above already printed all

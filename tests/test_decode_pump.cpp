@@ -180,10 +180,6 @@ TEST(a_decoded_frame_is_stamped_and_handed_over_then_primed) {
   Pump p;
   std::mutex om;
   std::vector<std::string> order;
-  p.pump.set_recorder_submit([&](const DmaFrame&) {
-    std::lock_guard<std::mutex> lk(om);
-    order.push_back(p.out.size() == 0 ? "submit" : "submit-after-handover");
-  });
   p.pump.set_prime([&](const DmaFrame&) {
     std::lock_guard<std::mutex> lk(om);
     if (p.out.size() == 1) order.push_back("handover");
@@ -195,7 +191,7 @@ TEST(a_decoded_frame_is_stamped_and_handed_over_then_primed) {
   p.pump.start();
   const uint64_t t0 = mono_us();
   fake.emit(frame(100, 1280, 720));
-  REQUIRE(wait_until([&] { std::lock_guard<std::mutex> lk(om); return order.size() >= 3; }));
+  REQUIRE(wait_until([&] { std::lock_guard<std::mutex> lk(om); return order.size() >= 2; }));
   p.pump.stop_and_join();
   std::vector<HandedFrame> h;
   CHECK(p.out.drain(&h) == 1);
@@ -203,7 +199,7 @@ TEST(a_decoded_frame_is_stamped_and_handed_over_then_primed) {
   CHECK(h[0].f.pts_us == 100);
   CHECK(h[0].t_decoded_us > 0);
   CHECK(h[0].t_decoded_us >= t0);
-  CHECK(order == (std::vector<std::string>{"submit", "handover", "prime"}));
+  CHECK(order == (std::vector<std::string>{"handover", "prime"}));
   CHECK(p.pump.frames() == 1);
   CHECK(p.pump.have_frame());
   CHECK(p.pump.last_pts() == 100u);
@@ -224,23 +220,6 @@ TEST(releases_queued_by_another_thread_reach_the_backend) {
   CHECK(wait_until([&] { return fake.released_snapshot().size() == 1; }));
   CHECK(fake.released_snapshot() == std::vector<uint32_t>{5});
   CHECK(p.rel.size() == 0);
-}
-
-TEST(a_cleared_recorder_hook_is_no_longer_called) {
-  PumpFake fake;
-  Pump p;
-  std::atomic<int> rec{0};
-  p.pump.set_recorder_submit([&](const DmaFrame&) { rec.fetch_add(1); });
-  fake.init({}, p.pump.sink());
-  p.pump.set_backend(&fake);
-  p.pump.start();
-  fake.emit(frame(1));
-  REQUIRE(wait_until([&] { return p.out.size() == 1; }));  // the hook runs before the hand-over
-  CHECK(rec.load() == 1);
-  p.pump.set_recorder_submit({});  // housekeeping, pump running
-  fake.emit(frame(2));
-  REQUIRE(wait_until([&] { return p.out.size() == 2; }));
-  CHECK(rec.load() == 1);
 }
 
 TEST(the_source_rate_is_measured_from_decoded_pts) {

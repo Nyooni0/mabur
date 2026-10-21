@@ -554,7 +554,7 @@ void DrmPresenter::Impl::on_flip(bool real_event) {
     // vsync stamp on it would corrupt the dsp segment. Excluded frames
     // just age out of LatTracker's bounded map, same as any other frame
     // that never flips.
-    if (real_event && flip_sink) flip_sink(on_screen.frame.pts_us, last_flip_us, ts_exact);
+    if (real_event && flip_sink) flip_sink(on_screen.frame, last_flip_us, ts_exact);
   }
   // The parked mailbox frame, now that the pipe has a free slot:
   //
