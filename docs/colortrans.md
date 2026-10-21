@@ -34,7 +34,10 @@ the top-left, and the burned overlay is composed at the record size, so a
 decoded size that changes mid-recording (a rung change) or a `size` set
 apart from the drone's (a 720p drone recorded at 1080p) keeps recording
 with the OSD in place. With colortrans the shader draw scales (target =
-record size, LINEAR sampler); without it, one RGA NV12 resize. So the ct
+record size, LINEAR sampler); without it, one RGA NV12 resize. The
+encoder also latches the first frame's strides, so a frame whose
+geometry (size or strides) differs from what the encoder latched goes
+through the same path — at equal size that is a restride copy. So the ct
 thread runs in every GPU build, colortrans or not. A picture of another
 aspect ratio than the record size (1728x816 into 1920x1080) is
 letterboxed like the screen shows it (`fit_rect.h`):
@@ -164,8 +167,9 @@ A recording must not cost the live picture a vsync. What makes that hold:
   recorded slot of the vblank grid: one buffer reference and a mailbox
   post under a `PiMutex`, never a copy and never a buffer release. A
   displaced mailbox entry waits on a two-deep list for the stage thread to
-  release it; with the list full the flip takes no reference and counts as
-  dropped. Record start and stop install and remove the hook from the
+  release it; with the list full, or four decoder buffers already held by
+  the recorder (counted, in every mode), the flip takes no reference and
+  counts as dropped. Record start and stop install and remove the hook from the
   housekeeping loop (`RecorderTap::set`/`clear`, cleared before `stop()`),
   so neither runs on the release thread.
 - **Pipelined ct thread.** The stage runs on its own thread (EGL is

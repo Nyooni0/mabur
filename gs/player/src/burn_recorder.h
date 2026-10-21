@@ -18,13 +18,14 @@ class ColorTrans;
 //
 // width/height are the recording's picture size. The stage thread scales
 // every frame of any other size to it, letterboxed if the aspect differs
-// (fit_rect.h), so the encoder -- which latches its geometry from the first
-// frame it is handed -- always latches width x height, and the mux's track
-// header follows. A decoded size that changes mid-recording (a rung change,
-// a 720p drone) is scaled like any other mismatch. The scale is part of the
-// stage thread, so it needs a MABUR_PLAYER_GPU build; without one the
-// recording is at the decoded size and a different width x height is
-// unsupported (logged at start()).
+// (fit_rect.h), and restrides a frame whose strides differ from what the
+// encoder latched, so the encoder -- which latches its geometry, strides
+// included, from the first frame it is handed -- always sees width x height
+// at one geometry, and the mux's track header follows. A decoded size that
+// changes mid-recording (a rung change, a 720p drone) is scaled like any
+// other mismatch. The scale is part of the stage thread, so it needs a
+// MABUR_PLAYER_GPU build; without one the recording is at the decoded size
+// and a different width x height is unsupported (logged at start()).
 //
 // osd_width/osd_height size the encoder's OSD region, and must equal the
 // size of the SURFACE set_osd() is called with: a region that disagrees
@@ -77,13 +78,16 @@ struct BurnCfg {
 // recycle it while either holder has a reference, so the presenter's
 // contract (it owns the handle, releases on flip, obeys the flush ordering)
 // is untouched. Cost: at most four decoder buffers, of the decoder's
-// 24-buffer external group -- one in the mailbox, up to two displaced and
-// awaiting release, one being staged or encoded (the stage releases its
-// source as soon as its own scaled or corrected copy exists). Beyond that
-// submit() takes no reference and the flip counts as dropped. A frame the
-// stage passes through FLAT (already at the record size with colortrans
-// off, or a failed GPU pass) stays a decoder reference through the stage's
-// handoff and encode(), which can add two more.
+// 24-buffer external group, in every mode -- typically one in the mailbox,
+// up to two displaced and awaiting release, one being staged or encoded
+// (the stage releases its source as soon as its own scaled or corrected
+// copy exists). A frame the stage passes through FLAT (already in the
+// encoder's geometry with colortrans off, or a failed GPU pass) stays a
+// decoder reference through the stage's handoff and encode(), so the
+// places alone do not bound it: the recorder counts every decoder
+// reference it holds (+1 in submit(), -1 at each release) and submit()
+// takes no reference at four, as it takes none when the displaced list is
+// full. Either refusal counts the flip as dropped.
 //
 // The GPU stage READS the decoder's frame, and panfrost fences every buffer
 // in a job as if it wrote it. DrmPresenter carries an explicit, already
@@ -99,8 +103,9 @@ struct BurnCfg {
 //                     release thread, which must not run mpp_buffer_put;
 //   drained           drop_pending() or stop()/~BurnRecorder() empties the
 //                     mailbox AND the displaced list.
-// A flip that finds the displaced list full is REFUSED: no reference is
-// taken at all, and it counts as dropped. Losing a reference leaks a pool
+// A flip that finds the displaced list full, or the recorder already
+// holding four decoder references, is REFUSED: no reference is taken at
+// all, and it counts as dropped. Losing a reference leaks a pool
 // buffer; ~24 leaks stall decode outright. frames_dropped() is the
 // observable that proves DISPLACEMENT specifically is handled: it climbs
 // under overload while the decoder keeps running at full rate. The flush
@@ -190,8 +195,9 @@ class BurnRecorder {
   // flip's slot on the vblank grid, which stamps the recording. Takes a
   // buffer reference and posts to the mailbox. Never releases a buffer: a
   // displaced entry goes to the displaced list (two deep), released by the
-  // thread that next takes the mailbox; a full list means no reference is
-  // taken and the flip counts as dropped. O(1), never touches pixels.
+  // thread that next takes the mailbox; a full list, or four decoder
+  // references already held, means no reference is taken and the flip
+  // counts as dropped. O(1), never touches pixels.
   void submit(const DmaFrame& f, uint64_t pts_us);
 
   // Housekeeping, whenever a fresh OSD screen has been rasterized. Quantizes
@@ -256,7 +262,8 @@ class BurnRecorder {
   //                  reached the post decision, refused ones included)
   //   frames_encoded encode() calls that produced a packet
   //   frames_dropped flips DISPLACED in a mailbox by a newer one, REFUSED
-  //                  by a full displaced list, or dropped because the
+  //                  (a full displaced list, or four decoder references
+  //                  already held), or dropped because the
   //                  recorder had given up -- i.e. the OVERLOAD signal (the
   //                  stage or the encoder fell behind), and the proof that
   //                  displacement releases its buffer reference. Thinning

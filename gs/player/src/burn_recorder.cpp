@@ -150,6 +150,17 @@ struct BurnRecorder::Impl {
   // counted in frames_dropped), which is what bounds the buffers this class
   // can hold.
   static constexpr int kDisplaced = 2;
+  // Decoder-buffer references this recorder holds right now, wherever they
+  // are (mailbox, displaced list, stage, ct_out, encode()). +1 at the
+  // inc_ref in submit(), -1 at every put of a decoder buffer (put_dec(), on
+  // whichever thread) -- never for the stage's own ct_dst buffers. submit()
+  // refuses at kMaxDecRefs, which is the bound in burn_recorder.h in every
+  // mode, whether the stage copies or passes frames through flat. Only
+  // submit() increments, from the one release thread, so its
+  // check-then-increment cannot overshoot. stop() warns if it is not back
+  // to 0: a missed put would leave it climbing until every flip is refused.
+  static constexpr int kMaxDecRefs = 4;
+  std::atomic<int> dec_refs_held{0};
   PiMutex box_mu;
   std::condition_variable_any box_cv;
   Mail box;                      // box_mu
@@ -220,8 +231,10 @@ struct BurnRecorder::Impl {
   // width x height), letterboxed if the aspect differs (fit_rect.h), so a
   // decoded size that changes mid-recording keeps recording and the overlay,
   // composed at the record size, stays in place. With colortrans the shader
-  // draw scales for free; without it, one RGA resize. A frame already at
-  // the record size passes through flat.
+  // draw scales for free; without it, one RGA resize. A frame already in
+  // the encoder's input geometry passes through flat; one at the record
+  // size but with other strides takes a restride copy through the same path
+  // (run_ct states the rule).
   //
   // Both stages are hardware waits (GPU/RGA ~13-22 ms, rkvenc ~13 ms at
   // 1080p) and serialising them on one thread capped the burned DVR at
@@ -247,6 +260,40 @@ struct BurnRecorder::Impl {
   // Recording picture size and its strides, fixed at start() from BurnCfg
   // width x height; 0 = no stage, record at the decoded size.
   int out_w = 0, out_h = 0, out_hs = 0, out_vs = 0;
+
+  // A frame's NV12 geometry as the encoder sees it. MppEncoder latches all
+  // four on its first frame and rejects every later frame that differs in
+  // any of them, stride included.
+  struct Geom {
+    int w = 0, h = 0, stride = 0, vstride = 0;
+    bool known() const { return w > 0; }
+    bool operator==(const Geom& o) const {
+      return w == o.w && h == o.h && stride == o.stride && vstride == o.vstride;
+    }
+  };
+  // enc_latched_geom: the geometry the encoder latched, published by the
+  // recorder thread after its first successful encode() (16 bits per field,
+  // 0 = not yet). stage_fwd_geom: the geometry of the first frame the stage
+  // forwarded (ct thread only) -- the stage is the encoder's only feeder,
+  // so that is what the encoder will latch; it stands in until the
+  // encoder's own value is published.
+  std::atomic<uint64_t> enc_latched_geom{0};
+  Geom stage_fwd_geom;
+  static uint64_t pack_geom(const Geom& g) {
+    if (g.w <= 0 || g.h <= 0 || g.stride <= 0 || g.vstride <= 0 || g.w > 0xffff ||
+        g.h > 0xffff || g.stride > 0xffff || g.vstride > 0xffff)
+      return 0;
+    return (uint64_t)g.w << 48 | (uint64_t)g.h << 32 | (uint64_t)g.stride << 16 |
+           (uint64_t)g.vstride;
+  }
+  static Geom unpack_geom(uint64_t v) {
+    Geom g;
+    g.w = (int)(v >> 48 & 0xffff);
+    g.h = (int)(v >> 32 & 0xffff);
+    g.stride = (int)(v >> 16 & 0xffff);
+    g.vstride = (int)(v & 0xffff);
+    return g;
+  }
   std::condition_variable ct_cv;  // ct_out handoff, with mu
   CtMail ct_out;                  // mu
   std::thread ct_th;
@@ -265,9 +312,15 @@ struct BurnRecorder::Impl {
     n_displaced = 0;
     return n;
   }
+  // Releases one decoder-buffer reference taken in submit(). Every put of
+  // a decoder buffer goes through here so dec_refs_held stays exact.
+  void put_dec(void* buf) {
+    mpp_buffer_put(static_cast<MppBuffer>(buf));
+    dec_refs_held.fetch_sub(1);
+  }
   // box_mu NOT held: releases the references `n` mailbox entries hold.
-  static void put_mails(const Mail* m, int n) {
-    for (int i = 0; i < n; ++i) mpp_buffer_put(static_cast<MppBuffer>(m[i].buf));
+  void put_mails(const Mail* m, int n) {
+    for (int i = 0; i < n; ++i) put_dec(m[i].buf);
   }
 
   // Releases whatever a CtMail holds: a destination goes back to the free
@@ -278,7 +331,7 @@ struct BurnRecorder::Impl {
       std::lock_guard<std::mutex> lk(mu);
       ct_dst_busy[o.dst_idx] = false;
     } else {
-      mpp_buffer_put(static_cast<MppBuffer>(o.buf));
+      put_dec(o.buf);
     }
   }
 
@@ -315,9 +368,10 @@ struct BurnRecorder::Impl {
     return true;
   }
 
-  // ct thread. The destinations, sized once on the first frame: MppEncoder
-  // latches its picture size on the first encode() anyway, so a later,
-  // larger frame cannot be recorded either way. false = pass through flat.
+  // ct thread. The destinations, sized once on the first staged frame at
+  // the output geometry, which is the encoder's latched input geometry
+  // from then on (see run_ct), so later frames need the same size. false =
+  // pass through flat.
   bool dst_prepare(size_t need) {
     if (dst_failed) return false;
     if (ct_dst_size) return need <= ct_dst_size;
@@ -337,9 +391,10 @@ struct BurnRecorder::Impl {
     return true;
   }
 
-  // ct thread. NV12 -> NV12 resize on RGA, synchronous. box: scale into
-  // that sub-rectangle with black bars around it (a letterbox); the bars
-  // are filled once per destination buffer and geometry, since nothing else
+  // ct thread. NV12 -> NV12 resize on RGA, synchronous; at equal size a
+  // restride copy into the destination's strides. box: scale into that
+  // sub-rectangle with black bars around it (a letterbox); the bars are
+  // filled once per destination buffer and geometry, since nothing else
   // writes them.
   bool rga_scale(int src_fd, const Mail& m, int dst_fd, int ow, int oh, int ohs, int ovs,
                  int k, const maburplay::Rect* box) {
@@ -363,6 +418,8 @@ struct BurnRecorder::Impl {
       if (improcess(s, d, pat, im_rect{0, 0, m.w, m.h}, im_rect{box->x, box->y, box->w, box->h},
                     im_rect{}, -1, nullptr, nullptr, IM_SYNC) == IM_STATUS_SUCCESS)
         return true;
+    } else if (m.w == ow && m.h == oh) {
+      if (imcopy(s, d) == IM_STATUS_SUCCESS) return true;
     } else if (imresize(s, d, 0, 0, INTER_LINEAR) == IM_STATUS_SUCCESS) {
       return true;
     }
@@ -409,7 +466,7 @@ struct BurnRecorder::Impl {
       }
       if (dead.load()) {
         // REF-DEAD, ct side: the encoder gave up; nothing downstream wants this.
-        mpp_buffer_put(static_cast<MppBuffer>(m.buf));
+        put_dec(m.buf);
         frames_dropped.fetch_add(1);
         continue;
       }
@@ -422,15 +479,31 @@ struct BurnRecorder::Impl {
       o.stride = m.stride;
       o.vstride = m.vstride;
 
-      // Output geometry: the record size for a frame of any other size,
-      // else the frame's own (colortrans only, same size and strides).
-      const bool scale = out_w > 0 && (m.w != out_w || m.h != out_h);
-      const int ow = scale ? out_w : m.w, oh = scale ? out_h : m.h;
-      // A picture of another aspect than the record size is letterboxed,
-      // as the display shows it, never stretched.
-      const maburplay::Rect fit = maburplay::fit_rect(m.w, m.h, ow, oh);
+      // Output geometry = the encoder's INPUT geometry, and the rule is: a
+      // frame goes through the stage whenever its geometry (w, h, stride,
+      // vstride) differs from it, not only when its size differs from the
+      // record size -- the encoder rejects a stride mismatch as surely as a
+      // size mismatch. The encoder's input geometry is what it latched
+      // (enc_latched_geom), else what the stage forwarded first
+      // (stage_fwd_geom). Before either exists, a frame at the record size
+      // passes with its own strides and any other is scaled to the record
+      // size at the stage's own aligned strides (out_hs x out_vs). So an
+      // untouched first frame (a decoder vstride of 1080) makes every later
+      // scaled frame land at 1080 rows too, and a scaled first frame makes
+      // a later record-size frame take a restride copy (same size, RGA or
+      // GPU) to the stage's strides.
+      const Geom in{m.w, m.h, m.stride, m.vstride};
+      Geom tgt = unpack_geom(enc_latched_geom.load());
+      if (!tgt.known()) tgt = stage_fwd_geom;
+      if (!tgt.known())
+        tgt = (in.w == out_w && in.h == out_h) ? in : Geom{out_w, out_h, out_hs, out_vs};
+      const bool scale = !(in == tgt);  // resize or restride through the stage
+      const int ow = tgt.w, oh = tgt.h, ohs = tgt.stride, ovs = tgt.vstride;
+      // A picture of another aspect than the output is letterboxed, as the
+      // display shows it, never stretched. A restride at equal size is the
+      // full frame (no box).
+      const maburplay::Rect fit = maburplay::fit_rect(in.w, in.h, ow, oh);
       const maburplay::Rect* box = (scale && (fit.w != ow || fit.h != oh)) ? &fit : nullptr;
-      const int ohs = scale ? out_hs : m.stride, ovs = scale ? out_vs : m.vstride;
       const bool want_ct = cfg.colortrans != nullptr;
 
       bool ct_done = false, done = false;
@@ -459,7 +532,7 @@ struct BurnRecorder::Impl {
             account(ct_n, ct_sum_us, ct_max_us, t_ct);
             // REF-ENCODE, early: the GPU and RGA are done with the source
             // (glFinish + synchronous RGA); the encoder reads ct_dst.
-            mpp_buffer_put(static_cast<MppBuffer>(m.buf));
+            put_dec(m.buf);
             o.buf = ct_dst[k];
             o.dst_idx = k;
             o.w = ow;
@@ -474,6 +547,9 @@ struct BurnRecorder::Impl {
       }
       if (want_ct && !ct_done) colortrans_fallbacks.fetch_add(1);
 
+      // Whatever is forwarded is what the encoder will see; the first one
+      // fixes the geometry later frames are conformed to (see above).
+      if (!stage_fwd_geom.known()) stage_fwd_geom = Geom{o.w, o.h, o.stride, o.vstride};
       CtMail prev_out;
       {
         std::lock_guard<std::mutex> lk(mu);
@@ -633,6 +709,10 @@ struct BurnRecorder::Impl {
       release_ct(o);
 
       if (ok) {
+        // The first success is the encoder's latch: publish its input
+        // geometry for the stage to conform every later frame to.
+        if (!enc_latched_geom.load())
+          enc_latched_geom.store(pack_geom(Geom{o.w, o.h, o.stride, o.vstride}));
         frames_encoded.fetch_add(1);
         consecutive_fail = 0;
         continue;
@@ -709,7 +789,7 @@ struct BurnRecorder::Impl {
       // let the hardware leak test, which reads frames_dropped(), be
       // satisfied entirely by flushes with the displacement path never
       // exercised at all.
-      mpp_buffer_put(static_cast<MppBuffer>(buf));
+      put_dec(buf);
       frames_flushed.fetch_add(1);
     }
   }
@@ -823,6 +903,9 @@ bool BurnRecorder::start(const BurnCfg& cfg, const std::string& path,
   im.box = Impl::Mail{};
   for (int i = 0; i < Impl::kDisplaced; ++i) im.displaced[i] = Impl::Mail{};
   im.n_displaced = 0;
+  im.dec_refs_held.store(0);
+  im.enc_latched_geom.store(0);
+  im.stage_fwd_geom = Impl::Geom{};
 #ifdef MABUR_PLAYER_GPU
   // The record size: every frame of another size is scaled to it (see the
   // stage comment in Impl), whatever the OSD region. Strides at the
@@ -876,10 +959,12 @@ void BurnRecorder::submit(const DmaFrame& f, uint64_t pts_us) {
   bool refused = false;
   {
     std::lock_guard<PiMutex> lk(im.box_mu);
-    if (im.box.buf && im.n_displaced == Impl::kDisplaced) {
-      // REF-REFUSE: the taker has not emptied the mailbox for three
-      // recorded flips. Holding another buffer would break the bound, so
-      // no reference is taken and nothing is posted.
+    if (im.dec_refs_held.load() >= Impl::kMaxDecRefs ||
+        (im.box.buf && im.n_displaced == Impl::kDisplaced)) {
+      // REF-REFUSE: the recorder already holds its four decoder buffers, or
+      // the taker has not emptied the mailbox for three recorded flips.
+      // Holding another buffer would break the bound, so no reference is
+      // taken and nothing is posted.
       refused = true;
     } else {
       // REF-SUBMIT: from here the recorder owns a reference; the decoder
@@ -887,6 +972,7 @@ void BurnRecorder::submit(const DmaFrame& f, uint64_t pts_us) {
       // Taken only once refusal is ruled out, and before the frame is
       // visible to a taker.
       mpp_buffer_inc_ref(buf);
+      im.dec_refs_held.fetch_add(1);
       // REF-DISPLACE, deferred: latest wins, and the displaced entry keeps
       // its reference until the next take or drain releases it. Dropping
       // it without that leaks one decoder pool buffer per displacement,
@@ -1009,6 +1095,8 @@ void BurnRecorder::stop() {
 #ifdef MABUR_PLAYER_GPU
   im.ct_free_dst();
 #endif
+  if (const int held = im.dec_refs_held.load())
+    std::fprintf(stderr, "BurnRecorder: %d decoder references unaccounted at stop\n", held);
 
   if (im.mux_open) {
     im.mux.close();
