@@ -233,8 +233,8 @@ struct BurnRecorder::Impl {
   // composed at the record size, stays in place. With colortrans the shader
   // draw scales for free; without it, one RGA resize. A frame already in
   // the encoder's input geometry passes through flat; one at the record
-  // size but with other strides takes a restride copy through the same path
-  // (run_ct states the rule).
+  // size but with other strides takes a restride copy through the same path,
+  // and one the stage cannot conform is dropped (run_ct states the rule).
   //
   // Both stages are hardware waits (GPU/RGA ~13-22 ms, rkvenc ~13 ms at
   // 1080p) and serialising them on one thread capped the burned DVR at
@@ -371,18 +371,21 @@ struct BurnRecorder::Impl {
   // ct thread. The destinations, sized once on the first staged frame at
   // the output geometry, which is the encoder's latched input geometry
   // from then on (see run_ct), so later frames need the same size. false =
-  // pass through flat.
+  // no destination: a frame already in the encoder's geometry passes
+  // through flat, any other is dropped.
   bool dst_prepare(size_t need) {
     if (dst_failed) return false;
     if (ct_dst_size) return need <= ct_dst_size;
     if (!ct_grp && mpp_buffer_group_get_internal(&ct_grp, MPP_BUFFER_TYPE_DRM) != MPP_OK) {
-      std::fprintf(stderr, "BurnRecorder: stage buffer group failed; recording FLAT\n");
+      std::fprintf(stderr, "BurnRecorder: stage buffer group failed; frames that need a scale "
+                           "or restride are dropped\n");
       dst_failed = true;
       return false;
     }
     for (int i = 0; i < kCtDst; ++i) {
       if (mpp_buffer_get(ct_grp, &ct_dst[i], need) != MPP_OK || !ct_dst[i]) {
-        std::fprintf(stderr, "BurnRecorder: stage destination alloc failed; recording FLAT\n");
+        std::fprintf(stderr, "BurnRecorder: stage destination alloc failed; frames that need a "
+                             "scale or restride are dropped\n");
         dst_failed = true;
         return false;
       }
@@ -516,7 +519,7 @@ struct BurnRecorder::Impl {
           if (k >= 0) ct_dst_busy[k] = true;
         }
         // k < 0 cannot happen with kCtDst = 3 (see the pipeline comment);
-        // if it ever does, the frame records flat and is counted below.
+        // if it ever does, the frame is handled as a failed stage below.
         if (k >= 0) {
           const auto t_ct = std::chrono::steady_clock::now();
           const int src_fd = mpp_buffer_get_fd(static_cast<MppBuffer>(m.buf));
@@ -544,6 +547,22 @@ struct BurnRecorder::Impl {
             ct_dst_busy[k] = false;
           }
         }
+      }
+      if (scale && !done) {
+        // The frame needed the stage (a resize or a restride: its geometry
+        // differs from tgt) and did not get it. It is dropped, never
+        // forwarded flat: forwarded, a wrong-size frame either fixes the
+        // encoder's latch at the decoded size, so the OSD region (laid at
+        // the record size) is refused for the whole file, or is rejected
+        // by an encoder that latched already. A same-size restride failure
+        // goes the same way: a frame at the target size enters the stage
+        // only when the latched (or first forwarded) geometry has other
+        // strides, so its own are ones the encoder refuses. A permanent
+        // stage failure shows as burn_drop climbing while frames_encoded
+        // stands still.
+        put_dec(m.buf);
+        frames_dropped.fetch_add(1);
+        continue;
       }
       if (want_ct && !ct_done) colortrans_fallbacks.fetch_add(1);
 

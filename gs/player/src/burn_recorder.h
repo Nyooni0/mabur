@@ -263,10 +263,12 @@ class BurnRecorder {
   //   frames_encoded encode() calls that produced a packet
   //   frames_dropped flips DISPLACED in a mailbox by a newer one, REFUSED
   //                  (a full displaced list, or four decoder references
-  //                  already held), or dropped because the
-  //                  recorder had given up -- i.e. the OVERLOAD signal (the
-  //                  stage or the encoder fell behind), and the proof that
-  //                  displacement releases its buffer reference. Thinning
+  //                  already held), dropped because the stage could not
+  //                  scale or restride them to the encoder's geometry, or
+  //                  dropped because the recorder had given up -- i.e. the
+  //                  OVERLOAD signal (the stage or the encoder fell behind,
+  //                  or the stage failed), and the proof that displacement
+  //                  releases its buffer reference. Thinning
   //                  happens before submit() and is deliberately NOT
   //                  counted here.
   //   frames_flushed flips released by drop_pending()/stop(), i.e.

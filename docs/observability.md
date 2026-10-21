@@ -674,7 +674,8 @@ against it, not against the housekeeping loop that prints the line.
   docstring has the spans).
 - `burn_in= burn_enc= burn_drop=` — the burned recorder's flips tapped
   after thinning, frames encoded, and frames dropped because the stage or
-  the encoder fell behind (`burn_recorder.h`'s `frames_in`/
+  the encoder fell behind or the stage could not scale a frame to the
+  record size (`burn_recorder.h`'s `frames_in`/
   `frames_encoded`/`frames_dropped`); cumulative since the current
   recording started, zero while no burned recording is running. A rising
   `burn_drop` is the recording's own stutter signal, independent of the

@@ -43,6 +43,11 @@ aspect ratio than the record size (1728x816 into 1920x1080) is
 letterboxed like the screen shows it (`fit_rect.h`):
 the shader clears to black and draws into the centred sub-rectangle; the
 RGA path fills the bars once per destination buffer and scales into it.
+A frame the stage cannot conform (both the shader and RGA failed, or the
+destination buffers could not be allocated) is dropped and counted in
+`burn_drop`, never recorded at another geometry: forwarded, it would fix
+the encoder's latch at the wrong size and the record-size OSD would be
+refused for the whole file.
 
 ## Kernel facts — RK3566 (GS kernel 6.1.84, `rockchip_drm_vop2.c`)
 
