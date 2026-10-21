@@ -123,6 +123,11 @@ the topology is:
   through the image kernel's `CTM` plane property (`docs/colortrans.md`,
   "Live picture (H618)"). The OSD plane is untouched by it.
 
+With `debug_log.enable` set, maburgs's session directory lands on the
+root overlay unless the image mounts `/media/dvr` (the bench image does
+not); a full overlay stops every session file silently
+(`docs/findings/2026-10-21-opi-release-thread-ab.md`, "Trap").
+
 `PAGE_FLIP_ASYNC` is refused (EINVAL), so flips are vsync-paced; the
 regulator's vsync servo locks and runs in paced mode. Page-flip
 timestamps are kernel CLOCK_MONOTONIC (`DRM_CAP_TIMESTAMP_MONOTONIC`, as
@@ -134,7 +139,11 @@ Decode keeps up with 1080p60: Cedrus decodes a whole AU in about 7 ms
 decode-output thread waiting inside `poll()` for it; the GS OSD layer
 costs no measurable frame rate. Lead 4 (`display.vsync_lead_ms`) holds
 on this board with no missed latches, there being no burned recorder to
-disturb it. Bench records: `docs/findings/2026-10-12-opi-zero2w-bringup.md`,
+disturb it; lead 3 misses a latch about once every 2.5 min with the
+release on time (a kernel-side late latch, as on the Radxa). The board
+also drives a 2560x1440@99.95 sink with the drone at 100 fps: Cedrus
+decodes 1728x972 in 3.6 ms at the median (5.6 ms p99) and the lock holds.
+Bench records: `docs/findings/2026-10-12-opi-zero2w-bringup.md`,
 `docs/findings/2026-10-21-opi-release-thread-ab.md`.
 
 ## Build and deploy
