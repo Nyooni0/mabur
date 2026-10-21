@@ -957,16 +957,47 @@ def load_reglog_release(path):
     return rows
 
 
+def _burn_recordings(rows):
+    """load_reglog_release rows, split into per-recording segments: the
+    BurnRecorder is a fresh object per recording (start_burn_if_needed(),
+    main.cpp), so burn_in/burn_enc/burn_drop restart at 0 every time one
+    starts. A segment ends -- and its last row is that recording's own
+    final tally -- wherever burn_in drops (a new recording started right
+    after the previous one, no gap) or a run of burn_in == 0 rows
+    (recording stopped) is followed by burn_in > 0 again. Returns each
+    recording's last row, in order; a session with one continuous
+    recording returns a single-element list, same as before this split
+    existed."""
+    recs = []
+    cur = []
+    for r in rows:
+        if r["burn_in"] <= 0:
+            if cur:
+                recs.append(cur[-1])
+                cur = []
+            continue
+        if cur and r["burn_in"] < cur[-1]["burn_in"]:
+            recs.append(cur[-1])
+            cur = []
+        cur.append(r)
+    if cur:
+        recs.append(cur[-1])
+    return recs
+
+
 def print_release_report(rows):
     """RELEASE section from load_reglog_release rows: the release thread's
     lateness behind each held frame's scheduled release (rlate) and the
     decode-to-offer hand-over (hand), per-second p99s summarised over the
     recording, plus the worst single frame. Silent without reglog 3 rows.
     When any row's burn_in > 0 (a burned recording ran), one more line
-    gives the final burn_in/burn_enc/burn_drop tally and burn_drop per
-    recording minute, the minute count taken from the burn_in > 0 rows
-    (reglog is 1 Hz, so their count is the recording's own span in
-    seconds) -- the stutter signal for that recording."""
+    gives the session's burn_in/burn_enc/burn_drop totals -- summed across
+    every recording in the session (_burn_recordings), since each one's
+    own counters restart at 0 -- the recording count, and burn_drop per
+    recording minute, the minute count taken from all the burn_in > 0 rows
+    (reglog is 1 Hz, so their count is the session's total recording span
+    in seconds) -- the stutter signal across the session's burned
+    recordings."""
     if not rows:
         return
     n = len(rows)
@@ -980,11 +1011,14 @@ def print_release_report(rows):
               f"{max(p99s)} us, worst frame={worst} us")
     active = [r for r in rows if r["burn_in"] > 0]
     if active:
-        last = active[-1]
+        recs = _burn_recordings(rows)
+        total_in = sum(r["burn_in"] for r in recs)
+        total_enc = sum(r["burn_enc"] for r in recs)
+        total_drop = sum(r["burn_drop"] for r in recs)
         minutes = len(active) / 60.0
-        per_min = last["burn_drop"] / minutes if minutes > 0 else 0.0
-        print(f"  burn drop={last['burn_drop']} (in={last['burn_in']} "
-              f"enc={last['burn_enc']}, {per_min:.1f}/min over {len(active)}s)")
+        per_min = total_drop / minutes if minutes > 0 else 0.0
+        print(f"  burn drop={total_drop} (in={total_in} enc={total_enc}, "
+              f"recordings={len(recs)}, {per_min:.1f}/min over {len(active)}s)")
 
 
 def print_lock_report(rows):
