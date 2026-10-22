@@ -96,6 +96,12 @@ size (`dvr.burned.size`) has another aspect, never stretched
 (`gs/player/src/fit_rect.h`). The burned DVR's default size is the
 decoded picture's own, which needs no letterbox.
 
+## The GS burned recorder at 100 fps
+
+At a 100 Hz panel the GS's burned DVR cannot encode every vblank and
+costs live view ~4 ms while it records; run it at `dvr.burned.every = 2`.
+Details: `docs/colortrans.md` ("Known limitations").
+
 ## The SD recorder above 90 fps
 
 `[record]` keeps its own rules (`docs/vtx-recorder.md`): `record.fps` ≤

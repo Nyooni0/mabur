@@ -228,6 +228,26 @@ measured without a hand on the GS.
 Bench record of the three fixes and their numbers:
 `docs/findings/2026-09-17-colortrans-recording-latency.md`.
 
+## Known limitations
+
+- **The burned recorder cannot record every vblank at 100 Hz.** The period
+  is 10 ms and both stages are slower at 1728x972: the colour stage takes
+  ~15 ms a frame (GPU draw ~9.5 + RGA ~5.3) and `encode()` ~11.4 ms
+  (rkvenc stays at 297 MHz: `venc_ondemand` never raises it). With
+  `dvr.burned.every = 1` on a 100 Hz panel the latest-wins mailboxes drop
+  20-35 % of the flips for the whole recording (`burn_drop=` climbs
+  ~20-30/s), so the file stutters. Use `every = 2` (50 fps) at 100 Hz.
+  With colortrans off and the rkvenc governor set to `performance` by hand
+  (400 MHz, ~9.2 ms) every vblank fits; the player sets no encoder clock.
+- **The colour stage costs live view at 100 fps.** Its GPU and RGA memory
+  traffic slows the hardware decoder (`dec` p50 +1.5-2 ms, p99 roughly
+  doubled), the regulator's allowance follows the wider tail, and e2e p50
+  rises ~4 ms while recording (~3.5 ms at `every = 2`). With colortrans off
+  the recording costs live view nothing measurable. At 60 fps the stage
+  fits and the cost is ~0.5 ms of `dec`.
+
+Measurements: `docs/findings/2026-10-22-burned-dvr-100fps-throughput.md`.
+
 ## Not done / follow-ups
 
 - A record start or stop blocks the housekeeping loop (OSD, stats; not the
