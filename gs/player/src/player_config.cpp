@@ -1,5 +1,6 @@
 #include "player_config.h"
 
+#include <cstdio>
 #include <fstream>
 #include <stdexcept>
 
@@ -130,11 +131,27 @@ Config load_config(const std::string& path, std::vector<std::string>* defaulted)
       fail("dvr.target", "must be \"gs\", \"vtx\" or \"both\"");
     if (r.contains("burned")) {
       const Value& b = r["burned"];
-      check_keys(b, "dvr.burned", {"bitrate_kbps", "fps_cap"});
+      check_keys(b, "dvr.burned", {"bitrate_kbps", "every", "size"});
       c.dvr.burned.bitrate_kbps =
           static_cast<int>(get_int(b, "bitrate_kbps", 12000, 500, 100000, "dvr.burned"));
-      c.dvr.burned.fps_cap =
-          static_cast<int>(get_int(b, "fps_cap", 30, 1, 120, "dvr.burned"));
+      c.dvr.burned.every =
+          static_cast<int>(get_int(b, "every", 1, 1, 10, "dvr.burned"));
+      const std::string size = get_str(b, "size", "", "dvr.burned");
+      if (size.empty()) {
+        c.dvr.burned.size_w = 0;
+        c.dvr.burned.size_h = 0;
+      } else {
+        int w = 0, h = 0, n = 0;
+        if (std::sscanf(size.c_str(), "%dx%d%n", &w, &h, &n) != 2 ||
+            static_cast<size_t>(n) != size.size() ||
+            w % 2 != 0 || h % 2 != 0 ||
+            w < 320 || w > 4096 || h < 240 || h > 2304) {
+          fail("dvr.burned.size",
+               "WxH, both even, 320-4096 x 240-2304, or \"\" for the decoded size");
+        }
+        c.dvr.burned.size_w = w;
+        c.dvr.burned.size_h = h;
+      }
     } else {
       // Whole sub-table absent: one line, same style as a missing top-level
       // section, rather than two separate per-key lines the operator would
@@ -202,15 +219,13 @@ Config load_config(const std::string& path, std::vector<std::string>* defaulted)
   if (j.contains("display")) {
     const Value& d = j["display"];
     check_keys(d, "display",
-               {"regulate_ms", "vsync_lock", "vsync_lead_ms", "rec_vsync_lead_ms",
-                "chain_budget", "sched_cap_ms", "phase_lock", "phase_margin_ms"});
+               {"regulate_ms", "vsync_lock", "vsync_lead_ms", "chain_budget", "sched_cap_ms",
+                "phase_lock", "phase_margin_ms", "rt_priority"});
     c.display.regulate_ms =
         static_cast<int>(get_int(d, "regulate_ms", 12, 0, 100, "display"));
     c.display.vsync_lock = get_bool(d, "vsync_lock", c.display.vsync_lock, "display");
-    c.display.vsync_lead_ms =
-        static_cast<int>(get_int(d, "vsync_lead_ms", 6, 1, 10, "display"));
-    c.display.rec_vsync_lead_ms =
-        static_cast<int>(get_int(d, "rec_vsync_lead_ms", 8, 1, 10, "display"));
+    c.display.vsync_lead_ms = static_cast<int>(
+        get_int(d, "vsync_lead_ms", c.display.vsync_lead_ms, 1, 10, "display"));
     c.display.chain_budget =
         static_cast<int>(get_int(d, "chain_budget", 0, 0, 60, "display"));
     c.display.sched_cap_ms =
@@ -218,6 +233,8 @@ Config load_config(const std::string& path, std::vector<std::string>* defaulted)
     c.display.phase_lock = get_bool(d, "phase_lock", c.display.phase_lock, "display");
     c.display.phase_margin_ms =
         static_cast<int>(get_int(d, "phase_margin_ms", 4, 1, 10, "display"));
+    c.display.rt_priority =
+        static_cast<int>(get_int(d, "rt_priority", c.display.rt_priority, 0, 50, "display"));
   }
 
   if (c.display.phase_lock &&

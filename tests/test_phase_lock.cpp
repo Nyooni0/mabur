@@ -424,7 +424,8 @@ LoopResult run_closed_loop(bool with_lock, double seconds) {
       DmaFrame f;
       f.pts_us = static_cast<uint32_t>(static_cast<uint64_t>(cap[idx] - cap[0]));
       f.opaque = reinterpret_cast<void*>(static_cast<uintptr_t>((idx << 1) | 1u));
-      if (reg.offer(f, static_cast<uint64_t>(next_dec), &disp))
+      if (reg.offer(f, static_cast<uint64_t>(next_dec),
+                   static_cast<uint64_t>(next_dec), &disp))
         pending.push_back({next_dec, static_cast<int64_t>(idx)});
       double m = 0.0;
       if (with_lock && reg.take_margin(&m))
