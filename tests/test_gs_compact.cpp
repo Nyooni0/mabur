@@ -1068,6 +1068,77 @@ TEST(low_power_tints_the_fps_cell) {
   CHECK(bar.debug_field_text(s, true, ps, GsBarField::kFps) == ic("fps:15"));
 }
 
+// Drone fps and panel Hz too far apart for the phase lock (a wrong
+// venc.fps, or a display that fell back to another rate): the fps cell
+// reads source/panel in caution. Both sides are player-measured, so the
+// warning holds while the sideport is stale.
+TEST(rate_mismatch_shows_source_over_panel_in_caution) {
+  GsFont f;
+  std::string err;
+  REQUIRE(f.load(GSFONT_SCALED, &err));
+  GsCompactBar bar(f);
+  REQUIRE(bar.layout(1920, 1080, &err));
+  GsSnapshot s = nominal();
+  GsPlayerState ps = player_nominal();
+  ps.rate_mismatch = true;
+  ps.src_hz = 99.96;
+  ps.panel_hz = 60.0;
+  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kFps) == ic("fps:100/60"));
+  CHECK(bar.debug_field_rgb(s, false, ps, GsBarField::kFps) == tok::kStatusCaution);
+  CHECK(bar.debug_field_rgb(s, true, ps, GsBarField::kFps) == tok::kStatusCaution);
+}
+
+TEST(rate_mismatch_keeps_a_decimal_when_rates_round_equal) {
+  GsFont f;
+  std::string err;
+  REQUIRE(f.load(GSFONT_SCALED, &err));
+  GsCompactBar bar(f);
+  REQUIRE(bar.layout(1920, 1080, &err));
+  GsSnapshot s = nominal();
+  GsPlayerState ps = player_nominal();
+  ps.rate_mismatch = true;
+  ps.src_hz = 59.66;
+  ps.panel_hz = 60.0;
+  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kFps) == ic("fps:59.7/60"));
+  // No room for the decimal at three digits (the cell holds "999/999"):
+  // integers, and the caution tint carries the warning.
+  ps.src_hz = 119.66;
+  ps.panel_hz = 120.0;
+  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kFps) == ic("fps:120/120"));
+  CHECK(bar.debug_field_rgb(s, false, ps, GsBarField::kFps) == tok::kStatusCaution);
+}
+
+// Rates close enough to call a match, but the phase lock gave up (out of
+// range): the steer cannot reach the panel, e.g. a mode whose ceiling sits
+// just under it. Same text, caution tint, so the failure is not silent.
+TEST(phase_lock_out_of_range_tints_the_fps_cell) {
+  GsFont f;
+  std::string err;
+  REQUIRE(f.load(GSFONT_SCALED, &err));
+  GsCompactBar bar(f);
+  REQUIRE(bar.layout(1920, 1080, &err));
+  GsSnapshot s = nominal();
+  GsPlayerState ps = player_nominal();
+  ps.phase_oor = true;
+  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kFps) == ic("fps:60"));
+  CHECK(bar.debug_field_rgb(s, false, ps, GsBarField::kFps) == tok::kStatusCaution);
+  CHECK(bar.debug_field_rgb(s, true, ps, GsBarField::kFps) == tok::kStatusCaution);
+}
+
+TEST(matched_fps_cell_is_unchanged) {
+  GsFont f;
+  std::string err;
+  REQUIRE(f.load(GSFONT_SCALED, &err));
+  GsCompactBar bar(f);
+  REQUIRE(bar.layout(1920, 1080, &err));
+  GsSnapshot s = nominal();
+  GsPlayerState ps = player_nominal();
+  ps.src_hz = 59.99;
+  ps.panel_hz = 60.0;
+  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kFps) == ic("fps:60"));
+  CHECK(bar.debug_field_rgb(s, false, ps, GsBarField::kFps) == tok::kTextPrimary);
+}
+
 // Drone SoC temperature (sideport drone.sys.soc_temp_c): a link-sourced
 // cell on the radio row. Caution tint from 70 C -- the fan-off spike
 // climbed to 84 C in 15 min (docs/findings/2026-09-19-low-power-spike.md)

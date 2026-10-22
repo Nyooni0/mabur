@@ -88,16 +88,26 @@ size. The SigmaStar encoder cannot scale, so the sizes decide the port:
   `[record] no frame 2000 ms after start` if none arrive. An idle port 1
   reads `Pixel MAX, OutputW 0` in `/proc/mi_modules/mi_vpe/mi_vpe0` until
   ch1 starts; that is not a failure.
-- **Above 1920x1080** the pinned sensor mode 2 (1080p, binned) cannot feed
-  it: the pipeline switches to mode 0, 3840x2160@30 (full FOV, not binned,
-  `STAR6E_SENSOR_MODE_4K`), and the loader requires `venc.fps <= 30`. The
-  link then also runs at 30 fps from a downscaled 4K capture.
+- **Above 1920x1080** none of the link's sensor modes (1920x1080 binned up
+  to 90 fps, 1728x972 / 1728x816 above; `docs/camera-modes.md`) can feed
+  it: the pipeline switches to the 3840x2160@33 mode (full view, not
+  binned), and the loader requires `venc.fps <= 30`. The link then also
+  runs at 30 fps from a downscaled 4K capture.
 
 4K is not usable next to the link: the SigmaStar H.265 engine runs one
 encode at a time, and a 4K encode (~30 ms) fills the 31 ms frame period, so
 the link queues behind it and the recorder drops frames. A 720p link with a
 1080p port-1 recording costs the link nothing. Measurements:
 `docs/findings/2026-09-26-vtx-recorder-bench.md`.
+
+Above 90 fps the link runs a binned crop mode (1728x972 to 100 fps,
+1728x816 above; `docs/camera-modes.md`) and the recorder's rules stay as
+they are, which carries three risks: a `record.size` larger than the mode
+(the bundle's 1920x1080 against 1728x972) is an upscale on port 1; a
+`record.fps` that does not divide `venc.fps` (60 from 100) records uneven
+frame spacing, since the bind's frame-rate limiter passes 60 of every 100;
+and the live 1728x972@100 encode alone is past the engine's rated rate, so
+recording adds encode time to the link.
 
 Switching `venc.size` needs no other key change: the rolling-refresh key
 is `venc.intra_refresh_frames` (sweep length), whose rows per P the

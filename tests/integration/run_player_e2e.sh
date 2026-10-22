@@ -67,7 +67,12 @@ OSD_SHA_EXPECTED=e202e5d127467752984bda2c135d166661f8c0eb2c8481a77d54b39ed8f76a8
 # lit total identical at 90,091 (a pure horizontal translation of items),
 # and both rows now start at x 308 (row 0 308..1413, row 1 308..1523; were
 # 407..1490 and 374..1457).
-BAR_SHA_EXPECTED=46d4286e152e61ca499602cf59122e83c4820b5945008a5415d6160c15be7937
+# Re-blessed (was 46d4286e...): the fps cell reserves "999/999" for the
+# drone-fps/panel-Hz mismatch reading (source/panel), widening the column
+# it shares with airtime. Same three ink bands at the same rows (type size
+# unchanged), lit total identical at 90,091, rows now 275..1446 and
+# 275..1556 (were 308..1413 and 308..1523).
+BAR_SHA_EXPECTED=404627bd7b10b6618353b8aec0475610437c984263ed8defa2e69f3a53135d94
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 

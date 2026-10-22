@@ -52,6 +52,15 @@ struct RecState {
 
 struct GsPlayerState {
   double fps = 0.0;
+  // Drone fps vs panel Hz (rate_match.h). rate_mismatch: too far apart
+  // for the phase lock; the fps cell then shows src_hz/panel_hz. Both are
+  // player-measured (pts cadence, vblank), so they never dim.
+  bool rate_mismatch = false;
+  double src_hz = 0.0;
+  double panel_hz = 0.0;
+  // The phase lock gave up (out of range) on a pair that otherwise matches:
+  // the steer cannot reach the panel. Caution tint on the fps cell.
+  bool phase_oor = false;
   double jitter_ms = 0.0;
   double mbps = 0.0;
   RecState rec;

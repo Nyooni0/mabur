@@ -12,6 +12,12 @@ static std::string write_tmp_play(const char* text) {
   return path;
 }
 
+static bool load_throws(const char* text) {
+  try { maburplay::load_config(write_tmp_play(text)); }
+  catch (const std::exception&) { return true; }
+  return false;
+}
+
 // dvr.target (VTX recorder): which recorders the record button drives. Default
 // "gs" (identical to pre-feature behaviour).
 TEST(dvr_target_values_and_strictness) {
@@ -98,16 +104,39 @@ TEST(dvr_mode_defaults_to_raw) {
   auto c = maburplay::load_config(write_tmp_play("backend = \"null\"\n"));
   CHECK(c.dvr.mode == "raw");
   CHECK(c.dvr.burned.bitrate_kbps == 12000);
-  CHECK(c.dvr.burned.fps_cap == 30);
 }
 
-TEST(dvr_burned_block_parses) {
+TEST(dvr_burned_defaults) {
+  auto c = maburplay::load_config(write_tmp_play("backend = \"null\"\n"));
+  CHECK(c.dvr.burned.every == 1);
+  CHECK(c.dvr.burned.size_w == 0 && c.dvr.burned.size_h == 0);
+}
+
+TEST(dvr_burned_every_and_size_parse) {
   auto c = maburplay::load_config(write_tmp_play(
       "backend = \"null\"\n\n[dvr]\nmode = \"burned\"\n\n"
-      "[dvr.burned]\nbitrate_kbps = 20000\nfps_cap = 60\n"));
+      "[dvr.burned]\nbitrate_kbps = 20000\nevery = 2\nsize = \"1728x972\"\n"));
   CHECK(c.dvr.mode == "burned");
   CHECK(c.dvr.burned.bitrate_kbps == 20000);
-  CHECK(c.dvr.burned.fps_cap == 60);
+  CHECK(c.dvr.burned.every == 2);
+  CHECK(c.dvr.burned.size_w == 1728 && c.dvr.burned.size_h == 972);
+}
+
+TEST(dvr_burned_fps_cap_is_unknown) {
+  CHECK(load_throws("backend = \"null\"\n[dvr.burned]\nfps_cap = 60\n"));
+}
+
+TEST(dvr_burned_every_bounds) {
+  CHECK(load_throws("backend = \"null\"\n[dvr.burned]\nevery = 0\n"));
+  CHECK(load_throws("backend = \"null\"\n[dvr.burned]\nevery = 11\n"));
+}
+
+TEST(dvr_burned_size_bounds) {
+  CHECK(load_throws("backend = \"null\"\n[dvr.burned]\nsize = \"1727x972\"\n"));   // odd
+  CHECK(load_throws("backend = \"null\"\n[dvr.burned]\nsize = \"300x240\"\n"));    // W < 320
+  CHECK(load_throws("backend = \"null\"\n[dvr.burned]\nsize = \"1920x2306\"\n"));  // H > 2304
+  CHECK(load_throws("backend = \"null\"\n[dvr.burned]\nsize = \"1920\"\n"));       // no x
+  CHECK(!load_throws("backend = \"null\"\n[dvr.burned]\nsize = \"\"\n"));
 }
 
 TEST(dvr_rejects_bad_mode_and_unknown_keys) {
@@ -122,18 +151,8 @@ TEST(dvr_rejects_bad_mode_and_unknown_keys) {
   CHECK(threw == true);
 }
 
-TEST(dvr_burned_bounds_are_enforced) {
-  bool threw = false;
-  try { maburplay::load_config(write_tmp_play(
-      "[dvr.burned]\nfps_cap = 0\n")); }
-  catch (const std::exception&) { threw = true; }
-  CHECK(threw == true);
-
-  threw = false;
-  try { maburplay::load_config(write_tmp_play(
-      "[dvr.burned]\nbitrate_kbps = 500000\n")); }
-  catch (const std::exception&) { threw = true; }
-  CHECK(threw == true);
+TEST(dvr_burned_bitrate_bound_is_enforced) {
+  CHECK(load_throws("[dvr.burned]\nbitrate_kbps = 500000\n"));
 }
 
 TEST(gs_osd_defaults_are_off_on_8302) {
@@ -290,24 +309,23 @@ TEST(display_vsync_defaults) {
   const auto cfg = maburplay::load_config(write_tmp_play(""));
   CHECK(cfg.display.vsync_lock == true);
   CHECK(cfg.display.vsync_lead_ms == 5);
-  CHECK(cfg.display.rec_vsync_lead_ms == 8);
 }
 
-TEST(display_rec_vsync_lead_range_enforced) {
-  bool threw = false;
-  try { maburplay::load_config(write_tmp_play(
-      "[display]\nrec_vsync_lead_ms = 0\n")); }
-  catch (const std::exception&) { threw = true; }
-  CHECK(threw == true);
-  threw = false;
-  try { maburplay::load_config(write_tmp_play(
-      "[display]\nrec_vsync_lead_ms = 11\n")); }
-  catch (const std::exception&) { threw = true; }
-  CHECK(threw == true);
-  const auto cfg = maburplay::load_config(write_tmp_play(
-      "[display]\nvsync_lead_ms = 4\nrec_vsync_lead_ms = 7\n"));
-  CHECK(cfg.display.vsync_lead_ms == 4);
-  CHECK(cfg.display.rec_vsync_lead_ms == 7);
+TEST(display_section_without_vsync_lead_keeps_the_default) {
+  // A [display] table that omits vsync_lead_ms gets the same default as a
+  // config with no [display] table at all.
+  const auto cfg = maburplay::load_config(write_tmp_play("[display]\n"));
+  CHECK(cfg.display.vsync_lead_ms == maburplay::DisplayCfg{}.vsync_lead_ms);
+  CHECK(cfg.display.vsync_lead_ms == 5);
+}
+
+TEST(rec_vsync_lead_ms_is_not_a_key) {
+  // The recording lead switch is gone: a config carrying the removed key
+  // must be refused (unknown key), not silently accepted.
+  std::string msg;
+  try { maburplay::load_config(write_tmp_play("[display]\nrec_vsync_lead_ms = 8\n")); }
+  catch (const std::exception& e) { msg = e.what(); }
+  CHECK(msg.find("rec_vsync_lead_ms") != std::string::npos);
 }
 
 TEST(display_vsync_lead_range_enforced) {
@@ -544,12 +562,6 @@ TEST(unsupported_on_build_names_available_backends) {
         "backend \"mpp\" is not in this build (Rockchip MPP decoder); this build has: null");
 }
 
-static bool load_throws(const char* text) {
-  try { maburplay::load_config(write_tmp_play(text)); }
-  catch (const std::exception&) { return true; }
-  return false;
-}
-
 TEST(display_phase_lock_keys) {
   // display.phase_lock / phase_margin_ms: off and 4 in code; the lock needs
   // the vsync servo, capture-time scheduling and the regulator itself.
@@ -565,6 +577,24 @@ TEST(display_phase_lock_keys) {
   CHECK(load_throws("[display]\nphase_lock = true\nsched_cap_ms = 0\n"));
   CHECK(load_throws("[display]\nphase_lock = true\nsched_cap_ms = 16\nvsync_lock = false\n"));
   CHECK(load_throws("[display]\nphase_lock = true\nsched_cap_ms = 16\nregulate_ms = 0\n"));
+}
+
+TEST(display_rt_priority_key) {
+  // display.rt_priority: the release thread's SCHED_FIFO priority, 10 in
+  // code and bundle, 0 = ordinary scheduling, at most 50.
+  const auto bare = maburplay::load_config(write_tmp_play(""));
+  CHECK(bare.display.rt_priority == 10);
+  const auto empty_display = maburplay::load_config(write_tmp_play("[display]\n"));
+  CHECK(empty_display.display.rt_priority == 10);
+  CHECK(maburplay::load_config(write_tmp_play("[display]\nrt_priority = 0\n"))
+            .display.rt_priority == 0);
+  CHECK(maburplay::load_config(write_tmp_play("[display]\nrt_priority = 50\n"))
+            .display.rt_priority == 50);
+  CHECK(load_throws("[display]\nrt_priority = -1\n"));
+  CHECK(load_throws("[display]\nrt_priority = 51\n"));
+  const auto b = maburplay::load_config(
+      std::string(MABUR_PLAY_BUNDLE_DIR) + "/maburplay.default.toml");
+  CHECK(b.display.rt_priority == 10);
 }
 
 TEST(screen_mode_must_parse) {

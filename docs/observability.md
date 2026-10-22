@@ -506,8 +506,8 @@ re-read every 5 s; a missing session or failed open (DVR not mounted yet)
 never blocks and never spams, and the stderr line keeps going regardless.
 
 The player's three session files (`lat.log`, `frame.log`, `reg.log`) are
-each written by their own writer thread: the main loop, which also drives
-decode and display, only queues a row. Every marker read, open, write and
+each written by their own writer thread: the housekeeping loop, which also
+runs the OSD, the phase lock and the decode watchdog, only queues a row. Every marker read, open, write and
 flush happens on that thread, so an SD card that stalls on writeback (the
 burned DVR streams to the same card) delays the log, never the picture. The
 queue holds 256 KiB, about 20 s of `frame.log`; a row that does not fit is
@@ -535,7 +535,8 @@ columns:
 `t_flip` is the frame's scanout-start stamp (mono µs); `t_submit` is when
 the player handed the AU (or its first slice) to the decoder, `t_complete`
 the ring's finish stamp (as `au.log`), `t_decoded` when the decoded picture
-came back, `t_release` when the regulator released it. `enc dq air fec dec
+came back, `t_release` when the release thread released it (its stamp,
+taken just before the frame goes to the display). `enc dq air fec dec
 reg dsp e2e` are the frame's own segments (µs, `dec = t_decoded −
 t_complete`, `e2e` the sum); `exact` is 1 when `t_flip` came from a real
 vblank event. `pts` joins the row to `au.log` (same value), which carries
@@ -555,16 +556,23 @@ vsync-paced two-plane commit), `0x02` `PAGE_FLIP_ASYNC` was set, `0x04`
 parked, `0x08` the commit failed, `0x10` a blocking modeset commit.
 `framelog 2` and earlier rows end at `exact`.
 
-### `reg.log` (`# reglog 2`)
+### `reg.log` (`# reglog 4`)
 
 The 1 Hz `regulator:` line ("Regulator line" below), written by the same
 follow-the-marker writer as `lat.log`: `<mono_us> regulator: held= ...`.
-Its counters are cumulative since maburplay started; difference adjacent
-rows for the per-second rate. It exists because `pend`/`pdrop`/`heals` are
-the presenter's side of a missed latch, and `/tmp/maburplay.log` does not
-outlive a power-off. reglog 2 adds the phase-lock fields `lock= lerr=
-loff= lctr=` (docs/phase-lock.md); reglog 1 rows end at `lslot=` before
-`present=`.
+Its counters are cumulative since maburplay started (the burned-DVR
+counters below are cumulative since the current recording started
+instead, and zero with none running); difference adjacent rows for the
+per-second rate (the `present=`, `rlate=` and `hand=` windows are per line
+already). It exists because `pend`/`pdrop`/`heals` are the presenter's
+side of a missed latch, and `/tmp/maburplay.log` does not outlive a
+power-off. reglog 4 appends the burned recorder's counters `burn_in=
+burn_enc= burn_drop=`; reglog 3 rows end at `recstarts=` and carry the
+release thread's fields `rlate= hand= rt=` and the event counters
+`flushes= recstarts=`; reglog 2 rows end at `ioctl=` and carry the
+phase-lock fields
+`lock= lerr= loff= lctr=` (docs/phase-lock.md); reglog 1 rows end at
+`lslot=` before `present=`.
 
 ### `cal.log` (`callog 3`)
 
@@ -625,17 +633,69 @@ The 1 Hz `regulator:` line (stderr, and `reg.log` in the session
 directory): `held= late= replaced= disconts= hold_ema=
 present_jitter= vsync= skips= fallback= pend= heals= pdrop= chained= chain=
 chain_max= chains= cuts= alw= lslot= lock= lerr= loff= lctr= present= acq=
-req= ioctl=`.
+req= ioctl= rlate= hand= rt= flushes= recstarts= burn_in= burn_enc=
+burn_drop=` (`regulator: off present_jitter= rlate= hand= rt= flushes=
+recstarts= burn_in= burn_enc= burn_drop=` with `display.regulate_ms = 0`;
+`present=` through `ioctl=` only with a display).
+
+The release thread (docs/phase-lock.md "Threads") makes every release
+decision and every present() call, so the timing fields below all read
+against it, not against the housekeeping loop that prints the line.
 
 - `present=N acq=p50/max req=p50/max ioctl=p50/max` — the N present()
   calls since the previous line, split into the framebuffer acquire (the
   dma-buf import plus `drmModeAddFB2`, served from the presenter's
   framebuffer cache, `gs/player/src/fb_cache.h`: a pool buffer seen again
-  is a lookup, a new one an import of ~3 ms), the atomic request build and
-  the commit ioctl, µs. `display.vsync_lead_ms` has to cover their sum: a
-  frame whose present() path runs past the lead latches a vblank late and
-  the frame behind it is a `pdrop` (`frame.log`'s `t_commit` shows it per
-  frame).
+  is a lookup, a new one an import of ~3 ms; the decode-output thread
+  primes the cache as each frame is decoded), the atomic request build and
+  the commit ioctl, µs. `display.vsync_lead_ms` has to cover the release
+  thread's own lateness (`rlate=`) plus their sum: a frame whose release
+  and present() path run past the lead latches a vblank late and the frame
+  behind it is a `pdrop` (`frame.log`'s `t_commit` shows it per frame).
+- `rlate=p99/max` — µs from a held frame's scheduled release to the moment
+  the release thread released it, over the frames released since the
+  previous line (a frame presented at once on arrival is not in it; it
+  counts in `late=`). The thread sleeps on an absolute timer armed to the
+  release, so this is its wake-up lateness.
+- `hand=p99/max` — µs from a frame's decode stamp (`t_decoded`) to the
+  release thread's offer of it to the regulator: the hand-over between the
+  decode-output thread and the release thread.
+- `rt=1|0` — whether the release thread runs `SCHED_FIFO`
+  (`display.rt_priority`; 0 when the priority is 0 or the kernel refused
+  it, which maburplay also logs once at start).
+- `flushes=` — output parks, cumulative: every time housekeeping parks the
+  decode-output and release threads and drops what the display holds — a
+  ring flush, a decode-watchdog reset or recreate, a display hotplug
+  acquire, shutdown. `disconts=` counts only encoder pts discontinuities,
+  none of these.
+- `recstarts=` — recorder starts, cumulative: the burned recorder coming
+  up, or a raw recording starting. `tools/bench/latchgate.py` excludes the
+  misses and `pend` growth right after a rise in either counter (its
+  docstring has the spans).
+- `burn_in= burn_enc= burn_drop=` — the burned recorder's flips tapped
+  after thinning, frames encoded, and frames dropped because the stage or
+  the encoder fell behind or the stage could not scale a frame to the
+  record size (`burn_recorder.h`'s `frames_in`/
+  `frames_encoded`/`frames_dropped`); cumulative since the current
+  recording started, zero while no burned recording is running. A rising
+  `burn_drop` is the recording's own stutter signal, independent of the
+  display's `pdrop=` above.
+- `present_jitter=` — |Δ present interval| EMA, ms, on the release
+  thread's submission clock.
+- `late=` — frames whose release had already passed when they were
+  offered, presented at once. Every frame still held then is older and is
+  displaced (counted in `replaced=`), including one already due but not
+  yet released, so nothing shows after a newer frame. A frame whose
+  arrival maps to a vblank the last frame out (released or presented at
+  once) was aimed at is not late: that vblank is taken, so the frame is
+  held for the first vblank after it (a burst pair's second frame handed
+  over just after its partner's release; presented at once it would queue
+  behind the partner's flip and the partner would show twice).
+- `replaced=` — held frames displaced and never shown: a newer frame took
+  their vblank slot, a full queue evicted its oldest, a chain cut, or the
+  release order had to be kept — a frame due to release after a newer one
+  that releases earlier, or every held frame when a late frame is
+  presented at once.
 - `vsync=locked|fallback` — whether the vblank estimator is locked (servo
   release) or has fallen back to the `anchor_floor(pts) + regulate_ms`
   rule.
@@ -652,9 +712,9 @@ req= ioctl=`.
   flip).
 - `pend=` — the presenter's present()-while-flip-in-flight mailbox
   engagements, 0 with no presenter.
-- `heals=` — chain-break slips: pending releases pushed one slot after two
-  mailbox engagements within 100 ms (a backstop that fires ~only at
-  startup).
+- `heals=` — chain-break slips: the release thread pushes the pending
+  releases one slot after two mailbox engagements within 100 ms (a
+  backstop that fires ~only at startup).
 - `pdrop=` — paced-mode mailbox drops: with the servo locked, a parked
   frame is a missed latch and is dropped at flip completion instead of
   resubmitted a period late, which keeps a single miss from becoming a
@@ -762,7 +822,7 @@ with the REC indicator alone in the top-right corner
 | thermometer | drone SoC temperature, °C | `drone.sys.soc_temp_c` |
 | speedometer | video bitrate, Mb/s | player-measured |
 | aspect-ratio | decoded picture height + `p` (1440×1080 reads `1080p`) | player-measured |
-| filmstrip | fps on screen | player-measured |
+| filmstrip | fps on screen; `src/panel` (drone fps / panel Hz) in caution on a rate mismatch | player-measured |
 | pulse | frame-interval jitter, ms | player-measured |
 | timer-outline | latency p50/p99, ms | player-measured |
 | link-variant-off | loss before/after FEC, % | `link.pre_fec_loss` / `link.residual_loss` |
@@ -780,7 +840,14 @@ per-segment breakdown is not on the glass (the `lat:` line, `lat.log` and
 `flightreport.py` carry it). No meters or bars. Two colour exceptions,
 both single-threshold: the fps item turns caution while `drone.low_power`
 is set, and temperature turns caution from 70 °C; both tints drop while
-the sideport is stale. An icon takes its item's colour. The REC indicator
+the sideport is stale. The fps item also turns caution, and reads
+`src/panel` (e.g. `100/60`; a decimal on the source when both round alike
+and it fits, `59.7/60`), while the drone's measured frame rate and the
+panel's refresh are too far apart for the phase lock (`docs/phase-lock.md`,
+"Rate mismatch"). Both rates are player-measured, so that tint holds while
+the sideport is stale; it is never raised while the drone reports
+low-power. The fps item is also tinted caution (text unchanged) while the
+phase lock is out of range on a pair that otherwise matches. An icon takes its item's colour. The REC indicator
 is a red dot, `REC` and an mm:ss clock (`REC FAULT` in amber), with a VTX
 leg sized by `dvr.target` (`docs/vtx-recorder.md`); armed draws nothing.
 It sits in the corner because in a row it would eat into the bar's width
@@ -841,7 +908,29 @@ in whichever `dvr.mode` is configured:
   GS's local recording): a complete IRAP (`au_is_irap()`) once VPS+SPS+PPS
   are known. Older raw files that open on a non-IRAP need repair — see
   `docs/findings/2026-09-29-web-gs-raw-dvr-irap-sync.md`.
-- **burned** resumes at the next decoded frame (`docs/colortrans.md`).
+- **burned** re-encodes what the display scans out, with the OSD burnt
+  in. The recorder taps the display's flip on the release thread
+  (`RecorderTap`, `gs/player/src/recorder_tap.h`) and records one flip in
+  every `dvr.burned.every` vblank periods, stamped with its slot on the
+  panel's vblank grid (`glass_cadence.h`): a frame the display held for
+  several vblanks is one sample whose duration is that many grid periods
+  — a hold, not a gap. The picture is `dvr.burned.size` (`""`, the
+  default, is the decoded size when the recording starts; a later rung
+  change is scaled to it, letterboxed if the aspect differs), and the
+  OSD is composed at that size. With `size = ""` a start before the
+  first decoded frame is deferred (`maburplay: rec: START deferred --
+  waiting for the first decoded frame`) and the recorder comes up on the
+  first frame; a start logs `maburplay: rec: burned WxH every=N`. A
+  `size` too small for the GS bar refuses the recording (`maburplay: rec:
+  recording refused -- the GS bar does not fit the record size ...`, OSD
+  REC field FAULT); the screen's GS overlay is unaffected. The
+  file check is `tools/bench/dvrcadence.py FILE.mp4`: it fits the grid
+  period to the file (a fractional period such as 16666.667 µs stamps
+  durations one microsecond apart; `--grid-us` gives it exactly instead),
+  prints the sample durations in grid units and exits 1 if any is not a
+  whole number of grid periods within 2 µs. `burn_drop=` on the regulator line (`reg.log`,
+  above) is the recording's stutter signal. The colour stage and the
+  scaling: `docs/colortrans.md`.
 
 Files are `record-NNNN.mp4` under `dvr.dir`, indexed one past the highest
 `record-NNNN` already on the card (`common/include/mabur/dvr_name.h`) — no
