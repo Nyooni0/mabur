@@ -31,6 +31,7 @@ constexpr const char* kFps = "\U000F0230";      // filmstrip
 constexpr const char* kJit = "\U000F0430";      // pulse
 constexpr const char* kLat = "\U000F051B";      // timer-outline
 constexpr const char* kLoss = "\U000F033A";     // link-variant-off
+constexpr const char* kUplink = "\U000F06F6";   // upload-network
 }  // namespace gs_icon
 
 // The GS link-status OSD: two rows along the bottom edge, each item an icon,
@@ -39,14 +40,15 @@ constexpr const char* kLoss = "\U000F033A";     // link-variant-off
 //                                                   ● REC 12:47   <- top right
 //   ...
 //   [wifi] 149 [tune-vertical] 5/20 [chart-donut] 62% [signal] -70/-72
-//     [waveform] 22/20 [thermometer] 41
+//     [waveform] 22/20 [thermometer] 41 [upload-network] 95%
 //   [speedometer] 8.1 [aspect-ratio] 720p [filmstrip] 60 [pulse] 5.2
 //     [timer-outline] 45/78 [link-variant-off] 0.3/0.0
 //
-// Row 0 is channel, mcs/width, airtime, per-card RSSI, per-card SNR and the
+// Row 0 is channel, mcs/width, airtime, per-card RSSI, per-card SNR, the
 // drone SoC temperature (sideport drone.sys.soc_temp_c, caution-coloured
 // from 70 C -- on the radio row because it is drone-sourced, not
-// player-measured). Row 1 is bitrate, the decoded resolution as its height
+// player-measured) and the uplink delivery % (drone.rcf, the share of the
+// GS's RCFs the drone accepted; it has no item below it). Row 1 is bitrate, the decoded resolution as its height
 // plus "p", fps, jitter, latency p50/p99 and pre/post-FEC loss.
 //
 // With the GS's channel scan enabled (sideport scan.state != "off") the
@@ -57,28 +59,26 @@ constexpr const char* kLoss = "\U000F033A";     // link-variant-off
 // width, so the pilot reads the radio on one line and the picture on the
 // other; `loss` sits with the video row it explains rather than with the
 // radio figures that cause it. Two rows rather than one for type size: all
-// twelve items on one line would cap the type too small to read on the GS
+// thirteen items on one line would cap the type too small to read on the GS
 // screen.
 //
 // The two rows share COLUMNS: an item starts at the same x as the item
 // above or below it (ch/bitrate, mcs/res, air/fps, rssi/jit, snr/lat,
-// temp/loss), each column as wide as the wider of its two worst cases, and
-// the grid -- not each row -- is centred. Rows centred on their own widths
+// temp/loss; uplink alone in the last column), each column as wide as the
+// wider of its worst cases, and the grid -- not each row -- is centred. Rows centred on their own widths
 // put every item at an arbitrary offset from its neighbour on the other row.
 //
-// The TYPE SIZE is pinned, not "whatever fits": layout() takes the largest
-// baked size at which a reference row of kSizingChars characters in
-// kSizingItems items fits between the insets -- 25/37/48/75 px at
-// 720p/1080p/1440p/2160p with the shipped asset. That reference is the
-// widest row from when the items carried text labels, and the operator
-// chose that size; the icons made the real rows narrower, and the width
-// they freed stays slack rather than growing the bar into the picture. The
-// real worst-case grid must fit too, so a wider item can never overflow.
+// The TYPE SIZE is the largest baked size at which the worst-case column
+// grid (kMaxCards cards, every value at its clamp) fits between the insets
+// -- 24/35/45/68 px at 720p/1080p/1440p/2160p with the shipped asset
+// (tests/test_gs_asset.cpp pins them). Widening any item's worst case
+// steps the whole bar down a size, so a new or wider item is a type-size
+// decision, not just a layout one.
 //
 // No status colours, no meters, no bars -- every glyph takes
-// tok::kTextPrimary, with three deliberate exceptions.
+// tok::kTextPrimary, with four deliberate exceptions.
 //
-// The first is staleness: the six LINK-sourced items dim to
+// The first is staleness: the LINK-sourced items dim to
 // tok::kTextLabel while the sideport is quiet, because the alternative is
 // a line of frozen numbers that looks live, which is the failure this OSD
 // exists to prevent. The player-measured items never dim -- they are
@@ -109,6 +109,15 @@ constexpr const char* kLoss = "\U000F033A";     // link-variant-off
 // by a frozen flag over a live number is the same failure staleness
 // dimming exists to prevent.
 //
+// The fourth is the uplink cell (drone.rcf): tok::kStatusCaution below
+// 80 % delivery, and "0%" in tok::kStatusCritical while the drone reports
+// it has stopped hearing the GS -- the one failure every other figure on
+// this line misses, since video and the downlink stay healthy. While the
+// GS itself sends no RCFs (rendezvous back to beaconing, key mismatch,
+// calibration silence) the cell is a dim "--": the drone failing safe then
+// says nothing about the uplink. Both tints are gated on !stale like
+// temp's.
+//
 // The glyph mask's baked drop shadow stays. It is part of the glyph, not
 // styling: without it the line is unreadable over bright video.
 //
@@ -134,6 +143,7 @@ enum class GsBarField {
   kRssi,
   kSnr,
   kTemp,
+  kUplink,
   kBitrate,
   kRes,
   kFps,
@@ -151,7 +161,7 @@ class GsCompactBar final : public GsLayer {
   explicit GsCompactBar(GsFont& font, RecTarget rec_target = RecTarget::kGs)
       : font_(font), rec_target_(rec_target) {}
 
-  // Picks the LARGEST baked atlas at which the sizing reference row and the
+  // Picks the LARGEST baked atlas at which the
   // worst-case grid (kMaxCards cards, every value at the magnitude its
   // clamp allows) fit between the insets and the rows stack inside the
   // surface, then centres the grid for however many cards are actually
@@ -189,18 +199,13 @@ class GsCompactBar final : public GsLayer {
   // size fits" by the same measurement layout() makes, rather than by
   // reimplementing it.
   static int worst_grid_width(const MaskAtlas& a, int n_cards);
-  // Width of the sizing reference row in `a` (see the type-size paragraph
-  // above), measured the same way as worst_grid_width.
-  static int sizing_row_width(const MaskAtlas& a);
-  static constexpr int kSizingChars = 76;
-  static constexpr int kSizingItems = 6;
   // Which row an item draws on: 0 (link figures), 1 (video figures), or
   // kCorner for the recording indicator, which is right-flushed at the top
   // inset and belongs to no row.
   static int row_of(GsBarField id);
   // Which grid column an item draws in, 0..kCols-1; -1 for the corner item.
   static int col_of(GsBarField id);
-  static constexpr int kCols = 6;
+  static constexpr int kCols = 7;
   static constexpr int kRows = 2;
   static constexpr int kCorner = -1;
   // The widest string field `id` can render with `n_cards` cards -- what

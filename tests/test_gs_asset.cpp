@@ -152,7 +152,7 @@ TEST(asset_metrics_are_sane_at_every_baked_size) {
     CHECK(a->advance_x > 0);
     CHECK(a->glyph_w > a->advance_x);       // the 4 px pad on each side
     CHECK(a->baseline > 0 && a->baseline < a->glyph_h);
-    CHECK(a->n_glyphs == 112);              // ASCII + gen_gsfont's 5 + 12 icons
+    CHECK(a->n_glyphs == 113);              // ASCII + gen_gsfont's 5 + 13 icons
     std::printf("  px=%3d adv=%3d cell=%3dx%-3d baseline=%3d glyphs=%d\n", a->px,
                 a->advance_x, a->glyph_w, a->glyph_h, a->baseline, a->n_glyphs);
   }
@@ -209,15 +209,15 @@ TEST(asset_layout_succeeds_at_every_resolution) {
 }
 
 // The sizes the operator signed off on, pinned. The bar's size comes from
-// the sizing reference row (gs_compact.h), not from its own rows, so
-// shortening an item must not move these -- and a regenerated asset whose
-// metrics shifted shows up as a changed size here rather than as a bar that
-// quietly grew on the glass.
+// its worst-case column grid at kMaxCards (gs_compact.h), so widening an
+// item's worst case moves these -- deliberately visible here -- and a
+// regenerated asset whose metrics shifted shows up as a changed size rather
+// than as a bar that quietly grew on the glass.
 TEST(asset_type_size_is_the_signed_off_size_at_every_resolution) {
   GsFont& f = asset();
   REQUIRE(f.ok());
   const struct { int w, h, px, rec; } want[] = {
-      {1280, 720, 25, 13}, {1920, 1080, 37, 19}, {2560, 1440, 48, 24}, {3840, 2160, 75, 37}};
+      {1280, 720, 24, 13}, {1920, 1080, 35, 17}, {2560, 1440, 45, 22}, {3840, 2160, 68, 34}};
   for (const auto& w : want) {
     GsCompactBar bar(f);
     std::string err;

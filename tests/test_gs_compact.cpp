@@ -39,6 +39,8 @@ GsSnapshot nominal() {
   s.pre_loss_pct = 0.3;
   s.post_loss_pct = 0.0;
   s.soc_temp_c = 41;
+  s.uplink = GsUplink::kOk;
+  s.uplink_pct = 95;
   GsCard a; a.id = 0; a.heard = true; a.rssi_dbm = -70.0; a.snr_db = 22.0;
   GsCard b; b.id = 1; b.heard = true; b.rssi_dbm = -72.0; b.snr_db = 20.0;
   s.cards = {a, b};
@@ -73,6 +75,7 @@ std::string ic(const std::string& spelled) {
       {"bitrate:", gs_icon::kBitrate}, {"res:", gs_icon::kRes},
       {"fps:", gs_icon::kFps},         {"jit:", gs_icon::kJit},
       {"lat:", gs_icon::kLat},         {"loss:", gs_icon::kLoss},
+      {"up:", gs_icon::kUplink},
   };
   std::string out;
   size_t i = 0;
@@ -164,6 +167,7 @@ TEST(the_rows_share_columns) {
   CHECK(GsCompactBar::col_of(GsBarField::kLat) == 4);
   CHECK(GsCompactBar::col_of(GsBarField::kTemp) == 5);
   CHECK(GsCompactBar::col_of(GsBarField::kLoss) == 5);
+  CHECK(GsCompactBar::col_of(GsBarField::kUplink) == 6);  // nothing below it
   CHECK(GsCompactBar::col_of(GsBarField::kRec) == -1);
   GsFont f;
   std::string err;
@@ -202,7 +206,7 @@ TEST(the_rows_read_exactly_as_specified) {
   GsCompactBar bar(f);
   REQUIRE(bar.layout(1920, 1080, &err));
   CHECK(row_of(bar, nominal(), false, player_nominal(), 0) ==
-        ic("ch:149 mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41"));
+        ic("ch:149 mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41 up:95%"));
   CHECK(row_of(bar, nominal(), false, player_nominal(), 1) ==
         ic("bitrate:8.1 res:720p fps:60 jit:5.2 lat:45/78 loss:0.3/0.0"));
 }
@@ -236,10 +240,10 @@ TEST(auto_channel_select_marks_the_channel) {
   GsSnapshot s = nominal();
   s.scan_auto = true;
   CHECK(row_of(bar, s, false, player_nominal(), 0) ==
-        ic("ch:149(a) mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41"));
+        ic("ch:149(a) mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41 up:95%"));
   s.channel.reset();
   CHECK(row_of(bar, s, false, player_nominal(), 0) ==
-        ic("ch:--(a) mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41"));
+        ic("ch:--(a) mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41 up:95%"));
 }
 
 // In-flight channel hop: the channel carries an "(h)" suffix -- same slot as
@@ -254,12 +258,12 @@ TEST(inflight_hop_marks_the_channel) {
   GsSnapshot s = nominal();
   s.hopped = true;
   CHECK(row_of(bar, s, false, player_nominal(), 0) ==
-        ic("ch:149(h) mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41"));
+        ic("ch:149(h) mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41 up:95%"));
   // hopped takes priority over scan_auto when (implausibly) both are set --
   // they share the one suffix slot worst_case() reserves.
   s.scan_auto = true;
   CHECK(row_of(bar, s, false, player_nominal(), 0) ==
-        ic("ch:149(h) mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41"));
+        ic("ch:149(h) mcs:5/20 air:62% rssi:-70/-72 snr:22/20 temp:41 up:95%"));
 }
 
 // A card count of four widens exactly two items and nothing else.
@@ -291,7 +295,7 @@ TEST(missing_values_render_as_double_dash_never_zero) {
   const GsSnapshot empty;          // nothing ever received, no cards
   const GsPlayerState cold;        // nothing ever decoded
   CHECK(row_of(bar, empty, false, cold, 0) ==
-        ic("ch:-- mcs:-- air:-- rssi:-- snr:-- temp:--"));
+        ic("ch:-- mcs:-- air:-- rssi:-- snr:-- temp:-- up:--"));
   CHECK(row_of(bar, empty, false, cold, 1) ==
         ic("bitrate:0.0 res:-- fps:0 jit:0.0 lat:--/-- loss:--/--"));
 }
@@ -418,10 +422,10 @@ TEST(the_recording_indicator_never_dims_on_a_stale_link) {
   ps.rec.kind = RecState::Kind::kRecording;
   std::vector<DirtyRect> rects;
   bar.update(s, false, ps, c.s, &rects);
-  // Fresh -> stale redraws only the seven LINK items (ch, mcs, air, rssi,
-  // snr, temp, loss); REC is not one of them.
+  // Fresh -> stale redraws only the eight LINK items (ch, mcs, air, rssi,
+  // snr, temp, uplink, loss); REC is not one of them.
   rects.clear();
-  CHECK(bar.update(s, true, ps, c.s, &rects) == 7);
+  CHECK(bar.update(s, true, ps, c.s, &rects) == 8);
   CHECK(bar.debug_field_text(s, true, ps, GsBarField::kRec) ==
         bar.debug_field_text(s, false, ps, GsBarField::kRec));
 }
@@ -633,10 +637,10 @@ TEST(stale_dims_the_link_items_and_leaves_the_player_ones_lit) {
   // Text is unchanged by staleness -- the value is HELD, only dimmed.
   CHECK(line_of(bar, s, true, ps) == line_of(bar, s, false, ps));
   // Every field still redraws on the transition (the colour moved), and
-  // exactly the seven link items are the ones that changed colour.
+  // exactly the eight link items are the ones that changed colour.
   rects.clear();
   const int drawn = bar.update(s, true, ps, c.s, &rects);
-  CHECK(drawn == 7);
+  CHECK(drawn == 8);
 }
 
 // --- geometry ---------------------------------------------------------
@@ -683,6 +687,7 @@ TEST(items_are_split_radio_above_picture_below) {
   CHECK(GsCompactBar::row_of(GsBarField::kRssi) == 0);
   CHECK(GsCompactBar::row_of(GsBarField::kSnr) == 0);
   CHECK(GsCompactBar::row_of(GsBarField::kTemp) == 0);  // drone-sourced: radio row
+  CHECK(GsCompactBar::row_of(GsBarField::kUplink) == 0);  // the uplink is radio too
   // REC belongs to no row at all: it is anchored top-right, so it costs
   // the rows no width (and therefore the bar no type size) and cannot
   // pull a centred row off centre.
@@ -707,9 +712,8 @@ TEST(two_rows_buy_at_least_half_again_the_single_line_size) {
   CHECK(bar.debug_atlas_px() >= 33);  // 1.5x the 22 px a single line allowed
 }
 
-// One type size for both rows: the largest baked size at which the sizing
-// reference row and both worst-case rows fit between the insets and the
-// stack fits the surface. No design-size table -- that rule is what renders
+// One type size for both rows: the largest baked size at which the
+// worst-case grid fits between the insets and the stack fits the surface. No design-size table -- that rule is what renders
 // readably on a 720p panel and larger on a 4K one.
 TEST(layout_picks_the_largest_baked_size_the_rule_allows) {
   GsFont f;
@@ -727,7 +731,6 @@ TEST(layout_picks_the_largest_baked_size_the_rule_allows) {
     const int avail = r.w - 2 * (int)(32 * scale + 0.5);
     const int row_gap = (int)(4 * scale + 0.5);
     auto fits_in = [&](const MaskAtlas& a) {
-      if (GsCompactBar::sizing_row_width(a) > avail) return false;
       for (int row = 0; row < GsCompactBar::kRows; ++row)
         if (GsCompactBar::worst_grid_width(a, kMaxCards) > avail) return false;
       const int block = GsCompactBar::kRows * a.glyph_h +
@@ -743,30 +746,6 @@ TEST(layout_picks_the_largest_baked_size_the_rule_allows) {
                     bigger);
       CHECK(!fits_in(*a));
     }
-  }
-}
-
-// The reference, not the grid, sets the type size: at the chosen size the
-// worst-case grid is narrower than the reference row, so the size can
-// never be one only the grid allows -- and an item grown wide enough to
-// take the size over shows up here. (The grid is just 4 cells narrower
-// than the reference, so whether the reference ALSO holds the size below
-// what the grid alone would allow depends on the bake set; it is not
-// asserted.)
-TEST(the_grid_fits_inside_the_sizing_reference) {
-  GsFont f;
-  std::string err;
-  REQUIRE(f.load(GSFONT_SCALED, &err));
-  for (const Reso& r : kFourResolutions) {
-    GsCompactBar bar(f);
-    REQUIRE(bar.layout(r.w, r.h, &err));
-    const double scale = (double)r.h / 1080.0;
-    const int avail = r.w - 2 * (int)(32 * scale + 0.5);
-    const MaskAtlas* chosen = f.atlas(bar.debug_atlas_px());
-    REQUIRE(chosen != nullptr);
-    CHECK(GsCompactBar::sizing_row_width(*chosen) <= avail);
-    CHECK(GsCompactBar::worst_grid_width(*chosen, kMaxCards) <
-          GsCompactBar::sizing_row_width(*chosen));
   }
 }
 
@@ -835,6 +814,8 @@ TEST(absurd_values_never_draw_outside_their_field_boxes) {
   s.air_pct = 1e300;
   s.pre_loss_pct = 1e300;
   s.post_loss_pct = -1e300;
+  s.uplink = GsUplink::kLow;
+  s.uplink_pct = 1'000'000;
   GsCard a; a.id = 0; a.heard = true; a.rssi_dbm = -1e300; a.snr_db = 1e300;
   GsCard b; b.id = 1; b.heard = true; b.rssi_dbm = 1e300; b.snr_db = -1e300;
   GsCard d; d.id = 2; d.heard = true; d.rssi_dbm = -12345.0; d.snr_db = -9999.0;
@@ -868,6 +849,15 @@ TEST(absurd_values_never_draw_outside_their_field_boxes) {
                                t.c_str(), w, box.w);
     CHECK(w <= box.w);
   }
+  // A negative delivery clamps the same way.
+  {
+    GsSnapshot neg = s;
+    neg.uplink_pct = -5;
+    const std::string t = bar.debug_field_text(neg, false, ps, GsBarField::kUplink);
+    CHECK(t == ic("up:0%"));
+    CHECK(text_width(*atlas, t.c_str()) <= bar.debug_field_box(GsBarField::kUplink).w);
+  }
+  CHECK(bar.debug_field_text(s, false, ps, GsBarField::kUplink) == ic("up:100%"));
   // And no pixel landed outside the union of the boxes.
   const DirtyRect bounds = bar.bounds();
   for (int y = 0; y < 1080; ++y)
@@ -1172,6 +1162,46 @@ TEST(drone_temp_reads_on_the_radio_row_and_tints_caution_from_70) {
   // and a negative SoC is not a flight condition worth a wider box.
   s.soc_temp_c = -40;
   CHECK(bar.debug_field_text(s, false, ps, GsBarField::kTemp) == ic("temp:0"));
+}
+
+// The uplink cell (drone.rcf via UplinkDelivery): delivery % in the
+// link colour, amber below 80, red "0%" while the drone has stopped
+// hearing the GS, and a dim "--" while the GS itself sends no RCFs (that
+// is not an uplink fault). Like temp, it dims and drops every tint while
+// the sideport is stale.
+TEST(uplink_cell_text_and_tint) {
+  GsFont f;
+  std::string err;
+  REQUIRE(f.load(GSFONT_SCALED, &err));
+  GsCompactBar bar(f);
+  REQUIRE(bar.layout(1920, 1080, &err));
+  GsSnapshot s = nominal();
+  GsPlayerState ps = player_nominal();
+  auto text = [&](bool stale) { return bar.debug_field_text(s, stale, ps, GsBarField::kUplink); };
+  auto rgb = [&](bool stale) { return bar.debug_field_rgb(s, stale, ps, GsBarField::kUplink); };
+
+  s.uplink = GsUplink::kNone; s.uplink_pct.reset();
+  CHECK(text(false) == ic("up:--")); CHECK(rgb(false) == tok::kTextPrimary);
+  s.uplink = GsUplink::kWait;
+  CHECK(text(false) == ic("up:--")); CHECK(rgb(false) == tok::kTextPrimary);
+  s.uplink = GsUplink::kOk; s.uplink_pct = 95;
+  CHECK(text(false) == ic("up:95%")); CHECK(rgb(false) == tok::kTextPrimary);
+  s.uplink = GsUplink::kLow; s.uplink_pct = 72;
+  CHECK(text(false) == ic("up:72%")); CHECK(rgb(false) == tok::kStatusCaution);
+  // Dead shows 0% whatever the window still holds.
+  s.uplink = GsUplink::kDead; s.uplink_pct = 88;
+  CHECK(text(false) == ic("up:0%")); CHECK(rgb(false) == tok::kStatusCritical);
+  s.uplink = GsUplink::kIdle; s.uplink_pct = 95;
+  CHECK(text(false) == ic("up:--")); CHECK(rgb(false) == tok::kTextLabel);
+  s.uplink = GsUplink::kStale; s.uplink_pct = 95;
+  CHECK(text(false) == ic("up:95%")); CHECK(rgb(false) == tok::kTextLabel);
+  s.uplink_pct.reset();
+  CHECK(text(false) == ic("up:--")); CHECK(rgb(false) == tok::kTextLabel);
+  // Sideport stale: dimmed, no tint, value held.
+  s.uplink = GsUplink::kDead; s.uplink_pct = 88;
+  CHECK(text(true) == ic("up:0%")); CHECK(rgb(true) == tok::kTextLabel);
+  s.uplink = GsUplink::kLow; s.uplink_pct = 72;
+  CHECK(text(true) == ic("up:72%")); CHECK(rgb(true) == tok::kTextLabel);
 }
 
 // The REC indicator draws at half the bar's type size (the nearest baked size

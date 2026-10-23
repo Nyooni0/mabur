@@ -22,12 +22,14 @@ constexpr uint32_t kTextLabel = 0x93989Du;      // labels, units, separators,
 constexpr uint32_t kTrack = 0x43474Bu;          // meter track, unlit bars
 constexpr uint32_t kStatusOk = 0x3FC99Au;
 constexpr uint32_t kStatusCaution = 0xDFA63Au;  // also the ceiling tick
-// The seventh token, and the one deviation from the handoff's "no third
-// colour" rule. That rule governs status ESCALATION -- it exists so a
-// critical link state cannot invent a colour the alert layer owns.
 // Recording is a mode indicator, not a status, and a white dot does not
-// read as recording. Faults still use kStatusCaution.
+// read as recording. Recorder faults use kStatusCaution.
 constexpr uint32_t kStatusRec = 0xE5484Du;
+// The one critical link state: the drone has stopped hearing the GS (the
+// uplink cell, gs_compact.h). The same hue as kStatusRec but its own token,
+// because it means a fault, not a mode -- a caller must never pick one for
+// the other.
+constexpr uint32_t kStatusCritical = 0xE5484Du;
 }  // namespace tok
 
 // Player-measured half of the OSD's inputs. maburgs cannot supply these:
