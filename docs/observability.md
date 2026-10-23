@@ -282,6 +282,19 @@ fields once per `drone.tlm_seq` (`flightreport.py` does).
   Telem period.
 - `rcf.{age_ms, rx_pps}`, `enc.cmd_kbps`, `txq_wait_ms` (per-period max
   TxQueue wait), `txq.{drops, drop_pps}`, `radio.usb_fail`.
+- `rcf.delivery_pct`, `rcf.uplink` — uplink delivery
+  (`gs/src/uplink_delivery.h`):
+  - **`delivery_pct`:** the drone's accepted RCFs (Δ`Telem.rcf_rx`) over the GS's sent RCFs, across a trailing ~10 s window. It's an integer 0–100, or `null` until a window spans 9 s or after a maburd restart. The denominator is RCFs only, never DISC: dividing by all control sends reads a healthy uplink as ~30 % once video stops and the GS falls back to DISC. Recorded flights sit at 94–95 %.
+  - **`uplink`:** the state the OSD colours by, first match wins:
+    - `none`: no Telem yet
+    - `stale`: the newest Telem is older than 3 s
+    - `idle`: the GS sent no RCF in the last 1 s
+    - `dead`: the drone reports FAILSAFE/RENDEZVOUS after 2 s of GS sending, or `delivery_pct` is 0
+    - `wait`: no window yet
+    - `low`: below 80 %
+    - `ok`: otherwise
+
+    The maburplay compact bar and the web GS's Flight stats show it.
 - `radio.rx = {own, foreign, crcfail}` — the drone's own RX-side view of
   the channel for the last telemetry period: CRC-clean RC from this GS
   (`own`), CRC-clean not-ours (`foreign`, other 802.11) and CRC-failed
