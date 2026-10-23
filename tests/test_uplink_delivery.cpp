@@ -2,6 +2,7 @@
 // trailing ~10 s window, plus the uplink state the OSD colours by. The
 // drone contributes Telem.rcf_rx (cumulative accepted RCFs) and
 // Telem.state; the GS contributes its own RCF send count.
+#include <cstdio>
 #include <cstring>
 #include <optional>
 
@@ -170,6 +171,72 @@ TEST(window_carries_across_a_gs_pause) {
   const auto v = f.u.view(14000);
   CHECK(v.pct.has_value());
   CHECK(v.state == UplinkState::kOk);
+}
+
+// A Telem gap longer than the window leaves no base to divide against: the
+// figure from before the gap must not keep judging the state. Here the
+// uplink died (a correct red), then everything went quiet for 15 s; on
+// recovery with the drone hearing every RCF the cell must read "wait",
+// not a held red 0.
+TEST(recovery_after_a_long_telem_gap_reads_wait_not_a_held_red) {
+  Fly f;
+  f.run(0, 11000, 20, 19);
+  f.run(11000, 23000, 20, 0, 3);           // uplink dead while video lives
+  CHECK(f.u.view(23000).state == UplinkState::kDead);
+  // 15 s of total loss: no Telem, no RCFs. Then the link comes back.
+  f.run(38000, 39000, 20, 20);
+  const auto v = f.u.view(39000);
+  CHECK(v.state == UplinkState::kWait);
+  CHECK(!v.pct);
+}
+
+// After a long GS pause with Telem still flowing (video lost, rendezvous
+// beaconing), the first Telem after the GS resumes sees only the one or
+// two RCFs sent since -- before the drone's 1 Hz counter heard them. Too
+// few RCFs to judge: no amber, no red, just "wait" until the window fills.
+TEST(resume_after_a_long_idle_does_not_flash_from_a_tiny_denominator) {
+  Fly f;
+  f.run(0, 11000, 20, 20);
+  for (uint64_t t = 11999; t <= 25999; t += 1000) f.telem(t);   // GS idle 15 s
+  f.u.on_rcf_sent(26000);
+  f.u.on_rcf_sent(26050);
+  f.telem(26060);                            // rcf_rx not advanced yet
+  const auto v = f.u.view(26060);
+  CHECK(v.state != UplinkState::kDead);
+  CHECK(v.state != UplinkState::kLow);
+  CHECK(v.state == UplinkState::kWait);
+  // A full window of RCFs later the real figure is back.
+  f.run(26100, 37100, 20, 20);
+  CHECK(f.u.view(37100).state == UplinkState::kOk);
+  CHECK(f.u.view(37100).pct == std::optional<int>(100));
+}
+
+// Every Telem after a long-idle resume, with the drone's count trailing
+// the GS's by the RCFs still in flight at Telem build (up to 3 here),
+// reads either no figure or a figure that is not amber/red. 100 % of RCFs
+// arrive throughout.
+TEST(resume_with_rcfs_in_flight_never_reads_amber_or_red) {
+  for (uint64_t phase = 0; phase < 1000; phase += 25) {
+    Fly f;
+    f.run(0, 11000, 20, 20);
+    for (uint64_t t = 11999; t <= 25999; t += 1000) f.telem(t);   // GS idle 15 s
+    const uint32_t rx0 = f.rcf_rx;
+    uint32_t sent_since = 0;
+    for (uint64_t t = 26000; t < 40000; t += 50) {
+      f.u.on_rcf_sent(t);
+      ++sent_since;
+      if ((t - 26000 + phase) % 1000 == 0) {
+        f.rcf_rx = rx0 + (sent_since > 3 ? sent_since - 3 : 0);
+        f.telem(t + 10);
+        const auto st = f.u.view(t + 10).state;
+        if (st == UplinkState::kLow || st == UplinkState::kDead)
+          std::printf("  phase %llu t %llu: %s\n", (unsigned long long)phase,
+                      (unsigned long long)t, to_string(st));
+        CHECK(st != UplinkState::kLow);
+        CHECK(st != UplinkState::kDead);
+      }
+    }
+  }
 }
 
 TEST(to_string_spellings) {

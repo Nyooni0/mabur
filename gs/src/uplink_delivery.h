@@ -31,7 +31,11 @@ namespace maburgs {
 // drone fails safe because nothing was sent, which says nothing about the
 // uplink. Dead also needs kDeadGraceMs of continuous sending before the
 // Telem that reports it, so the drone's last pre-session RENDEZVOUS Telem
-// cannot flash red at link-up.
+// cannot flash red at link-up. For the same reason the window yields no
+// figure once a Telem gap has evicted its base or while it holds fewer
+// than kMinRcfsInWindow RCFs: a figure from before a gap, or one divided by
+// two RCFs the drone has not counted yet, would read red over a healthy
+// link.
 //
 // Single-threaded: all three calls come from the GS core thread.
 enum class UplinkState : uint8_t { kNone, kWait, kOk, kLow, kDead, kIdle, kStale };
@@ -54,6 +58,9 @@ class UplinkDelivery {
   static constexpr uint64_t kWindowMs = 10000, kMinSpanMs = 9000, kStaleMs = 3000,
                             kIdleMs = 1000, kDeadGraceMs = 2000;
   static constexpr int kLowBelowPct = 80;
+  // Fewest RCFs a window must hold before it yields a figure: ~1 s of RCFs
+  // at the 20 Hz feedback rate.
+  static constexpr uint64_t kMinRcfsInWindow = 20;
   static constexpr uint8_t kStateRendezvous = 1, kStateFailsafe = 3;  // Telem.state
 
  private:

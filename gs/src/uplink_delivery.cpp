@@ -55,11 +55,24 @@ void UplinkDelivery::on_telem(uint16_t tlm_seq, uint32_t rcf_rx, uint8_t drone_s
     --n_;
   }
 
+  // A Telem gap longer than the window evicted every base: the figure from
+  // before the gap describes another stretch of flight and must not keep
+  // judging the state (a held 0 would read red over a recovered link).
+  if (n_ == 1) {
+    pct_.reset();
+    return;
+  }
   const Sample& base = ring_[head_];
   const Sample& cur = ring_[(head_ + n_ - 1) % kCap];
   if (cur.t_ms - base.t_ms < kMinSpanMs) return;
+  // Too few RCFs across the window to judge -- typically the first Telem
+  // after a long GS pause, whose handful of RCFs the drone's 1 Hz counter
+  // has not caught up with yet. No figure rather than a false amber/red.
   const uint64_t d_sent = cur.sent - base.sent;
-  if (d_sent == 0) return;  // nothing sent across the window: hold
+  if (d_sent < kMinRcfsInWindow) {
+    pct_.reset();
+    return;
+  }
   const double ratio = static_cast<double>(cur.rcf_rx - base.rcf_rx) / static_cast<double>(d_sent);
   pct_ = std::clamp(static_cast<int>(std::lround(100.0 * ratio)), 0, 100);
 }
