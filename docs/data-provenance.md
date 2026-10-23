@@ -1255,3 +1255,13 @@ widths under the file's original marker: the marker is written when the
 file is created, not when a newer binary appends. Key per-row on the
 column count, not the marker, when reading such a file.
 
+
+## 2026-10-24 — bundle ships low-power off and NACK on
+
+The drone bundle sets `low_power.enable = false`: recordings from builds
+that ship this no longer open with the disarmed low-power segment described
+under 2026-09-20 — the ground phase runs at the full ladder bitrate and fps.
+The GS bundle sets `[link.nack] enable = true`, so sideport `link.nack` and
+the `retx` accounting class are populated from boot on these recordings
+rather than only on a GS overlaid by hand. A recording that does open with a
+low-power segment came from a drone config with the mode turned back on.

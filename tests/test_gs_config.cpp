@@ -346,8 +346,9 @@ TEST(nack_disabled_sends_nothing) {
   // test_nack_tracker's disabled_tracker_is_inert for the tracker itself.
   auto off = maburgs::load_config(write_tmp(""));
   CHECK(!off.link.nack.enable);
+  // The bundle ships NACK on: an absent section is off, the shipped file is not.
   auto bundle = maburgs::load_config(std::string(MABUR_GS_BUNDLE_DIR) + "/maburgs.default.toml");
-  CHECK(!bundle.link.nack.enable);
+  CHECK(bundle.link.nack.enable);
 }
 
 TEST(stale_video_out_key_throws) {
