@@ -209,15 +209,15 @@ TEST(asset_layout_succeeds_at_every_resolution) {
 }
 
 // The sizes the operator signed off on, pinned. The bar's size comes from
-// its worst-case column grid at kMaxCards (gs_compact.h), so widening an
-// item's worst case moves these -- deliberately visible here -- and a
-// regenerated asset whose metrics shifted shows up as a changed size rather
-// than as a bar that quietly grew on the glass.
+// the sizing reference row (gs_compact.h), not from its own rows, so
+// shortening an item must not move these -- and a regenerated asset whose
+// metrics shifted shows up as a changed size here rather than as a bar that
+// quietly grew on the glass.
 TEST(asset_type_size_is_the_signed_off_size_at_every_resolution) {
   GsFont& f = asset();
   REQUIRE(f.ok());
   const struct { int w, h, px, rec; } want[] = {
-      {1280, 720, 24, 13}, {1920, 1080, 35, 17}, {2560, 1440, 45, 22}, {3840, 2160, 68, 34}};
+      {1280, 720, 25, 13}, {1920, 1080, 37, 19}, {2560, 1440, 48, 24}, {3840, 2160, 75, 37}};
   for (const auto& w : want) {
     GsCompactBar bar(f);
     std::string err;

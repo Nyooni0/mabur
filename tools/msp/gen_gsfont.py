@@ -97,7 +97,7 @@ BAR_ICONS = [
     0xF0430,  # jit      pulse
     0xF051B,  # lat      timer-outline
     0xF033A,  # loss     link-variant-off
-    0xF06F6,  # uplink   upload-network
+    0xF005D,  # uplink   arrow-up
 ]
 SUBSET = ([c for c in range(0x20, 0x7F)] + [0x2014, 0x2212, 0x2192, 0x25CF, 0x25CB]
           + sorted(BAR_ICONS))

@@ -72,14 +72,12 @@ OSD_SHA_EXPECTED=e202e5d127467752984bda2c135d166661f8c0eb2c8481a77d54b39ed8f76a8
 # it shares with airtime. Same three ink bands at the same rows (type size
 # unchanged), lit total identical at 90,091, rows now 275..1446 and
 # 275..1556 (were 308..1413 and 308..1523).
-# Re-blessed (was 404627bd...): row 0 gained a 7th item (uplink delivery,
-# "--" here: the fixture carries no drone.rcf) and the type size now comes
-# from the 7-column worst-case grid instead of the 76-char reference row,
-# one baked size down. The REC band is unchanged (x 1760..1886 y 42..70,
-# still the 19 px nearest half size); the two row bands move down and
-# shrink with the smaller type (y 944..996 / 1003..1055 -> 954..1001 /
-# 1008..1055); rows now x 267..1612 and 267..1432; lit 90,091 -> 79,215.
-BAR_SHA_EXPECTED=92852f85f6b13ea3b4505fdc9ddfecf7651d28a525df75f4aefac9c8b15fcf01
+# Re-blessed (was 404627bd...): row 0 gained the uplink item ("--" here:
+# the fixture carries no drone.rcf), trailing temp at item spacing outside
+# the column grid. Type size unchanged (the same three ink bands at the same
+# rows, y 42..70 / 944..996 / 1003..1055); row 0 now x 275..1578 (was
+# 275..1446), row 1 unchanged at 275..1556; lit 90,091 -> 95,057.
+BAR_SHA_EXPECTED=3e4de517167dc40ba449e2225cb8d77cfe53b0f4d871d0a356b8b6428d5d2638
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
@@ -293,7 +291,7 @@ fi
 # invariants are three bands of ink and nothing else: the indicator up top,
 # then the two rows hugging the bottom inset. The synthetic font carries
 # eight sizes (and a box for every icon); the bar takes its size from its
-# worst-case column grid (gs_compact.h).
+# sizing reference row (gs_compact.h).
 echo "== GS render gate =="
 python3 tools/msp/gen_gsfont.py --synthetic "$TMP/syn.gfont" \
   --sizes 19,21,22,24,26,34,38,56

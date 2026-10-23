@@ -167,7 +167,9 @@ TEST(the_rows_share_columns) {
   CHECK(GsCompactBar::col_of(GsBarField::kLat) == 4);
   CHECK(GsCompactBar::col_of(GsBarField::kTemp) == 5);
   CHECK(GsCompactBar::col_of(GsBarField::kLoss) == 5);
-  CHECK(GsCompactBar::col_of(GsBarField::kUplink) == 6);  // nothing below it
+  // Uplink trails row 0 after the shared grid (see
+  // uplink_follows_temp_at_item_spacing): no column, nothing below it.
+  CHECK(GsCompactBar::col_of(GsBarField::kUplink) == GsCompactBar::kTrail);
   CHECK(GsCompactBar::col_of(GsBarField::kRec) == -1);
   GsFont f;
   std::string err;
@@ -677,6 +679,37 @@ TEST(the_bar_sits_along_the_bottom_edge) {
   }
 }
 
+// The uplink item is not a grid column: nothing sits below it, so it
+// follows temp at plain item spacing instead of waiting for the column
+// temp shares with loss (sized for "100.0/100.0") to end. Measured from
+// temp's worst-case box, so it does not move as temp's value changes.
+TEST(uplink_follows_temp_at_item_spacing) {
+  GsFont f;
+  std::string err;
+  REQUIRE(f.load(GSFONT_SCALED, &err));
+  for (const Reso& r : kFourResolutions) {
+    GsCompactBar bar(f);
+    REQUIRE(bar.layout(r.w, r.h, &err));
+    Canvas c(r.w, r.h);
+    std::vector<DirtyRect> rects;
+    bar.update(nominal(), false, player_nominal(), c.s, &rects);
+    const MaskAtlas* a = f.atlas(bar.debug_atlas_px());
+    REQUIRE(a != nullptr);
+    // Box-to-box spacing between two neighbours: one item gap less the two
+    // boxes' shadow pads (gs_compact.cpp item_gap / pad_h).
+    const int pad = (a->glyph_w - a->advance_x) / 2;
+    const int gap = std::max(a->advance_x, (a->glyph_w - a->advance_x) + 2);
+    const DirtyRect temp = bar.debug_field_box(GsBarField::kTemp);
+    const DirtyRect up = bar.debug_field_box(GsBarField::kUplink);
+    const DirtyRect loss = bar.debug_field_box(GsBarField::kLoss);
+    if (up.x != temp.x + temp.w + gap - 2 * pad)
+      std::printf("  %dx%d: temp %d+%d, uplink at %d\n", r.w, r.h, temp.x, temp.w, up.x);
+    CHECK(up.x == temp.x + temp.w + gap - 2 * pad);
+    CHECK(up.x < loss.x + loss.w);   // did not wait for loss's column to end
+    CHECK(up.y == temp.y);
+  }
+}
+
 // Row 0 is the radio, row 1 the picture. Pinned because the split is what
 // decides the type size, so an item quietly moving rows would shrink or
 // grow the whole bar.
@@ -712,8 +745,9 @@ TEST(two_rows_buy_at_least_half_again_the_single_line_size) {
   CHECK(bar.debug_atlas_px() >= 33);  // 1.5x the 22 px a single line allowed
 }
 
-// One type size for both rows: the largest baked size at which the
-// worst-case grid fits between the insets and the stack fits the surface. No design-size table -- that rule is what renders
+// One type size for both rows: the largest baked size at which the sizing
+// reference row and both worst-case rows fit between the insets and the
+// stack fits the surface. No design-size table -- that rule is what renders
 // readably on a 720p panel and larger on a 4K one.
 TEST(layout_picks_the_largest_baked_size_the_rule_allows) {
   GsFont f;
@@ -731,6 +765,7 @@ TEST(layout_picks_the_largest_baked_size_the_rule_allows) {
     const int avail = r.w - 2 * (int)(32 * scale + 0.5);
     const int row_gap = (int)(4 * scale + 0.5);
     auto fits_in = [&](const MaskAtlas& a) {
+      if (GsCompactBar::sizing_row_width(a) > avail) return false;
       for (int row = 0; row < GsCompactBar::kRows; ++row)
         if (GsCompactBar::worst_grid_width(a, kMaxCards) > avail) return false;
       const int block = GsCompactBar::kRows * a.glyph_h +
@@ -746,6 +781,30 @@ TEST(layout_picks_the_largest_baked_size_the_rule_allows) {
                     bigger);
       CHECK(!fits_in(*a));
     }
+  }
+}
+
+// The reference, not the grid, sets the type size: at the chosen size the
+// worst-case grid is narrower than the reference row, so the size can
+// never be one only the grid allows -- and an item grown wide enough to
+// take the size over shows up here. (The grid is just 4 cells narrower
+// than the reference, so whether the reference ALSO holds the size below
+// what the grid alone would allow depends on the bake set; it is not
+// asserted.)
+TEST(the_grid_fits_inside_the_sizing_reference) {
+  GsFont f;
+  std::string err;
+  REQUIRE(f.load(GSFONT_SCALED, &err));
+  for (const Reso& r : kFourResolutions) {
+    GsCompactBar bar(f);
+    REQUIRE(bar.layout(r.w, r.h, &err));
+    const double scale = (double)r.h / 1080.0;
+    const int avail = r.w - 2 * (int)(32 * scale + 0.5);
+    const MaskAtlas* chosen = f.atlas(bar.debug_atlas_px());
+    REQUIRE(chosen != nullptr);
+    CHECK(GsCompactBar::sizing_row_width(*chosen) <= avail);
+    CHECK(GsCompactBar::worst_grid_width(*chosen, kMaxCards) <
+          GsCompactBar::sizing_row_width(*chosen));
   }
 }
 

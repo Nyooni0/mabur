@@ -821,7 +821,7 @@ with the REC indicator alone in the top-right corner
 ```
                                               ● REC 12:47   <- top right
 ...
-[wifi] 149 [tune-vertical] 5/40 [chart-donut] 62% [signal] -70/-72 [waveform] 22/20 [thermometer] 41 [upload-network] 95%
+[wifi] 149 [tune-vertical] 5/40 [chart-donut] 62% [signal] -70/-72 [waveform] 22/20 [thermometer] 41 [arrow-up] 95%
 [speedometer] 8.1 [aspect-ratio] 720p [filmstrip] 60 [pulse] 5.2 [timer-outline] 45/78 [link-variant-off] 0.3/0.0
 ```
 
@@ -833,7 +833,7 @@ with the REC indicator alone in the top-right corner
 | signal | RSSI per GS card, dBm | `cards[]` |
 | waveform | SNR per GS card, dB | `cards[]` |
 | thermometer | drone SoC temperature, °C | `drone.sys.soc_temp_c` |
-| upload-network | uplink delivery: share of the GS's RCFs the drone accepted, %. Amber below 80; `0%` in red when the drone has stopped hearing the GS; a dim `--` while the GS itself sends no RCFs. It has no item below it. | `drone.rcf.delivery_pct` / `drone.rcf.uplink` |
+| arrow-up | uplink delivery: share of the GS's RCFs the drone accepted, %. Amber below 80; `0%` in red when the drone has stopped hearing the GS; a dim `--` while the GS itself sends no RCFs. It is not in the column grid: it follows temp at item spacing. | `drone.rcf.delivery_pct` / `drone.rcf.uplink` |
 | speedometer | video bitrate, Mb/s | player-measured |
 | aspect-ratio | decoded picture height + `p` (1440×1080 reads `1080p`) | player-measured |
 | filmstrip | fps on screen; `src/panel` (drone fps / panel Hz) in caution on a rate mismatch | player-measured |
@@ -872,17 +872,21 @@ and shift that row whenever the recorder was merely armed.
 
 The two rows share columns: each item starts at the same x as the item
 above or below it (ch/bitrate, mcs/res, air/fps, rssi/jit, snr/lat,
-temp/loss; uplink alone in the last column), each column as wide as the
-wider of its items' worst cases, and the grid as a whole is centred. Every item sits in a box sized
+temp/loss), each column as wide as the wider of its two items' worst
+cases, and the grid as a whole is centred. Uplink has nothing below it,
+so it sits outside the grid, one item gap after temp's box, and overhangs
+the last column only as far as it must. Every item sits in a box sized
 for its WORST-CASE string (four cards), so short values leave trailing
 space — that is what stops a row reflowing every time a figure gains a
 digit. Only a card-count change moves the columns. The
-type size is one size for both rows: the largest baked size at which the
-worst-case grid (four cards, every value at its clamp) fits between the
-insets — 24/35/45/68 px at 720p/1080p/1440p/2160p with the shipped asset
-(`tests/test_gs_asset.cpp` pins them). It is sized for four cards always,
-so the type never changes when a card drops out. Two rows because all
-thirteen items on one line would cap the type
+type size is one size for both rows, and it is pinned: the largest baked
+size at which a 76-character, 6-item reference row fits between the insets
+— 25/37/48/75 px at 720p/1080p/1440p/2160p with the shipped asset
+(`tests/test_gs_asset.cpp` pins them). That reference is the widest row
+from when the items carried text labels; the icons made the real rows
+narrower, and the freed width stays slack instead of growing the bar into
+the picture. The worst-case grid, uplink's overhang included, must fit too, so a
+wider item can never overflow. Two rows because all thirteen items on one line would cap the type
 too small to read on the GS screen.
 
 The glyph atlas is `/usr/local/share/mabur/gs_osd.gfont`, committed and
