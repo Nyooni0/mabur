@@ -72,7 +72,12 @@ OSD_SHA_EXPECTED=e202e5d127467752984bda2c135d166661f8c0eb2c8481a77d54b39ed8f76a8
 # it shares with airtime. Same three ink bands at the same rows (type size
 # unchanged), lit total identical at 90,091, rows now 275..1446 and
 # 275..1556 (were 308..1413 and 308..1523).
-BAR_SHA_EXPECTED=404627bd7b10b6618353b8aec0475610437c984263ed8defa2e69f3a53135d94
+# Re-blessed (was 404627bd...): row 0 gained the uplink item ("--" here:
+# the fixture carries no drone.rcf), trailing temp at item spacing outside
+# the column grid. Type size unchanged (the same three ink bands at the same
+# rows, y 42..70 / 944..996 / 1003..1055); row 0 now x 275..1578 (was
+# 275..1446), row 1 unchanged at 275..1556; lit 90,091 -> 95,057.
+BAR_SHA_EXPECTED=3e4de517167dc40ba449e2225cb8d77cfe53b0f4d871d0a356b8b6428d5d2638
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 

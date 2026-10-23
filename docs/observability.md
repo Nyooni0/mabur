@@ -282,6 +282,19 @@ fields once per `drone.tlm_seq` (`flightreport.py` does).
   Telem period.
 - `rcf.{age_ms, rx_pps}`, `enc.cmd_kbps`, `txq_wait_ms` (per-period max
   TxQueue wait), `txq.{drops, drop_pps}`, `radio.usb_fail`.
+- `rcf.delivery_pct`, `rcf.uplink` — uplink delivery
+  (`gs/src/uplink_delivery.h`):
+  - **`delivery_pct`:** the drone's accepted RCFs (Δ`Telem.rcf_rx`) over the GS's sent RCFs, across a trailing ~10 s window. It's an integer 0–100, or `null` until a window spans 9 s or after a maburd restart. The denominator is RCFs only, never DISC: dividing by all control sends reads a healthy uplink as ~30 % once video stops and the GS falls back to DISC. Recorded flights sit at 94–95 %.
+  - **`uplink`:** the state the OSD colours by, first match wins:
+    - `none`: no Telem yet
+    - `stale`: the newest Telem is older than 3 s
+    - `idle`: the GS sent no RCF in the last 1 s
+    - `dead`: the drone reports FAILSAFE/RENDEZVOUS after 2 s of GS sending, or `delivery_pct` is 0
+    - `wait`: no window yet
+    - `low`: below 80 %
+    - `ok`: otherwise
+
+    The maburplay compact bar and the web GS's Flight stats show it.
 - `radio.rx = {own, foreign, crcfail}` — the drone's own RX-side view of
   the channel for the last telemetry period: CRC-clean RC from this GS
   (`own`), CRC-clean not-ours (`foreign`, other 802.11) and CRC-failed
@@ -808,7 +821,7 @@ with the REC indicator alone in the top-right corner
 ```
                                               ● REC 12:47   <- top right
 ...
-[wifi] 149 [tune-vertical] 5/40 [chart-donut] 62% [signal] -70/-72 [waveform] 22/20 [thermometer] 41
+[wifi] 149 [tune-vertical] 5/40 [chart-donut] 62% [signal] -70/-72 [waveform] 22/20 [thermometer] 41 [arrow-up] 95%
 [speedometer] 8.1 [aspect-ratio] 720p [filmstrip] 60 [pulse] 5.2 [timer-outline] 45/78 [link-variant-off] 0.3/0.0
 ```
 
@@ -820,6 +833,7 @@ with the REC indicator alone in the top-right corner
 | signal | RSSI per GS card, dBm | `cards[]` |
 | waveform | SNR per GS card, dB | `cards[]` |
 | thermometer | drone SoC temperature, °C | `drone.sys.soc_temp_c` |
+| arrow-up | uplink delivery: share of the GS's RCFs the drone accepted, %. Amber below 80; `0%` in red when the drone has stopped hearing the GS; a dim `--` while the GS itself sends no RCFs. It is not in the column grid: it follows temp at item spacing. | `drone.rcf.delivery_pct` / `drone.rcf.uplink` |
 | speedometer | video bitrate, Mb/s | player-measured |
 | aspect-ratio | decoded picture height + `p` (1440×1080 reads `1080p`) | player-measured |
 | filmstrip | fps on screen; `src/panel` (drone fps / panel Hz) in caution on a rate mismatch | player-measured |
@@ -837,10 +851,13 @@ each figure is ONE REAL FRAME from the last 1 s window, ranked by e2e, and
 the pair is read together because p99 alone is a tail statistic that gets
 misread as typical (`docs/findings/2026-08-31-dq-spike.md` §20); the
 per-segment breakdown is not on the glass (the `lat:` line, `lat.log` and
-`flightreport.py` carry it). No meters or bars. Two colour exceptions,
-both single-threshold: the fps item turns caution while `drone.low_power`
-is set, and temperature turns caution from 70 °C; both tints drop while
-the sideport is stale. The fps item also turns caution, and reads
+`flightreport.py` carry it). No meters or bars. Colour exceptions:
+- the fps item turns caution while `drone.low_power` is set
+- temperature turns caution from 70 °C
+- uplink turns caution below 80 %, and turns red, reading `0%`, while `drone.rcf.uplink` is `dead`
+
+All of these tints drop while the sideport is stale. Red is
+`tok::kStatusCritical`, kept apart from REC's `kStatusRec`. The fps item also turns caution, and reads
 `src/panel` (e.g. `100/60`; a decimal on the source when both round alike
 and it fits, `59.7/60`), while the drone's measured frame rate and the
 panel's refresh are too far apart for the phase lock (`docs/phase-lock.md`,
@@ -856,7 +873,9 @@ and shift that row whenever the recorder was merely armed.
 The two rows share columns: each item starts at the same x as the item
 above or below it (ch/bitrate, mcs/res, air/fps, rssi/jit, snr/lat,
 temp/loss), each column as wide as the wider of its two items' worst
-cases, and the grid as a whole is centred. Every item sits in a box sized
+cases, and the grid as a whole is centred. Uplink has nothing below it,
+so it sits outside the grid, one item gap after temp's box, and overhangs
+the last column only as far as it must. Every item sits in a box sized
 for its WORST-CASE string (four cards), so short values leave trailing
 space — that is what stops a row reflowing every time a figure gains a
 digit. Only a card-count change moves the columns. The
@@ -866,8 +885,8 @@ size at which a 76-character, 6-item reference row fits between the insets
 (`tests/test_gs_asset.cpp` pins them). That reference is the widest row
 from when the items carried text labels; the icons made the real rows
 narrower, and the freed width stays slack instead of growing the bar into
-the picture. The worst-case grid (72 cells plus 5 gaps) must fit too, so a
-wider item can never overflow. Two rows because all twelve items on one line would cap the type
+the picture. The worst-case grid, uplink's overhang included, must fit too, so a
+wider item can never overflow. Two rows because all thirteen items on one line would cap the type
 too small to read on the GS screen.
 
 The glyph atlas is `/usr/local/share/mabur/gs_osd.gfont`, committed and
