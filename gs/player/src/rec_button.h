@@ -13,17 +13,20 @@ namespace maburplay {
 // tolerance cannot leak in.
 bool match_pin_name(const char* name, int pin);
 
-// Edge-triggered press detector. `level` is already polarity-corrected --
-// the kernel inverts for us when the line is requested ACTIVE_LOW -- so
-// true means pressed.
+// Debounced press detector. `level` is already polarity-corrected -- the
+// kernel inverts for us when the line is requested ACTIVE_LOW -- so true
+// means pressed.
 //
-// Deliberately simple: a transition is accepted only if it is at least
-// kDebounceMs after the last ACCEPTED transition, and a press is reported
-// only on the accepted false->true edge. A held button therefore fires
-// once and never repeats. The known limit is a switch whose bounce lasts
-// longer than kDebounceMs, which can read as press-release-press; 50 ms
-// is comfortably past the settling time of the tactile switches this is
-// built for, and is the value PixelPilot_rk uses for the same job.
+// A level is accepted only once it has held for kDebounceMs: every sample
+// that disagrees with the candidate restarts its clock, and a press is
+// reported when the pressed level is accepted. A spike shorter than the
+// window -- contact chatter, or noise coupled onto the button wire -- is
+// therefore never a press, whichever way it goes. Accepting a change on its
+// first sample instead (a leading-edge debounce) turns one noise spike into
+// a phantom DVR toggle: on a line idling at the pressed level, a spike to
+// released is accepted, the return a few ms later is swallowed as bounce,
+// and the next sample past the window "presses". A held button fires once
+// and never repeats. The cost is kDebounceMs of latency per press.
 class ButtonDebounce {
  public:
   static constexpr uint64_t kDebounceMs = 50;
@@ -35,8 +38,9 @@ class ButtonDebounce {
   bool feed(bool level, uint64_t now_ms);
 
  private:
-  bool level_ = false;
-  uint64_t last_change_ms_ = 0;
+  bool level_ = false;      // the accepted level
+  bool cand_ = false;       // the level the line has read since cand_ms_
+  uint64_t cand_ms_ = 0;
   bool seeded_ = false;
 };
 

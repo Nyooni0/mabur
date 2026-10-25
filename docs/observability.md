@@ -915,9 +915,16 @@ in `/etc/maburplay.toml` (`pin` is the header pin number, required,
 resolved at startup by matching the kernel's line names — the Radxa ZERO 3
 names its header `PIN_7`…`PIN_40` across gpiochip1/3/4;
 `active_low`/`bias` default to a button between the pin and GND with the
-internal pull-up). No `[input.rec]` table means no button. Short press,
-50 ms debounce, edge-triggered; `kill -USR1 $(pidof maburplay)` is the same
-press for benches. `dvr.target` (`gs` | `vtx` | `both`) picks what a press
+internal pull-up). No `[input.rec]` table means no button. `bias` is only
+a request: the Radxa ZERO 3's kernel GPIO driver does not implement bias
+on the character device and gpiolib drops the refusal silently, so the
+pad keeps its default pull — pull-down on `PIN_32` — and the line idles
+low whatever `bias` says. Read the real level with `grep maburplay_rec
+/sys/kernel/debug/gpio` (raw, before `active_low`). A press counts once
+the line has held the pressed level for 50 ms (every disagreeing sample
+restarts the window, so contact chatter and noise spikes on the button
+wire never toggle the DVR); a hold fires once. `kill -USR1 $(pidof
+maburplay)` is the same press for benches. `dvr.target` (`gs` | `vtx` | `both`) picks what a press
 records (`docs/vtx-recorder.md`); on the GS, each start produces one file
 in whichever `dvr.mode` is configured:
 
