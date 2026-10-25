@@ -57,7 +57,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential git cmake pkg-config \
             bc bison flex gawk m4 texinfo \
-            patch file which rsync cpio tree whiptail \
+            patch file rsync cpio tree whiptail \
             unzip zip gzip bzip2 xz-utils zstd tar \
             wget curl ca-certificates \
             python3 python-is-python3 perl \
