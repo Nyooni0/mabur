@@ -89,6 +89,24 @@ test('attitude, heartbeat, gps and vfr hud map into state', () => {
   assert.equal(f.state.frames, 4);
 });
 
+test('gps global origin produces home NED relative to the current fix', () => {
+  const origin = payload(20);
+  setI32(origin, 0, 525000000);       // 52.5
+  setI32(origin, 4, -12000000);       // -1.2
+  setI32(origin, 8, 100000);          // 100 m MSL
+  const gps = payload(30);
+  setI32(gps, 8, 525010000);          // +0.001 deg north
+  setI32(gps, 12, -12000000);
+  gps[28] = 3; gps[29] = 12;
+  const f = new MavlinkFeed();
+  f.push(frame(49, origin));
+  f.push(frame(24, gps));
+  assert.ok(Math.abs(f.state.homeRelN - (-111.32)) < 0.01);
+  assert.ok(Math.abs(f.state.homeRelE) < 0.01);
+  assert.ok(Number.isFinite(f.state.homeDist));
+  assert.ok(f.state.homeDist > 100 && f.state.homeDist < 120);
+});
+
 test('a corrupted CRC is counted and does not update state', () => {
   const p = payload(28);
   setF32(p, 4, 1);

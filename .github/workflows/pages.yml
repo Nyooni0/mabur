@@ -13,7 +13,7 @@ name: Pages
 # reload on the first visit).
 on:
   push:
-    branches: [master]
+    branches: [master, osd-dev]
     paths:
       - 'web/**'
       - 'gs/src/**'
@@ -35,7 +35,7 @@ permissions:
 # A newer push to the same channel supersedes a queued one; stable and edge
 # never cancel each other.
 concurrency:
-  group: pages-${{ github.ref == 'refs/heads/master' && 'stable' || 'edge' }}
+  group: pages-${{ (github.ref == 'refs/heads/master' || (github.repository == 'Nyooni0/mabur' && github.ref == 'refs/heads/osd-dev')) && 'stable' || 'edge' }}
   cancel-in-progress: true
 
 jobs:
@@ -44,7 +44,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     env:
-      CHANNEL: ${{ github.ref == 'refs/heads/master' && 'stable' || 'edge' }}
+      CHANNEL: ${{ (github.ref == 'refs/heads/master' || (github.repository == 'Nyooni0/mabur' && github.ref == 'refs/heads/osd-dev')) && 'stable' || 'edge' }}
     defaults:
       run:
         working-directory: mabur

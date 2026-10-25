@@ -13,6 +13,7 @@ const CRC_EXTRA = new Map([
   [24, 24],   // GPS_RAW_INT
   [30, 39],   // ATTITUDE
   [33, 104],  // GLOBAL_POSITION_INT
+  [49, 39],   // GPS_GLOBAL_ORIGIN
   [74, 20],   // VFR_HUD
   [147, 154], // BATTERY_STATUS
 ]);
@@ -76,8 +77,13 @@ export class MavlinkFeed {
   static blank() {
     return {
       roll: 0, pitch: 0, heading: 0,
-      alt: 0, relAlt: 0, vario: 0,
+      alt: 0, relAlt: 0, vario: 0, altMsl: 0,
       airspeed: 0, groundspeed: 0, track: 0,
+      velN: 0, velE: 0, velD: 0,
+      lat: 0, lon: 0,
+      homeLat: NaN, homeLon: NaN, homeAlt: 0,
+      homeRelN: NaN, homeRelE: NaN, homeRelD: NaN,
+      homeDist: NaN, homeBearing: NaN,
       throttle: 0,
       sats: 0, fix: 0,
       batteryV: NaN, cellV: NaN, cells: 0, currentA: NaN, mah: NaN, batteryPct: NaN,
@@ -130,6 +136,16 @@ export class MavlinkFeed {
     if (this.buf.length > 4096) this.buf = new Uint8Array(0);  // not MAVLink
   }
 
+  updateHome(s) {
+    if (!Number.isFinite(s.homeLat) || !Number.isFinite(s.homeLon)) return;
+    if (!s.lat && !s.lon) return;
+    s.homeRelN = (s.homeLat - s.lat) * 111320;
+    s.homeRelE = (s.homeLon - s.lon) * 111320 * Math.cos(s.lat * Math.PI / 180);
+    s.homeRelD = (Number.isFinite(s.altMsl) && s.altMsl ? s.altMsl : 0) - s.homeAlt;
+    s.homeDist = Math.hypot(s.homeRelN, s.homeRelE);
+    s.homeBearing = ((Math.atan2(s.homeRelE, s.homeRelN) * 180 / Math.PI) + 360) % 360;
+  }
+
   decode(msgid, b, p, len, ptsUs, nowMs) {
     const s = this.state;
     if (msgid === 0 && len >= 9) {                       // HEARTBEAT
@@ -147,28 +163,42 @@ export class MavlinkFeed {
     } else if (msgid === 24 && len >= 30) {              // GPS_RAW_INT
       s.sats = b[p + 29];
       s.fix = b[p + 28];
+      s.lat = i32(b, p + 8) / 1e7;
+      s.lon = i32(b, p + 12) / 1e7;
       if (u16(b, p + 24) !== 0xffff) s.groundspeed = u16(b, p + 24) / 100;
       if (u16(b, p + 26) !== 0xffff) s.track = u16(b, p + 26) / 100;
       s.posMs = nowMs;
+      this.updateHome(s);
       s.updated = nowMs;
     } else if (msgid === 33 && len >= 28) {              // GLOBAL_POSITION_INT
+      s.lat = i32(b, p + 4) / 1e7;
+      s.lon = i32(b, p + 8) / 1e7;
       s.relAlt = i32(b, p + 16) / 1000;
-      s.alt = s.relAlt;
+      if (!Number.isFinite(s.altMsl) || !s.altMsl) s.alt = s.relAlt;
       // vx/vy/vz are NED cm/s. Kept for the FPM when the fancy HUD lands.
       s.velN = i16(b, p + 20) / 100;
       s.velE = i16(b, p + 22) / 100;
       s.velD = i16(b, p + 24) / 100;
       s.track = u16(b, p + 26) / 100;
       s.posMs = nowMs;
+      this.updateHome(s);
+      s.updated = nowMs;
+    } else if (msgid === 49 && len >= 12) {              // GPS_GLOBAL_ORIGIN
+      s.homeLat = i32(b, p + 0) / 1e7;
+      s.homeLon = i32(b, p + 4) / 1e7;
+      s.homeAlt = i32(b, p + 8) / 1000;
+      this.updateHome(s);
       s.updated = nowMs;
     } else if (msgid === 74 && len >= 20) {              // VFR_HUD
       s.airspeed = f32(b, p + 0);
       s.groundspeed = f32(b, p + 4);
       s.alt = f32(b, p + 8);
+      s.altMsl = s.alt;
       s.vario = f32(b, p + 12);
       s.heading = ((i16(b, p + 16) % 360) + 360) % 360;
       s.throttle = u16(b, p + 18);
       s.statusMs = nowMs;
+      this.updateHome(s);
       s.updated = nowMs;
     } else if (msgid === 147 && len >= 36) {             // BATTERY_STATUS
       const consumed = i32(b, p + 0);
