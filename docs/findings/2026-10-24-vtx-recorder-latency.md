@@ -1,9 +1,10 @@
 # What the VTX SD recorder costs the link — 2026-10-24 / 25
 
-**Status:** measured, not fixed. The recorder's SD writing loads the drone's
-core 0 (the TX path's core) and the GS allowance turns that jitter into a
-steady hold; the H.265 engine and the bind order are clean. Current
-reference → `docs/vtx-recorder.md` "Link latency cost".
+**Status:** measurements stand, mechanism superseded. The next day's
+`docs/findings/2026-10-25-vtx-recorder-engine-cost.md` showed the writer is
+innocent (a sink that discards every byte costs the same) and the cost is
+the record channel's second encode. Current reference →
+`docs/vtx-recorder.md` "Link latency cost".
 
 **Question.** With `[record]` on at the bundle's 40 Mb/s, glass latency
 rises and flights show spikes and stutter. The 2026-09-26 spike had shown

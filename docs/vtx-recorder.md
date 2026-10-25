@@ -158,29 +158,36 @@ the drone's first `Recording` report of this press.
 
 ## Link latency cost
 
-The recorder's channel costs the link nothing on the H.265 engine (the
-bind-order invariant above), but its writer does cost glass latency. At the
-bundle's 40 Mb/s the writer moves ~5 MB/s onto the vfat card with one
-`fsync` per fragment, all on core 0, which also carries the link's TX
-writer, the USB threads and the FEC worker (`drone/src/main.cpp`
-core-placement policy; only the frame producer has core 1 to itself). Core 0
-rises from roughly half busy to about four fifths, the drone's TX-queue
-wait doubles, and the per-frame transit tails (`dq`, `air`, `fec`, and the
-GS `dec` waiting on late slices) widen. The GS regulator's capture-time
-allowance is the transit p99 − p1 over the last 600 frames
-(`docs/phase-lock.md`), so a wider tail holds every frame longer:
+The recorder's channel does not delay the link's frames in the H.265
+engine (the bind-order invariant above; the MI per-stage delays read the
+same recording and idle), but running it costs the link glass latency all
+the same: while the second encode runs, every `maburd` thread — the TX
+writer, the USB threads and the FEC worker on core 0, the frame producer
+alone on core 1, the encoder thread — spends 30–45 % more CPU on unchanged
+work, which is memory-system contention from the engine's second 1080p60
+encode. The per-frame transit tails (`dq`, `air`, `fec`) widen, and the GS
+regulator's capture-time allowance, the transit p99 − p1 over the last 600
+frames (`docs/phase-lock.md`), holds every frame longer.
 
-- bench, 1080p60 at rung 5: **e2e p50 +2 ms** (p99 +2); at
-  `bitrate_kbps = 5000`, same encode, **+0.2 ms**;
-- in flight (0239, `dvr.target = "both"`): **+4 ms p50**, the allowance
-  pinned at `sched_cap_ms` most of the time, and after each demote the
-  drone's queue wait reaches 16–33 ms, which can trip the congestion shed
-  (enhance layer dropped, 30 fps on the glass for a couple of seconds).
+The cost scales with the pixels the record channel encodes per second and
+not with the bytes it writes: recording to a sink that discards everything
+costs the same as recording to the card, 5 Mb/s costs the same as
+40 Mb/s, and the writer's placement, priority, pacing and the kernel's
+writeback settings change nothing. Bench, 1080p60 link at rung 5, e2e p50:
 
-The cost scales with bytes written, not with the recorder's resolution or
-frame rate as such. Record: `docs/findings/2026-10-24-vtx-recorder-latency.md`.
-Untried levers: a lower `bitrate_kbps`, placing or deprioritising the
-writer and the kernel writeback away from the TX threads, larger fragments.
+- `size` 1920x1080, `fps` 60 (bundle): **+1 to +2 ms**; in flight (0239,
+  `dvr.target = "both"`) **+4 ms**, the allowance pinned at `sched_cap_ms`
+  most of the time, and after each demote the drone's queue wait reaches
+  16–33 ms, which can trip the congestion shed (enhance layer dropped,
+  30 fps on the glass for a couple of seconds);
+- `fps` 30: about +1 ms;
+- `size` 1280x720 at 60 fps (VPE port 1): +0.3 to +0.9 ms, the method's
+  noise floor being about 0.5 ms.
+
+Records: `docs/findings/2026-10-25-vtx-recorder-engine-cost.md` (the
+mechanism and the levers tried) and
+`docs/findings/2026-10-24-vtx-recorder-latency.md` (the flight numbers; its
+writer-side reading is superseded).
 
 ## Known issues
 
