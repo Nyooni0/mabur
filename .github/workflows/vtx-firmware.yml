@@ -8,6 +8,8 @@ name: VTX firmware
 # Buildroot image (tens of minutes). It needs the mabur OpenIPC builder fork
 # because upstream does not carry package/mabur.
 on:
+  push:
+    branches: [osd-dev]
   workflow_dispatch:
     inputs:
       target:
