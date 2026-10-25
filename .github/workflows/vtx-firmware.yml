@@ -105,7 +105,7 @@ jobs:
           set -euo pipefail
           # Detached checkout: skip the builder's self-update, which would fail.
           sed -i 's/^git pull$/true/' builder.sh
-          printf '%s\n' "$TARGET" | ./builder.sh
+          ./builder.sh "$TARGET"
           ls -lR archive/
 
       - name: Upload firmware
