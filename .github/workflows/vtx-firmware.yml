@@ -8,6 +8,8 @@ name: VTX firmware
 # Buildroot image (tens of minutes). It needs the mabur OpenIPC builder fork
 # because upstream does not carry package/mabur.
 on:
+  push:
+    branches: [osd-dev]
   workflow_dispatch:
     inputs:
       target:
@@ -73,7 +75,7 @@ jobs:
 
       - name: Select telemetry config
         env:
-          TELEMETRY: ${{ inputs.telemetry }}
+          TELEMETRY: ${{ inputs.telemetry || 'mavlink' }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -98,7 +100,7 @@ jobs:
       - name: Build OpenIPC image
         working-directory: openipc-builder
         env:
-          TARGET: ${{ inputs.target }}
+          TARGET: ${{ inputs.target || 'ssc338q_fpv_openipc-urllc-aio' }}
         run: |
           set -euo pipefail
           # Detached checkout: skip the builder's self-update, which would fail.
