@@ -100,12 +100,16 @@ jobs:
       - name: Build OpenIPC image
         working-directory: openipc-builder
         env:
-          TARGET: ${{ inputs.target || 'ssc338q_fpv_openipc-urllc-aio' }}
+          # NOTE: do not call this TARGET. The OpenIPC firmware Makefile uses
+          # TARGET as its output directory, so an env var of that name turns
+          # BR_CONF into <device>/openipc_defconfig and the build dies.
+          VTX_TARGET: ${{ inputs.target || 'ssc338q_fpv_openipc-urllc-aio' }}
         run: |
           set -euo pipefail
           # Detached checkout: skip the builder's self-update, which would fail.
           sed -i 's/^git pull$/true/' builder.sh
-          ./builder.sh "$TARGET"
+          ./builder.sh "$VTX_TARGET"
+          test -n "$(find archive -type f -print -quit)"
           ls -lR archive/
 
       - name: Upload firmware
