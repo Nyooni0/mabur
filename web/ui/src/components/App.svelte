@@ -101,6 +101,7 @@
   // updates it at the FC's rate. It is deliberately independent of the
   // decoder, so a frozen/late picture does not freeze the instruments.
   let fpvRaf = 0;
+  let mavView = $state(null);
   function fpvFlight() {
     const s = mav.state;
     if (!s.frames || mav.ageMs(performance.now()) >= 5000) return null;
@@ -196,7 +197,6 @@
   // copied into $state here -- including the core snapshot the header's link
   // tag and the record button's enable rule depend on.
   let view = $state(null), groups = $state([]), spark = $state('0,24 100,24'), status = $state('');
-  let mavView = $state(null);
   let tag = $state({ label: 'Disconnected', on: false });
   let core = $state.raw(null);
   let rec = $state({ state: 'unknown', err: null }), recMs = $state(0);
