@@ -20,13 +20,13 @@ export const WORKER_FAILED = 'Page worker failed — if served over LAN, the TLS
   + 'this device (see docs/web-gs.md).';
 
 export class Session {
-  constructor({ createModule, requestDevice, onAu, onStats, onOsd = () => {}, onRecClosed = () => {},
+  constructor({ createModule, requestDevice, onAu, onStats, onOsd = () => {}, onMav = () => {}, onRecClosed = () => {},
                 onChannel = () => {}, reload,
                 // Wrapped: a bare window.setTimeout called as timers.setTimeout(...) throws "Illegal invocation".
                 timers = { setTimeout: (f, ms) => setTimeout(f, ms), clearTimeout: (h) => clearTimeout(h) },
                 stopTimeoutMs = 3000, recOffTimeoutMs = 1000,
                 checkIsolated = () => {}, startRelay = null, prepareRelay = async () => {} }) {
-    Object.assign(this, { createModule, requestDevice, onAu, onStats, onOsd, onRecClosed, onChannel, reload, timers,
+    Object.assign(this, { createModule, requestDevice, onAu, onStats, onOsd, onMav, onRecClosed, onChannel, reload, timers,
       stopTimeoutMs, recOffTimeoutMs, checkIsolated, startRelay, prepareRelay });
     this.subs = new Set();
     this.mod = null;
@@ -80,6 +80,7 @@ export class Session {
         onAu: (...a) => { if (this.token === token) this.onAu(...a); },
         onStats: (text) => { if (this.token === token) this.handleStats(text); },
         onOsd: (rows, cols, cells) => { if (this.token === token) this.onOsd(rows, cols, cells); },
+        onMav: (buf, pts) => { if (this.token === token) this.onMav(buf, pts); },
         onError: (text) => { if (this.token === token) this.handleError(text); },
         onRelayRing: (buffer, ptr) => {
           if (this.token !== token || !this.startRelay) return;

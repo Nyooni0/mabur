@@ -87,6 +87,10 @@ constexpr uint8_t T_CAL_RESULT = 6;
 // recover; the drone re-sends them from its retransmit ring at the head of
 // the TxQueue.
 constexpr uint8_t T_NACK = 7;
+// Raw MAVLink tunnel (VTX -> VRX): one complete v1/v2 frame per body, with
+// the drone video-clock stamp at which it was forwarded. Display/telemetry
+// only; the GS parses it and may forward it to an external MAVLink client.
+constexpr uint8_t T_MAV = 8;
 
 constexpr uint8_t F_DISCOVERY = 0x04;
 
@@ -120,6 +124,11 @@ constexpr uint16_t CAP_TELEMETRY = 0x0002;
 // DiscAck.chip_caps bit: VTX understands T_CAL_CMD / T_CAL_RESULT and can run
 // a TX-power wall calibration. The GS refuses to start a session without it.
 constexpr uint16_t CAP_CALIBRATE = 0x0004;
+
+// DiscAck.chip_caps bit: VTX forwards raw MAVLink as T_MAV frames. The GS does
+// not need it to parse them (the pair ships together), but it is the
+// observability bit for "this drone has a MAVLink input".
+constexpr uint16_t CAP_MAV_TELEMETRY = 0x0008;
 
 // VRX -> VTX feedback: the GS-authoritative operating point. Every field
 // here is one maburd acts on. It used to also carry ack_seq, an alink-style
@@ -316,6 +325,21 @@ struct CalResult {
   // W rows, and the drone has no use for them. Nothing on this side of
   // the wire ever read one.
 };
+
+// One raw MAVLink frame forwarded over the link. `data` is the complete
+// frame as it came off the FC UART (magic through CRC; no 802.11 FCS), and
+// `pts_us` is the drone video-clock stamp at forward time (0 = unavailable).
+struct MavFrame {
+  uint32_t pts_us = 0;
+  std::vector<uint8_t> data;
+};
+
+// Largest MAVLink frame T_MAV will carry: v2 header(10) + 255 payload +
+// CRC(2) + signature(13) = 280. The body is 5 + 4 + 2 + data + 2.
+constexpr size_t kMavMaxFrame = 280;
+
+std::vector<uint8_t> pack_mav(const uint8_t* frame, size_t n, uint32_t pts_us = 0);
+std::optional<MavFrame> parse_mav(const uint8_t* buf, size_t len);
 
 // Tagged frames (DISC/RCF/CAL_CMD/CAL_RESULT) carry an 8-byte SipHash tag
 // (kTagLen) right before the CRC. pack_* always writes a tag -- keyed by

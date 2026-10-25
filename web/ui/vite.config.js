@@ -33,6 +33,11 @@ function webgsFromDist() {
 
 export default defineConfig({
   base: './',
+  // Vite normally fs.realpath()s every resolved module. On Windows its
+  // "safe realpath" helper shells out to `net use` once, which fails with
+  // EPERM in a confined dev sandbox; npm's flat node_modules needs no
+  // symlink resolution anyway.
+  resolve: { preserveSymlinks: true },
   plugins: [svelte(), webgsFromDist(), maburSw({
     srcFile: path.resolve(import.meta.dirname, 'sw/sw.js'),
     publicDir: path.resolve(import.meta.dirname, 'public'),

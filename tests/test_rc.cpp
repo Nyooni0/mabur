@@ -423,6 +423,29 @@ TEST(telem_round_trip_and_golden) {
   CHECK(!mabur::rc::parse_telem(flip.data(), flip.size()).has_value());
 }
 
+TEST(mav_round_trip_and_truncation) {
+  // T_MAV is additive: it carries a complete MAVLink frame unchanged plus
+  // the drone's pts stamp. No RC_VERSION bump is needed because every peer
+  // already ignores an unknown frame type (and an old GS simply never sees
+  // T_MAV unless the new drone is configured to send it).
+  std::vector<uint8_t> raw = {0xfd, 0x09, 0x00, 0x00, 0x01, 0x01, 0x01,
+                              0x00, 0x00, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  auto wire = mabur::rc::pack_mav(raw.data(), raw.size(), 0x12345678u);
+  CHECK(!wire.empty());
+  CHECK(wire.size() == 13 + raw.size());
+  CHECK(mabur::rc::frame_type(wire.data(), wire.size()) == mabur::rc::T_MAV);
+  auto back = mabur::rc::parse_mav(wire.data(), wire.size());
+  REQUIRE(back.has_value());
+  CHECK(back->pts_us == 0x12345678u);
+  CHECK(back->data == raw);
+
+  auto trunc = wire; trunc.pop_back();
+  CHECK(!mabur::rc::parse_mav(trunc.data(), trunc.size()).has_value());
+  auto flip = wire; flip[8] ^= 0xFF;
+  CHECK(!mabur::rc::parse_mav(flip.data(), flip.size()).has_value());
+  CHECK(mabur::rc::pack_mav(raw.data(), 0, 0).empty());
+}
+
 TEST(telem_rtt_sync_fields_round_trip) {
   // link-rtt: the drone echoes WHICH RCF rcf_age_ms is aging against (seq
   // identity for the GS send-time match) and its pts-domain clock at telem

@@ -186,6 +186,14 @@ WebGs::WebGs(const maburgs::Config& cfg, Mode mode, uint8_t start_ch, int width,
                       {f.body_mono_us, f.q_ms, f.enc_us, f.air_ms, f.sw_seq, true, f.retx});
   });
   agg_.set_rc_sink([this](uint8_t, const std::vector<uint8_t>& f, uint64_t us) {
+    if (mabur::rc::frame_type(f.data(), f.size()) == mabur::rc::T_MAV) {
+      if (auto m = mabur::rc::parse_mav(f.data(), f.size())) {
+        ++mav_frames_;
+        mav_bytes_ += m->data.size();
+        if (io_.on_mav) io_.on_mav(m->data.data(), m->data.size(), m->pts_us);
+      }
+      return;
+    }
     if (mabur::rc::frame_type(f.data(), f.size()) == mabur::rc::T_TELEM) {
       if (auto t = mabur::rc::parse_telem(f.data(), f.size())) {
         telem_ = t;
@@ -570,6 +578,8 @@ Stats WebGs::stats() const {
   }
   s.osd_snaps = msp_ ? msp_->snapshots_out() : 0;
   s.osd_screens = osd_.screens();
+  s.mav_frames = mav_frames_;
+  s.mav_bytes = mav_bytes_;
   s.channel = cards_.empty() ? start_ch_ : cards_[0]->channel();
   if (chan_) {
     const auto cs = chan_->snapshot(0);
@@ -660,6 +670,8 @@ std::string stats_json(const Stats& s) {
   j["idr_req"] = s.idr_req;
   j["osd_snaps"] = s.osd_snaps;
   j["osd_screens"] = s.osd_screens;
+  j["mav_frames"] = s.mav_frames;
+  j["mav_bytes"] = s.mav_bytes;
   if (s.nack) {
     nlohmann::json n;
     const auto& c = s.nack->cum;

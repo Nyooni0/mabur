@@ -973,6 +973,40 @@ more. The 5 s blank counts from the last *published* screen, where
 `maburplay` counts from the last datagram. That is the same thing in
 practice, since Betaflight sends DRAW_SCREEN continuously.
 
+## MAVLink telemetry tunnel
+
+`maburd` can forward the FC's MAVLink stream byte-for-byte as `T_MAV` RC
+frames (`[mavlink]` in the drone config; `serial` must differ from
+`[msp].serial`). This is additive: `T_MAV` is a new frame type under the
+existing `RC_VERSION`, and a GS that does not know it drops it. `T_MAV` is
+not FEC-protected -- a lost sample is simply a lost HUD update.
+
+`WebGs` decodes `T_MAV` in the RC sink in both modes, counts `mav_frames` /
+`mav_bytes` in the stats line, and hands the raw frame to the page through
+`Module.onMav`. The page (`web/ui/src/lib/mavlink.js`) validates MAVLink
+CRC_EXTRA and maps `HEARTBEAT`, `SYS_STATUS`, `GPS_RAW_INT`, `ATTITUDE`,
+`GLOBAL_POSITION_INT`, `VFR_HUD` and `BATTERY_STATUS` into the small
+telemetry strip drawn over the video (battery/cell/current/mAh, mode/armed,
+sats, alt/speed/throttle). The strip is independent of the MSP DisplayPort
+grid; a MAVLink-only aircraft has no grid.
+
+The drone's `[mavlink]` block:
+
+```toml
+[mavlink]
+enable  = true
+serial  = "/dev/ttyS2"   # the FC UART; disable [msp] on the same port
+baud    = 115200
+max_bps = 4000
+```
+
+The FC must be configured to emit MAVLink on that UART. INAV 9 exposes the
+stream rates as `mavlink_extra1_rate` (ATTITUDE), `mavlink_pos_rate`,
+`mavlink_extra2_rate` (VFR_HUD/HEARTBEAT), `mavlink_ext_status_rate` and
+`mavlink_extra3_rate`; ArduPilot uses `SERIALn_PROTOCOL=2` plus `SRn_*`.
+No GCS heartbeat is sent by this first tunnel; a telemetry stream that stops
+without one is a separate follow-up.
+
 ## Software NACK
 
 GS mode runs `docs/fec-nack.md`'s base-layer selective repeat with the same

@@ -178,6 +178,27 @@ void emit_au(webgs::Au&& a) {
 #endif
 }
 
+// Hands one raw MAVLink frame to the page. Native live: nothing (the STATS
+// line counts mav_frames/mav_bytes).
+void emit_mav(const uint8_t* frame, size_t len, uint32_t pts_us) {
+#ifdef WEBGS_PAGE
+  if (!frame || len == 0) return;
+  auto* p = static_cast<uint8_t*>(std::malloc(len));
+  std::memcpy(p, frame, len);
+  MAIN_THREAD_ASYNC_EM_ASM(
+      {
+        const b = HEAPU8.slice($0, $0 + $1).buffer;
+        _free($0);
+        if (Module['onMav']) Module['onMav'](b, $2);
+      },
+      p, static_cast<int>(len), static_cast<double>(pts_us));
+#else
+  (void)frame;
+  (void)len;
+  (void)pts_us;
+#endif
+}
+
 // Hands one MSP OSD screen to the page.
 // Native live: nothing (the STATS line counts osd_screens).
 void emit_osd(int rows, int cols, const uint16_t* cells) {
@@ -397,6 +418,7 @@ int live_loop(const LiveOpts& o, const maburgs::Config& cfg, uint8_t ch, int wid
     emit_au(std::move(a));
   };
   io.on_osd = emit_osd;
+  io.on_mav = emit_mav;
   io.on_log = [](const std::string& l) { std::fprintf(stderr, "%s\n", l.c_str()); };
   io.on_channel_store = [](uint8_t c) {
     std::printf("CHANNEL %u\n", static_cast<unsigned>(c));
