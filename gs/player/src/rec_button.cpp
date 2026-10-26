@@ -37,15 +37,17 @@ bool match_pin_name(const char* name, int pin) {
 bool ButtonDebounce::feed(bool level, uint64_t now_ms) {
   if (!seeded_) {
     seeded_ = true;
-    level_ = level;
-    last_change_ms_ = now_ms;
+    level_ = cand_ = level;
+    cand_ms_ = now_ms;
     return false;
   }
-  if (level == level_) return false;
-  if (now_ms - last_change_ms_ < kDebounceMs) return false;  // bounce
-  level_ = level;
-  last_change_ms_ = now_ms;
-  return level;  // a press, never a release
+  if (level != cand_) {
+    cand_ = level;
+    cand_ms_ = now_ms;
+  }
+  if (cand_ == level_ || now_ms - cand_ms_ < kDebounceMs) return false;
+  level_ = cand_;
+  return level_;  // a press, never a release
 }
 
 RecButton::~RecButton() {
