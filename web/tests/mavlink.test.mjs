@@ -44,7 +44,7 @@ function setU32(b, o, v) { new DataView(b.buffer, b.byteOffset + o, 4).setUint32
 
 test('CRC_EXTRA table is pinned to the message definitions', () => {
   assert.deepEqual(Object.fromEntries(MAVLINK_CRC_EXTRA), {
-    0: 50, 1: 124, 24: 24, 30: 39, 33: 104, 74: 20, 147: 154,
+    0: 50, 1: 124, 24: 24, 30: 39, 33: 104, 49: 39, 74: 20, 147: 154, 253: 83,
   });
 });
 
@@ -136,6 +136,72 @@ test('global position gives relative altitude, not the MSL value', () => {
   assert.equal(f.state.alt, 42.3);
   assert.equal(f.state.track, 90);
   assert.equal(f.state.velN, 1);
+});
+
+test('GPS dilution and home vector decode', () => {
+  const gps = payload(30);
+  setI32(gps, 8, 525000000);      // 52.5
+  setI32(gps, 12, -12000000);     // -1.2
+  setU16(gps, 20, 120);           // hdop 1.20
+  gps[28] = 3;
+  gps[29] = 12;
+  const origin = payload(12);
+  setI32(origin, 0, 525000000);
+  setI32(origin, 4, -12000000);
+  setI32(origin, 8, 100000);      // home 100 m MSL
+  const pos = payload(28);
+  setI32(pos, 4, 525001000);      // ~11 m north
+  setI32(pos, 8, -12000000);
+  setI32(pos, 16, 50000);         // 50 m relative
+  const vfr = payload(20);
+  setF32(vfr, 8, 150);            // 150 m MSL
+  const f = new MavlinkFeed();
+  f.push(frame(24, gps));
+  assert.equal(f.state.hdop, 1.2);
+  f.push(frame(49, origin));
+  f.push(frame(33, pos));
+  f.push(frame(74, vfr));
+  assert.ok(f.state.homeRelN < 0);
+  assert.ok(Math.abs(f.state.homeRelD - 50) < 1e-6);
+  assert.ok(f.state.homeDist > 0);
+});
+
+test('armed time, odometer and efficiency derive from the stream', () => {
+  const hb = payload(9);
+  setU32(hb, 0, 0);
+  hb[4] = 1;
+  hb[6] = 0x80;                   // armed
+  const pos = payload(28);
+  setI32(pos, 4, 525000000);
+  setI32(pos, 8, -12000000);
+  const pos2 = payload(28);
+  setI32(pos2, 4, 525006000);     // ~67 m north
+  setI32(pos2, 8, -12000000);
+  const bat = payload(36);
+  setI32(bat, 0, 500);            // 500 mAh used
+  const f = new MavlinkFeed();
+  f.push(frame(0, hb), 0, 1000);
+  f.push(frame(33, pos), 0, 2000);
+  f.push(frame(33, pos2), 0, 3000);
+  f.push(frame(147, bat), 0, 3000);
+  assert.ok(f.state.tripDist > 60 && f.state.tripDist < 75);
+  assert.ok(f.state.odometer >= f.state.tripDist);
+  assert.ok(Number.isFinite(f.state.efficiency));
+  hb[6] = 0;                      // disarmed
+  f.push(frame(0, hb), 0, 4000);
+  assert.ok(Math.abs(f.state.flightTime - 3) < 1e-6);
+});
+
+test('STATUSTEXT becomes a message with its severity', () => {
+  const st = payload(51);
+  st[0] = 4;                      // MAV_SEVERITY_WARNING
+  const text = 'LOW BAT';
+  for (let i = 0; i < text.length; i++) st[1 + i] = text.charCodeAt(i);
+  const f = new MavlinkFeed();
+  f.push(frame(253, st));
+  assert.equal(f.state.messages.length, 1);
+  assert.equal(f.state.messages[0].text, 'LOW BAT');
+  assert.equal(f.state.messages[0].severity, 4);
 });
 
 test('a corrupted CRC is counted and does not update state', () => {

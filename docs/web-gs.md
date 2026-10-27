@@ -993,11 +993,12 @@ queued.
 `mav_bytes` in the stats line, and hands the raw frame to the page through
 `Module.onMav`. The page (`web/ui/src/lib/mavlink.js`) validates MAVLink
 CRC_EXTRA and maps `HEARTBEAT`, `SYS_STATUS`, `GPS_RAW_INT`, `ATTITUDE`,
-`GLOBAL_POSITION_INT`, `VFR_HUD` and `BATTERY_STATUS` into the telemetry
-strip over the video (mode/armed, sats, battery/cell/current/mAh/percent,
-alt/speed/throttle). The strip clears after 5 s without a decoded frame. It
-is independent of the MSP DisplayPort grid: a MAVLink-only aircraft gets the
-strip and no grid.
+`GLOBAL_POSITION_INT`, `GPS_GLOBAL_ORIGIN`, `VFR_HUD`, `BATTERY_STATUS` and
+`STATUSTEXT` into the vector HUD over the video (attitude/heading, speed and
+altitude tapes, VSI, flight-path and home markers, SATS/HDOP, mode, throttle,
+armed, timer, trip/total distance, efficiency, battery and status messages).
+The HUD clears after 5 s without a decoded frame. It is independent of the
+MSP DisplayPort grid: a MAVLink-only aircraft gets the HUD and no grid.
 
 The drone's `[mavlink]` block:
 
