@@ -17,6 +17,7 @@ const SEARCH = 10;
 const MIN_VAR = 80;       // flat sky/water: no usable feature
 const MAX_SCORE = 24;     // mean abs luma difference for a confident match
 const SMOOTH_S = 0.35;    // fixed-wing auto modes can take a slow follow
+const EST_MS = 50;        // estimate at 20 Hz, not on every decoded frame
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
@@ -71,6 +72,7 @@ export class Stabilizer {
     this.prev = [null, null];
     this.size = 0;
     this.lastT = 0;
+    this.lastEstT = 0;
     this.sx = 0; this.sy = 0; this.sa = 0;
     this.rawX = 0; this.rawY = 0; this.rawA = 0;
     this.cx = 0; this.cy = 0; this.ca = 0;
@@ -80,6 +82,7 @@ export class Stabilizer {
   reset() {
     this.prev = [null, null];
     this.lastT = 0;
+    this.lastEstT = 0;
     this.sx = this.sy = this.sa = 0;
     this.rawX = this.rawY = this.rawA = 0;
     this.cx = this.cy = this.ca = 0;
@@ -115,13 +118,15 @@ export class Stabilizer {
   // frame: VideoFrame. mode: 'translate' | 'rotate'. Returns the correction
   // to apply to the video canvas, in source pixels and radians.
   update(frame, mode) {
-    const w = frame.displayWidth, h = frame.displayHeight;
     if (mode !== this.mode) {
       this.mode = mode;
       this.reset();
     }
     const now = performance.now();
-    const dt = this.lastT ? clamp((now - this.lastT) / 1000, 0.001, 0.1) : 0.016;
+    if (this.lastEstT && now - this.lastEstT < EST_MS) return this.last;
+    this.lastEstT = now;
+    const w = frame.displayWidth, h = frame.displayHeight;
+    const dt = this.lastT ? clamp((now - this.lastT) / 1000, 0.001, 0.2) : 0.05;
     this.lastT = now;
 
     const centers = mode === 'rotate'

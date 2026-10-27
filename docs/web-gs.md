@@ -1023,7 +1023,7 @@ latency. `Translate` tracks one centre window; `Rotate + translate` tracks
 two windows at horizontal 1/3 and 2/3 and fits a similarity transform from
 their displacements.
 
-Motion is estimated per frame as a 64x64 luma SAD search (±10 px), smoothed
+Motion is estimated at 20 Hz as a 64x64 luma SAD search (±10 px), smoothed
 over ~0.35 s, and applied as a CSS transform to the video layer only; the
 MSP and vector OSD canvases stay fixed. The transform sits on a wrapper div,
 not the canvas, so the compositor does not resample a stale canvas layer
