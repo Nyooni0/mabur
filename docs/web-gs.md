@@ -977,10 +977,11 @@ practice, since Betaflight sends DRAW_SCREEN continuously.
 
 `maburd` forwards the flight controller's MAVLink stream byte-for-byte as
 `T_MAV` frames (`[mavlink]` in the drone config; `serial` must differ from
-`[msp].serial`). This is a downlink only: the drone never parses or rewrites
-the frames, and no GCS heartbeat is sent back to the FC. A lost `T_MAV` is a
-lost HUD update; the type is not FEC-protected and does not touch the video
-path.
+`[msp].serial`). The shipped bundle enables the tunnel on `/dev/ttyS2` and
+runs `[msp]` disabled on that port. This is a downlink only: the drone never
+parses or rewrites the frames, and no GCS heartbeat is sent back to the FC. A
+lost `T_MAV` is a lost HUD update; the type is not FEC-protected and does not
+touch the video path.
 
 The envelope is `magic(2) | version | type | pts_us(4) | len(2) | frame |
 crc(2)`, so the body is 12 bytes larger than one complete MAVLink v1/v2
