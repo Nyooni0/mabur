@@ -6,11 +6,9 @@ name: VTX firmware
 #
 # A build downloads the OpenIPC toolchain and compiles a full Buildroot
 # image (tens of minutes). It needs the mabur OpenIPC builder fork because
-# upstream does not carry package/mabur. The push trigger exists so this
-# branch can produce its first image; remove it once the artifact is down.
+# upstream does not carry package/mabur. Manual only: a push to a branch
+# would start a full image build on every commit.
 on:
-  push:
-    branches: [mavlink]
   workflow_dispatch:
     inputs:
       target:
