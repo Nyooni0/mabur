@@ -1024,10 +1024,14 @@ two windows at horizontal 1/3 and 2/3 and fits a similarity transform from
 their displacements.
 
 Motion is estimated at 20 Hz as a 64x64 luma SAD search (±10 px), smoothed
-over ~0.35 s, and applied as a CSS transform to the video layer only; the
-MSP and vector OSD canvases stay fixed. The transform sits on a wrapper div,
-not the canvas, so the compositor does not resample a stale canvas layer
-while it is being redrawn. `Crop %` (0–30) scales the picture
+over ~0.35 s, and applied inside the video draw: the WebGL colortrans shader
+samples through the inverse transform, and the flat path uses a 2D canvas
+transform. The MSP and vector OSD canvases stay fixed. It is deliberately
+not a CSS transform on the canvas — compositing a transformed canvas while
+it is being redrawn looks like data mosh on tablets. The accumulated
+correction leaks back to centre with a 2 s time constant, so a long yaw does
+not park it against the clamp; one `[webgs] stab` line per second reports the
+window scores, displacement and correction for the console. `Crop %` (0–30) scales the picture
 in to hide the moving edges; 0 keeps the full frame and shows black bars when
 the transform reaches the border. A low-variance window (sky, water) or a
 poor match falls back to the other window, then to the last correction.

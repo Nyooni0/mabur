@@ -40,6 +40,9 @@ const M = P.matrix;
 export const CT_FRAG = `precision highp float;
 varying vec2 v_uv;
 uniform sampler2D tex;
+uniform vec2 u_rot;
+uniform float u_zoom;
+uniform vec2 u_shift;
 const float kYoff = ${f(YOFF)};
 const float kBlackLift = ${f(P.blackLift)};
 const mat3 kM = mat3(${[M[0], M[3], M[6], M[1], M[4], M[7], M[2], M[5], M[8]].join(', ')});
@@ -49,7 +52,18 @@ const float kGain = ${f(P.gain)};
 const vec3 kMult = vec3(${P.rgbMult.map(f).join(', ')});
 const float kSat = ${f(SAT)};
 void main() {
-  vec3 c = texture2D(tex, v_uv).rgb;
+  // Inverse of the stabilizer canvas transform: sample the source through
+  // the inverse rotation/scale/translation around the centre. Outside the
+  // source is black; Crop % controls how much margin hides that.
+  vec2 p = v_uv - 0.5 - u_shift;
+  p = mat2(u_rot.x, -u_rot.y, u_rot.y, u_rot.x) * p;
+  p /= u_zoom;
+  vec2 uv = p + 0.5;
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+  }
+  vec3 c = texture2D(tex, uv).rgb;
   vec3 y = kM * (c - vec3(kYoff)) + vec3(kBlackLift);
   c = clamp(y, 0.0, 1.0);
   y = pow(c, vec3(kGamma));
@@ -109,16 +123,28 @@ export class ColorTransGl {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.uniform1i(gl.getUniformLocation(prog, 'tex'), 0);
+    this.uRot = gl.getUniformLocation(prog, 'u_rot');
+    this.uZoom = gl.getUniformLocation(prog, 'u_zoom');
+    this.uShift = gl.getUniformLocation(prog, 'u_shift');
+    gl.uniform2f(this.uRot, 1, 0);
+    gl.uniform1f(this.uZoom, 1);
+    gl.uniform2f(this.uShift, 0, 0);
   }
 
   get ok() { return !this.lost && !this.gl.isContextLost(); }
 
-  draw(frame) {
+  // tf: optional {x, y, rad, zoom} correction in source pixels/radians.
+  draw(frame, tf = null) {
     const { gl, canvas } = this;
     if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
       canvas.width = frame.displayWidth;
       canvas.height = frame.displayHeight;
     }
+    const zoom = tf?.zoom || 1;
+    const rad = tf?.rad || 0;
+    gl.uniform2f(this.uRot, Math.cos(rad), Math.sin(rad));
+    gl.uniform1f(this.uZoom, zoom);
+    gl.uniform2f(this.uShift, (tf?.x || 0) / canvas.width, (tf?.y || 0) / canvas.height);
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, frame);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);

@@ -29,7 +29,6 @@
 
   let canvas = $state(null);
   let glCanvas = $state(null);
-  let videoFrame = $state(null);
   let osdCanvas = $state(null);
   let fpvCanvas = $state(null);
   let W = $state(innerWidth), H = $state(innerHeight);
@@ -76,7 +75,7 @@
   }
 
   const video = new VideoPipeline({ getCanvas: () => canvas, getGlCanvas: () => glCanvas,
-    getStabTarget: () => videoFrame, getMode: () => sess.mode,
+    getMode: () => sess.mode,
     getColortrans: () => ui.cfg.colortrans, getStabilize: () => ui.cfg.stabilize,
     getStabCrop: () => ui.cfg.stabCrop, onWantIdr: () => session.requestIdr() });
   const tele = new Telemetry(video);
@@ -437,11 +436,9 @@
       <div class="videobox">
         <!-- ONE canvas for the page lifetime: never inside a layout-dependent {#if}. -->
         <div class="videoinner">
-          <div class="videoframe" bind:this={videoFrame}>
-            <canvas bind:this={canvas} width="1280" height="720"></canvas>
-            <!-- colortrans (WebGL): stacked on the flat canvas; VideoPipeline shows whichever drew the last frame. -->
-            <canvas class="vgl" bind:this={glCanvas} width="1280" height="720" style="visibility:hidden"></canvas>
-          </div>
+          <canvas bind:this={canvas} width="1280" height="720"></canvas>
+          <!-- colortrans (WebGL): stacked on the flat canvas; VideoPipeline shows whichever drew the last frame. -->
+          <canvas class="vgl" bind:this={glCanvas} width="1280" height="720" style="visibility:hidden"></canvas>
           <!-- MSP OSD: page-lifetime like the video canvas; .videoinner IS the visible area in every layout. -->
           <canvas class="osd" bind:this={osdCanvas}></canvas>
           <!-- Vector HUD: MSP grid below, MAVLink attitude/tapes above. -->
@@ -497,7 +494,6 @@
   .videocol { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .videobox { flex: 1; min-height: 0; display: grid; place-items: center; container-type: size; background: var(--color-bg); }
   .videoinner { position: relative; aspect-ratio: 16 / 9; width: min(100cqw, calc(100cqh * 16 / 9)); border-radius: var(--radius-sm); overflow: hidden; background: #000; }
-  .videoframe { position: absolute; inset: 0; }
   canvas { display: block; width: 100%; height: 100%; object-fit: contain; }
   .osd, .fpvosd, .vgl { position: absolute; inset: 0; pointer-events: none; }
   .immersive .row { position: absolute; inset: 0; padding: 0; gap: 0; }

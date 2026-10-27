@@ -18,6 +18,8 @@ const MIN_VAR = 80;       // flat sky/water: no usable feature
 const MAX_SCORE = 24;     // mean abs luma difference for a confident match
 const SMOOTH_S = 0.35;    // fixed-wing auto modes can take a slow follow
 const EST_MS = 50;        // estimate at 20 Hz, not on every decoded frame
+const RECENTER_S = 2.0;   // slowly pull a held correction back to centre
+const LOG_MS = 1000;      // one copyable debug line per second
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
@@ -73,6 +75,7 @@ export class Stabilizer {
     this.size = 0;
     this.lastT = 0;
     this.lastEstT = 0;
+    this.lastLog = 0;
     this.sx = 0; this.sy = 0; this.sa = 0;
     this.rawX = 0; this.rawY = 0; this.rawA = 0;
     this.cx = 0; this.cy = 0; this.ca = 0;
@@ -83,6 +86,7 @@ export class Stabilizer {
     this.prev = [null, null];
     this.lastT = 0;
     this.lastEstT = 0;
+    this.lastLog = 0;
     this.sx = this.sy = this.sa = 0;
     this.rawX = this.rawY = this.rawA = 0;
     this.cx = this.cy = this.ca = 0;
@@ -152,7 +156,13 @@ export class Stabilizer {
       const i = ok.findIndex(Boolean);
       if (i >= 0) { tx = results[i].dx; ty = results[i].dy; }
     }
-    if (tx === null) return this.last;   // no confident motion: hold
+    if (tx === null) {
+      const leak = Math.exp(-dt / RECENTER_S);
+      this.cx *= leak; this.cy *= leak; this.ca *= leak;
+      this.last = { x: this.cx, y: this.cy, rad: this.ca };
+      this.log(now, mode, results, null);
+      return this.last;   // no confident motion: hold, slowly recenter
+    }
 
     const a = 1 - Math.exp(-dt / SMOOTH_S);
     this.sx += (tx - this.sx) * a;
@@ -163,11 +173,33 @@ export class Stabilizer {
     const maxX = w * 0.12, maxY = h * 0.12, maxA = (8 * Math.PI) / 180;
     // Accumulate the correction: the canvas is not re-based each frame, so a
     // one-frame bump has to stay compensated until the smooth path catches
-    // up. C = sum(smoothed) - sum(raw).
-    this.cx = clamp(this.cx + (this.sx - tx), -maxX, maxX);
-    this.cy = clamp(this.cy + (this.sy - ty), -maxY, maxY);
-    this.ca = clamp(this.ca + (this.sa - ra), -maxA, maxA);
+    // up. C = sum(smoothed) - sum(raw), with a slow leak so a sustained yaw
+    // cannot park the correction against its clamp.
+    const leak = Math.exp(-dt / RECENTER_S);
+    this.cx = clamp(this.cx * leak + (this.sx - tx), -maxX, maxX);
+    this.cy = clamp(this.cy * leak + (this.sy - ty), -maxY, maxY);
+    this.ca = clamp(this.ca * leak + (this.sa - ra), -maxA, maxA);
     this.last = { x: this.cx, y: this.cy, rad: this.ca };
+    this.log(now, mode, results, { tx, ty, ra });
     return this.last;
+  }
+
+  log(now, mode, results, m) {
+    if (now - this.lastLog < LOG_MS) return;
+    this.lastLog = now;
+    const scores = results.map((r) => (r ? +r.score.toFixed(1) : null));
+    const d = results.map((r) => (r ? [r.dx, r.dy] : null));
+    const deg = (v) => +((v * 180) / Math.PI).toFixed(2);
+    console.log('[webgs] stab', {
+      mode,
+      scores,
+      d,
+      tx: m ? +m.tx.toFixed(2) : null,
+      ty: m ? +m.ty.toFixed(2) : null,
+      ra: m ? deg(m.ra) : null,
+      cx: +this.cx.toFixed(2),
+      cy: +this.cy.toFixed(2),
+      ca: deg(this.ca),
+    });
   }
 }

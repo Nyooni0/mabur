@@ -14,12 +14,11 @@ const now = () => performance.timeOrigin + performance.now();
 export class VideoPipeline {
   // getCanvas: the flat 2D canvas; getGlCanvas: the colortrans WebGL one
   // (a canvas cannot change context type). getColortrans: the live toggle.
-  constructor({ getCanvas, getGlCanvas = () => null, getStabTarget = () => null, getMode,
+  constructor({ getCanvas, getGlCanvas = () => null, getMode,
     getColortrans = () => false,
     getStabilize = () => 'off', getStabCrop = () => 0, onWantIdr = () => {} }) {
     this.getCanvas = getCanvas;
     this.getGlCanvas = getGlCanvas;
-    this.getStabTarget = getStabTarget;
     this.getMode = getMode;
     this.getColortrans = getColortrans;
     this.getStabilize = getStabilize;
@@ -157,51 +156,58 @@ export class VideoPipeline {
 
   // Page-only stabilizer. The disabled path is one string compare and no
   // frame reads; the stabilizer object is only built when a mode is picked.
-  applyStabilizer(frame, mode) {
-    if (this.stabFailed) return;
+  // The warp is done inside the draw (WebGL shader or 2D transform), never
+  // by a CSS transform on the canvas: compositing a transformed canvas
+  // while it is being redrawn looks like data mosh on tablets.
+  stabilizerCorrection(frame, mode) {
+    if (this.stabFailed) return null;
     if (!this.stab) {
       try { this.stab = new Stabilizer(); }
       catch (e) {
         console.error('[webgs] stabilizer unavailable:', e);
         this.stabFailed = true;
-        return;
+        return null;
       }
     }
     const c = this.stab.update(frame, mode);
-    const w = frame.displayWidth || 1, h = frame.displayHeight || 1;
     const crop = Math.max(0, Math.min(30, Number(this.getStabCrop()) || 0));
-    const zoom = 1 / (1 - (2 * crop) / 100);
-    const tf = `translate(${((c.x / w) * 100).toFixed(3)}%, ${((c.y / h) * 100).toFixed(3)}%)`
-      + ` rotate(${((c.rad * 180) / Math.PI).toFixed(3)}deg) scale(${zoom.toFixed(4)})`;
-    // Transform the wrapper, not the canvases: scaling/rotating a canvas
-    // element itself makes the compositor resample a stale canvas layer
-    // while it is being redrawn (visible smearing/tearing on tablets).
-    const target = this.getStabTarget() || null;
-    const targets = target ? [target] : [this.getCanvas(), this.getGlCanvas()];
-    for (const el of targets) {
-      if (!el) continue;
-      el.style.transformOrigin = '50% 50%';
-      el.style.transform = tf;
-    }
     this.stabOn = true;
+    return { x: c.x, y: c.y, rad: c.rad, zoom: 1 / (1 - (2 * crop) / 100) };
   }
 
   clearStabilizer() {
     if (!this.stabOn) return;
-    const target = this.getStabTarget() || null;
-    const targets = target ? [target] : [this.getCanvas(), this.getGlCanvas()];
-    for (const el of targets) {
-      if (!el) continue;
-      el.style.transform = '';
-      el.style.transformOrigin = '';
-    }
     this.stab?.reset();
     this.stabOn = false;
   }
 
+  drawFlat(frame, corr) {
+    const canvas = this.getCanvas();
+    if (!canvas) return;
+    const w = frame.displayWidth, h = frame.displayHeight;
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (!corr) {
+      ctx.drawImage(frame, 0, 0);
+      return;
+    }
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, w, h);
+    ctx.translate(w / 2 + corr.x, h / 2 + corr.y);
+    ctx.rotate(corr.rad);
+    ctx.scale(corr.zoom, corr.zoom);
+    ctx.drawImage(frame, -w / 2, -h / 2, w, h);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+
   draw(frame) {
     const stab = this.getStabilize();
-    if (stab && stab !== 'off') this.applyStabilizer(frame, stab);
+    let corr = null;
+    if (stab && stab !== 'off') corr = this.stabilizerCorrection(frame, stab);
     else if (this.stabOn) this.clearStabilizer();
 
     const want = this.getColortrans();
@@ -210,15 +216,10 @@ export class VideoPipeline {
     let canvas;
     if (ct) {
       canvas = this.getGlCanvas();
-      ct.draw(frame);
+      ct.draw(frame, corr);
     } else {
       canvas = this.getCanvas();
-      if (!canvas) return;
-      if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
-        canvas.width = frame.displayWidth;
-        canvas.height = frame.displayHeight;
-      }
-      canvas.getContext('2d').drawImage(frame, 0, 0);
+      this.drawFlat(frame, corr);
     }
     // Only the canvas that got this frame is visible (the toggle flips live).
     if (canvas !== this.shown) {
