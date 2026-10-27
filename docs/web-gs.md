@@ -973,6 +973,46 @@ more. The 5 s blank counts from the last *published* screen, where
 `maburplay` counts from the last datagram. That is the same thing in
 practice, since Betaflight sends DRAW_SCREEN continuously.
 
+## MAVLink telemetry tunnel
+
+`maburd` forwards the flight controller's MAVLink stream byte-for-byte as
+`T_MAV` frames (`[mavlink]` in the drone config; `serial` must differ from
+`[msp].serial`). This is a downlink only: the drone never parses or rewrites
+the frames, and no GCS heartbeat is sent back to the FC. A lost `T_MAV` is a
+lost HUD update; the type is not FEC-protected and does not touch the video
+path.
+
+The envelope is `magic(2) | version | type | pts_us(4) | len(2) | frame |
+crc(2)`, so the body is 12 bytes larger than one complete MAVLink v1/v2
+frame (magic through CRC). `[mavlink] max_bps` is a token bucket over the
+whole forwarder (default 4000 B/s); frames over budget are dropped, not
+queued.
+
+`WebGs` decodes `T_MAV` in the RC sink in both modes, counts `mav_frames` /
+`mav_bytes` in the stats line, and hands the raw frame to the page through
+`Module.onMav`. The page (`web/ui/src/lib/mavlink.js`) validates MAVLink
+CRC_EXTRA and maps `HEARTBEAT`, `SYS_STATUS`, `GPS_RAW_INT`, `ATTITUDE`,
+`GLOBAL_POSITION_INT`, `VFR_HUD` and `BATTERY_STATUS` into the telemetry
+strip over the video (mode/armed, sats, battery/cell/current/mAh/percent,
+alt/speed/throttle). The strip clears after 5 s without a decoded frame. It
+is independent of the MSP DisplayPort grid: a MAVLink-only aircraft gets the
+strip and no grid.
+
+The drone's `[mavlink]` block:
+
+```toml
+[mavlink]
+enable  = true
+serial  = "/dev/ttyS2"   # the FC UART; disable [msp] on the same port
+baud    = 115200
+max_bps = 4000
+```
+
+The FC must be configured to emit MAVLink on that UART. INAV exposes the
+stream rates as `mavlink_extra1_rate` (ATTITUDE), `mavlink_pos_rate`,
+`mavlink_extra2_rate` (VFR_HUD/HEARTBEAT), `mavlink_ext_status_rate` and
+`mavlink_extra3_rate`; ArduPilot uses `SERIALn_PROTOCOL=2` plus `SRn_*`.
+
 ## Software NACK
 
 GS mode runs `docs/fec-nack.md`'s base-layer selective repeat with the same

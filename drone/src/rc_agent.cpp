@@ -932,6 +932,7 @@ rc::DiscAck RcAgent::make_disc_ack(uint32_t vrx_nonce, uint32_t vtx_nonce, uint8
   // wires them up) -- a real gate, unlike CAP_TELEMETRY:
   // gs/src/cal_session.cpp's start() refuses a session outright without it.
   ack.chip_caps = rc::CAP_FRAME_WIRE | rc::CAP_TELEMETRY | rc::CAP_CALIBRATE;
+  if (cfg_.mavlink.enable) ack.chip_caps |= rc::CAP_MAV_TELEMETRY;
   // agreed is member_(op_channel) ? the DISC's proposed op_channel : the
   // current channel -- computed by the caller, which also stores it in the
   // pending pair whose promotion drives the actual retune, so the ack and the

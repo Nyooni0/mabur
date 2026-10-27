@@ -64,6 +64,7 @@
 #include "mabur/fec_worker.h"
 #include "mabur/uep_encoder.h"
 #include "msp_serial.h"
+#include "mav_source.h"
 #include "power_plan.h"
 #include "probe_source.h"
 #include "radio_tx.h"
@@ -1784,6 +1785,59 @@ int run_real_mode(const Config& cfg, uint8_t start_ch, const std::string& cfg_pa
     });
   }
 
+  // Raw MAVLink tunnel. Same transaction shape as the MSP thread: the FC's
+  // UART is read on its own thread and each complete frame is wrapped in a
+  // T_MAV RC body on the mutex-guarded dev_sink.send() path. Frames are
+  // forwarded byte-for-byte (no parsing, no normalization) so the GS can
+  // parse them and/or bridge them to an external MAVLink client.
+  std::thread mav_thread;
+  if (cfg.mavlink.enable) {
+    mav_thread = std::thread([&]() {
+      name_thread("mbr-mav");
+      // Same robust control tier as MSP/DISC_ACK. Like the MSP thread this
+      // is a producer on dev_sink.send(), never the video pool.
+      std::vector<uint8_t> radiotap =
+          devourer::build_stream_radiotap(control_tx_mode(cfg.radio.ldpc));
+      uint16_t seq = 0;
+      mabur::MavSource src(mabur::MavSourceCfg{cfg.mavlink.max_bps},
+        [&](const uint8_t* frame, size_t n) {
+          // Calibration characterizes the airtime of the video sweep alone;
+          // a stray PPDU here would land in the measured window. Keep
+          // reading the UART so the FC stream never backs up, just do not
+          // transmit.
+          if (cal_active.load(std::memory_order_relaxed)) return;
+          std::vector<uint8_t> body = mabur::rc::pack_mav(frame, n, 0);
+          if (body.empty()) return;
+          std::vector<uint8_t> out;
+          out.reserve(radiotap.size() + kDot11HeaderLen + body.size());
+          out.insert(out.end(), radiotap.begin(), radiotap.end());
+          auto hdr = build_dot11_header(seq);
+          seq = static_cast<uint16_t>((seq + 1) & 0xFFF);
+          out.insert(out.end(), hdr.begin(), hdr.end());
+          out.insert(out.end(), body.begin(), body.end());
+          dev_sink.send(out.data(), out.size());
+        });
+      std::fprintf(stderr, "maburd mav: serial=%s baud=%d max_bps=%d\n",
+                   cfg.mavlink.serial.c_str(), cfg.mavlink.baud, cfg.mavlink.max_bps);
+
+      MspSerial serial;
+      uint8_t buf[512];
+      while (!g_devourer_should_stop) {
+        if (!serial.is_open()) {
+          if (!serial.open(cfg.mavlink.serial, cfg.mavlink.baud)) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            continue;
+          }
+          std::fprintf(stderr, "maburd mav: reading %s @ %d\n",
+                       cfg.mavlink.serial.c_str(), cfg.mavlink.baud);
+        }
+        const int n = serial.read(buf, sizeof buf);
+        if (n > 0) src.on_bytes(buf, static_cast<size_t>(n), now_steady_ms());
+        else if (n < 0) serial.close();  // error -> reconnect
+      }
+    });
+  }
+
   // TX body queue between the encode (hot) thread and the USB writer
   // thread: a bulk-OUT stall backs up HERE (bounded, drop-oldest =
   // FEC-recoverable erasures) instead of in the waybeam SHM ring, whose
@@ -3039,6 +3093,7 @@ int run_real_mode(const Config& cfg, uint8_t start_ch, const std::string& cfg_pa
   if (tx_thread.joinable()) tx_thread.join();
   if (agent_thread.joinable()) agent_thread.join();
   if (msp_thread.joinable()) msp_thread.join();
+  if (mav_thread.joinable()) mav_thread.join();
   tx_pool.stop();  // drain + join senders before device teardown
 
   vtx_rec.shutdown();   // close the file before the record channel is torn down

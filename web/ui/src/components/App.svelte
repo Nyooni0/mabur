@@ -23,6 +23,7 @@
   import { effectiveTarget, targetCovers, recFileName, localView, combinedRec, headroomWarning,
     formatBytes, listRecordings, downloadRecording, deleteRecording, opfsRoot } from '../lib/localrec.js';
   import { OsdLayer, OsdPainter } from '../lib/osd.js';
+  import { MavlinkFeed } from '../lib/mavlink.js';
   import { ScreenWake } from '../lib/wakelock.js';
 
   let canvas = $state(null);
@@ -88,6 +89,13 @@
   });
   function clearOsd() { if (osdLayer.screen) { osdLayer.clear(); osd.schedule(); } }
 
+  // Raw MAVLink from the drone's T_MAV tunnel. The drone forwards the FC's
+  // frames verbatim; this page validates CRC_EXTRA and decodes the subset
+  // the telemetry strip shows.
+  const mav = new MavlinkFeed();
+  // Latest decoded snapshot for the strip; refreshed by the 200 ms view tick.
+  let mavView = $state(null);
+
   const session = new Session({
     createModule: (opts) => window.createWebGs(opts),
     requestDevice: async () => {
@@ -118,6 +126,11 @@
       osdLayer.onScreen(rows, cols, cells, performance.now());
       osd.schedule();
     },
+    onMav: (buf, pts) => {
+      const st = session.snapshot.state;
+      if (st !== 'live' && st !== 'connecting') return;
+      mav.push(new Uint8Array(buf), pts, performance.now());
+    },
     onRecClosed: (n, b, e) => onRecClosed(n, b, e),
     reload: reloadToConfig,
   });
@@ -126,7 +139,7 @@
   session.subscribe((s) => {
     sess = s;
     // Left live (stopping/idle/error): free the hardware decoder now.
-    if (s.state !== 'live' && s.state !== 'connecting') { video.close(); clearOsd(); }
+    if (s.state !== 'live' && s.state !== 'connecting') { video.close(); clearOsd(); mav.reset(); mavView = null; }
     wake.set(s.state === 'live' || s.state === 'connecting');
     if (s.state === 'live' && prevState !== 'live') { ui.tab = 'stats'; ui.cfgOpen = false; ui.statsVisible = true; }
     if (prevState === 'stopping' && s.state === 'idle') { ui.tab = 'config'; ui.cfgOpen = true; }
@@ -158,6 +171,16 @@
     const nowMs = performance.timeOrigin + performance.now();
     if (osdLayer.isStale(performance.now())) clearOsd();   // 5 s without MSP
     if (live) tele.sample(nowMs, sess.mode);
+    // MAVLink strip: refreshed with the 200 ms view tick, cleared after 5 s
+    // without a decoded frame (the MSP screen's freshness window).
+    if (live && mav.state.frames > 0) {
+      const age = mav.ageMs(performance.now());
+      const st = mav.state;
+      const speed = Number.isFinite(st.airspeed) && st.airspeed > 0.5 ? st.airspeed : st.groundspeed;
+      mavView = age < 5000 ? { ...st, age, speedKmh: Number.isFinite(speed) ? speed * 3.6 : 0 } : null;
+    } else {
+      mavView = null;
+    }
     core = live ? tele.core : null;
     view = statsView({ connected: live, connecting: sess.state === 'connecting', mode: shownMode, ch: sess.ch, w: live ? sess.w : ui.cfg.width,
       core, page: live ? tele.page : null, sessionCfg: live ? sessionCfg : ui.cfg, cfg: ui.cfg, videoSize: video.videoSize,
@@ -197,6 +220,7 @@
     // which the first-time WebUSB chooser needs.
     if (isMobile(LW, LH) && usbGranted) goLandscape();
     video.reset(); tele.reset(); osd.resetAtlasFailure(); hiddenShown = false; hiddenBanner = false;
+    mav.reset(); mavView = null;
     const ch = startChannel(sessionCfg, loadRememberedChannel(localStorageSafe()));
     const p = session.connect({ mode: ui.mode, ch, w: sessionCfg.width, overlayToml: toOverlayToml(sessionCfg, ui.key, ui.mode),
       relay: ui.radio === 'relay' ? relayTarget(showRelayAddr ? ui.relayAddr : '') : null });
@@ -377,6 +401,29 @@
           <canvas class="vgl" bind:this={glCanvas} width="1280" height="720" style="visibility:hidden"></canvas>
           <!-- MSP OSD: page-lifetime like the video canvas; .videoinner IS the visible area in every layout. -->
           <canvas class="osd" bind:this={osdCanvas}></canvas>
+          {#if mavView}
+            <!-- Raw-MAVLink telemetry, independent of the MSP grid: a
+                 MAVLink-only aircraft has no grid but still gets this. -->
+            <div class="mavtelem" aria-live="off">
+              <div class="mavrow">
+                <span class="mavmode">{mavView.mode || '---'}</span>
+                <span class:armed={mavView.armed}>{mavView.armed ? 'ARMED' : 'DISARMED'}</span>
+                <span>SAT {mavView.sats || '--'}{mavView.fix >= 2 ? ' 3D' : ''}</span>
+              </div>
+              <div class="mavrow">
+                {#if Number.isFinite(mavView.batteryV)}<span>BAT {mavView.batteryV.toFixed(1)}V</span>{/if}
+                {#if Number.isFinite(mavView.cellV)}<span>{mavView.cellV.toFixed(2)}V/C</span>{/if}
+                {#if Number.isFinite(mavView.currentA)}<span>{mavView.currentA.toFixed(1)}A</span>{/if}
+                {#if Number.isFinite(mavView.mah)}<span>{Math.round(mavView.mah)}mAh</span>{/if}
+                {#if Number.isFinite(mavView.batteryPct)}<span>{Math.round(mavView.batteryPct)}%</span>{/if}
+              </div>
+              <div class="mavrow">
+                <span>ALT {mavView.posMs || Number.isFinite(mavView.mslAlt) ? Math.round(mavView.alt) : '--'}m</span>
+                <span>SPD {mavView.speedKmh ? Math.round(mavView.speedKmh) : '--'}km/h</span>
+                <span>THR {mavView.statusMs ? (mavView.throttle || 0) : '--'}%</span>
+              </div>
+            </div>
+          {/if}
           {#if live && status}<div class="status glass">{status}</div>{/if}
           {#if !live}
             <DisconnectedOverlay mode={ui.mode} onMode={(m) => (ui.mode = m)} onConnect={connect}
@@ -430,6 +477,15 @@
   .videoinner { position: relative; aspect-ratio: 16 / 9; width: min(100cqw, calc(100cqh * 16 / 9)); border-radius: var(--radius-sm); overflow: hidden; background: #000; }
   canvas { display: block; width: 100%; height: 100%; object-fit: contain; }
   .osd, .vgl { position: absolute; inset: 0; pointer-events: none; }
+  /* Raw-MAVLink telemetry, above the video and the MSP grid. Plain text with
+     a shadow (no panel) so it reads over any picture. */
+  .mavtelem { position: absolute; left: 14px; top: 12px; z-index: 4; pointer-events: none;
+    display: flex; flex-direction: column; gap: 2px; font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 13px; font-weight: 600; letter-spacing: 0.02em; color: #fff;
+    text-shadow: 0 0 3px #000, 0 1px 2px #000; }
+  .mavrow { display: flex; gap: 10px; flex-wrap: wrap; }
+  .mavmode { color: #fff; }
+  .mavtelem .armed { color: #ffd23f; }
   .immersive .row { position: absolute; inset: 0; padding: 0; gap: 0; }
   /* Letterboxed, never cropped: the 16:9 box fits the viewport, black bars fill the rest. */
   .immersive .videobox { background: #000; }

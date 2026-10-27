@@ -50,6 +50,7 @@ Drone → GS (the downlink, nearly all of the airtime):
 | NACK retransmits (sid 0 symbols) | on a verified `T_NACK` only | pushed at the TxQueue HEAD (`TxQueue::push_front`) | `[nack] air_pct`/`burst_ms` token bucket (`docs/fec-nack.md`) |
 | MSP OSD (sid 4) | `msp.update_rate_hz` 3 | `msp.symbol_size` 1312 B units | not slotted |
 | T_TELEM | 1 Hz | 54 B payload (`TELEM_LEN`) | not slotted |
+| T_MAV (raw MAVLink tunnel) | the FC's own stream (typically 25 Hz ATTITUDE / 5 Hz position) | one complete MAVLink frame + 12 B envelope, one PPDU per frame | `[mavlink] max_bps` token bucket; not slotted |
 | DISC_ACK | rendezvous only | small | not slotted |
 
 GS → drone (the uplink: a low duty cycle, but every send is a blast):

@@ -569,6 +569,19 @@ void parse_msp(const Value& j, MspCfg& m) {
   if (m.baud <= 0) fail("msp.baud", "must be > 0");
 }
 
+void parse_mavlink(const Value& j, MavlinkCfg& m) {
+  check_known_keys(j, {"enable", "serial", "baud", "max_bps"}, "mavlink");
+  assign_if_present(j, "enable", m.enable, "mavlink");
+  assign_if_present(j, "serial", m.serial, "mavlink");
+  assign_if_present(j, "baud", m.baud, "mavlink");
+  assign_if_present(j, "max_bps", m.max_bps, "mavlink");
+  if (m.baud <= 0) fail("mavlink.baud", "must be > 0");
+  if (m.max_bps < 500 || m.max_bps > 20000)
+    fail("mavlink.max_bps", "must be in [500,20000]");
+  if (m.serial.empty() || m.serial[0] != '/')
+    fail("mavlink.serial", "must be an absolute path");
+}
+
 void parse_low_power(const Value& j, LowPowerCfg& lp) {
   check_known_keys(j, {"enable", "bitrate_kbps", "fps", "stale_ms"}, "low_power");
   assign_if_present(j, "enable", lp.enable, "low_power");
@@ -684,8 +697,8 @@ Config load_config(const std::string& path, std::vector<std::string>* defaulted)
   } clear_on_exit;
 
   static const char* kSections[] = {"radio", "fec", "encoder", "venc",
-                                    "link", "msp", "ampdu", "air_clock", "low_power", "record", "nack"};
-  check_known_keys(j, {"radio", "fec", "encoder", "venc", "link", "msp", "ampdu", "air_clock", "low_power", "record", "nack"}, "");
+                                    "link", "msp", "mavlink", "ampdu", "air_clock", "low_power", "record", "nack"};
+  check_known_keys(j, {"radio", "fec", "encoder", "venc", "link", "msp", "mavlink", "ampdu", "air_clock", "low_power", "record", "nack"}, "");
 
   // A whole missing section means none of its keys are visited below, so
   // report the section itself. Dropping a [table] while hand-transcribing is
@@ -703,6 +716,7 @@ Config load_config(const std::string& path, std::vector<std::string>* defaulted)
   // unconditionally rather than gated on j.contains("link") like the rest.
   parse_link(j.contains("link") ? j.at("link") : Value(), cfg.link);
   if (j.contains("msp")) parse_msp(j.at("msp"), cfg.msp);
+  if (j.contains("mavlink")) parse_mavlink(j.at("mavlink"), cfg.mavlink);
   if (j.contains("ampdu")) parse_ampdu(j.at("ampdu"), cfg.ampdu);
   if (j.contains("air_clock")) parse_air_clock(j.at("air_clock"), cfg.air_clock);
   if (j.contains("low_power")) parse_low_power(j.at("low_power"), cfg.low_power);
@@ -712,6 +726,8 @@ Config load_config(const std::string& path, std::vector<std::string>* defaulted)
   // Cross-section checks, only when the mode is on: a disabled mode's
   // values are irrelevant and the minimal configs the tests load (msp off,
   // encoder struct floor 2000) must keep loading.
+  if (cfg.mavlink.enable && cfg.msp.enable && cfg.mavlink.serial == cfg.msp.serial)
+    fail("mavlink.serial", "must differ from msp.serial (one UART is one protocol)");
   if (cfg.low_power.enable) {
     if (!cfg.msp.enable)
       fail("low_power.enable", "needs msp.enable (arm state comes from the FC over MSP)");
