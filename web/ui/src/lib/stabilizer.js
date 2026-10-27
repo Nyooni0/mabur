@@ -73,6 +73,7 @@ export class Stabilizer {
     this.lastT = 0;
     this.sx = 0; this.sy = 0; this.sa = 0;
     this.rawX = 0; this.rawY = 0; this.rawA = 0;
+    this.cx = 0; this.cy = 0; this.ca = 0;
     this.last = { x: 0, y: 0, rad: 0 };
   }
 
@@ -81,6 +82,7 @@ export class Stabilizer {
     this.lastT = 0;
     this.sx = this.sy = this.sa = 0;
     this.rawX = this.rawY = this.rawA = 0;
+    this.cx = this.cy = this.ca = 0;
     this.last = { x: 0, y: 0, rad: 0 };
   }
 
@@ -154,11 +156,13 @@ export class Stabilizer {
     this.rawX = tx; this.rawY = ty; this.rawA = ra;
 
     const maxX = w * 0.12, maxY = h * 0.12, maxA = (8 * Math.PI) / 180;
-    this.last = {
-      x: clamp(this.sx - tx, -maxX, maxX),
-      y: clamp(this.sy - ty, -maxY, maxY),
-      rad: clamp(this.sa - ra, -maxA, maxA),
-    };
+    // Accumulate the correction: the canvas is not re-based each frame, so a
+    // one-frame bump has to stay compensated until the smooth path catches
+    // up. C = sum(smoothed) - sum(raw).
+    this.cx = clamp(this.cx + (this.sx - tx), -maxX, maxX);
+    this.cy = clamp(this.cy + (this.sy - ty), -maxY, maxY);
+    this.ca = clamp(this.ca + (this.sa - ra), -maxA, maxA);
+    this.last = { x: this.cx, y: this.cy, rad: this.ca };
     return this.last;
   }
 }
