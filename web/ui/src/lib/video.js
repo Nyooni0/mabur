@@ -7,23 +7,28 @@ import {
 } from './logic.mjs';
 import { PageMetrics } from './metrics.js';
 import { ColorTransGl } from './colortrans.js';
+import { Stabilizer } from './stabilizer.js';
 
 const now = () => performance.timeOrigin + performance.now();
 
 export class VideoPipeline {
   // getCanvas: the flat 2D canvas; getGlCanvas: the colortrans WebGL one
   // (a canvas cannot change context type). getColortrans: the live toggle.
-  constructor({ getCanvas, getGlCanvas = () => null, getMode, getColortrans = () => false, onWantIdr = () => {} }) {
+  constructor({ getCanvas, getGlCanvas = () => null, getMode, getColortrans = () => false,
+    getStabilize = () => 'off', getStabCrop = () => 0, onWantIdr = () => {} }) {
     this.getCanvas = getCanvas;
     this.getGlCanvas = getGlCanvas;
     this.getMode = getMode;
     this.getColortrans = getColortrans;
+    this.getStabilize = getStabilize;
+    this.getStabCrop = getStabCrop;
     this.onWantIdr = onWantIdr;
-    // Page lifetime, like the canvases: built on the first colortrans frame;
-    // a failure (no WebGL, lost context) falls back to flat for good.
     this.ct = null;
     this.ctFailed = false;
     this.shown = null;
+    this.stab = null;
+    this.stabFailed = false;
+    this.stabOn = false;
     // ONE slot for the page lifetime: every replace() closes the decoder it
     // held, so a Connect never leaks the previous session's hardware decoder.
     this.decoderSlot = new DecoderSlot();
@@ -57,6 +62,7 @@ export class VideoPipeline {
     // black and the page says what it is waiting for; after it, a freeze
     // keeps the last frame up with nothing drawn over it.
     this.hasPicture = false;
+    if (this.stabOn) this.clearStabilizer();
   }
 
   gateArmed() { return this.gate.armed; }
@@ -147,7 +153,50 @@ export class VideoPipeline {
     return this.ct;
   }
 
+  // Page-only stabilizer. The disabled path is one string compare and no
+  // frame reads; the stabilizer object is only built when a mode is picked.
+  applyStabilizer(frame, mode) {
+    if (this.stabFailed) return;
+    if (!this.stab) {
+      try { this.stab = new Stabilizer(); }
+      catch (e) {
+        console.error('[webgs] stabilizer unavailable:', e);
+        this.stabFailed = true;
+        return;
+      }
+    }
+    const c = this.stab.update(frame, mode);
+    const w = frame.displayWidth || 1, h = frame.displayHeight || 1;
+    const crop = Math.max(0, Math.min(30, Number(this.getStabCrop()) || 0));
+    const zoom = 1 / (1 - (2 * crop) / 100);
+    const tf = `translate(${((c.x / w) * 100).toFixed(3)}%, ${((c.y / h) * 100).toFixed(3)}%)`
+      + ` rotate(${((c.rad * 180) / Math.PI).toFixed(3)}deg) scale(${zoom.toFixed(4)})`;
+    for (const canvas of [this.getCanvas(), this.getGlCanvas()]) {
+      if (!canvas) continue;
+      canvas.style.transformOrigin = '50% 50%';
+      canvas.style.willChange = 'transform';
+      canvas.style.transform = tf;
+    }
+    this.stabOn = true;
+  }
+
+  clearStabilizer() {
+    if (!this.stabOn) return;
+    for (const canvas of [this.getCanvas(), this.getGlCanvas()]) {
+      if (!canvas) continue;
+      canvas.style.transform = '';
+      canvas.style.transformOrigin = '';
+      canvas.style.willChange = '';
+    }
+    this.stab?.reset();
+    this.stabOn = false;
+  }
+
   draw(frame) {
+    const stab = this.getStabilize();
+    if (stab && stab !== 'off') this.applyStabilizer(frame, stab);
+    else if (this.stabOn) this.clearStabilizer();
+
     const want = this.getColortrans();
     const ct = want ? this.colorTrans() : null;
     this.colour = ct ? 'colortrans' : want ? 'unavailable' : 'flat';

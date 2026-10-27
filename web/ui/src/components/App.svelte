@@ -75,7 +75,8 @@
   }
 
   const video = new VideoPipeline({ getCanvas: () => canvas, getGlCanvas: () => glCanvas, getMode: () => sess.mode,
-    getColortrans: () => ui.cfg.colortrans, onWantIdr: () => session.requestIdr() });
+    getColortrans: () => ui.cfg.colortrans, getStabilize: () => ui.cfg.stabilize,
+    getStabCrop: () => ui.cfg.stabCrop, onWantIdr: () => session.requestIdr() });
   const tele = new Telemetry(video);
   // MSP OSD: latest DisplayPort grid, painted on
   // a second canvas over the video. The atlas URL resolves against the page

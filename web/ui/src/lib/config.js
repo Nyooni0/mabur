@@ -26,6 +26,11 @@ export function defaultConfig() {
     // sensor tuning on the video (lib/colortrans.js). maburplay's bundle
     // default is on too.
     colortrans: true,
+    // Page-only: video stabilization (lib/stabilizer.js). 'off' does no
+    // frame work at all; crop is the percentage trimmed from every edge so
+    // the stabilizer has room to move (0 = full frame, black bars allowed).
+    stabilize: 'off',
+    stabCrop: 0,
     // Page-only: which recorder(s) Record drives (lib/localrec.js).
     dvr: 'web',
     // GS mode: ask the drone to re-send base-layer symbols FEC could not
@@ -75,6 +80,11 @@ export function normalizeConfig(raw) {
     staticMcs: inRange(sm, -1, 7) ? sm : d.staticMcs,
     ladder,
     colortrans: typeof raw.colortrans === 'boolean' ? raw.colortrans : d.colortrans,
+    stabilize: ['off', 'translate', 'rotate'].includes(raw.stabilize) ? raw.stabilize : d.stabilize,
+    stabCrop: (() => {
+      const v = Number(raw.stabCrop);
+      return Number.isFinite(v) ? Math.round(Math.max(0, Math.min(30, v))) : d.stabCrop;
+    })(),
     dvr: ['web', 'vtx', 'both'].includes(raw.dvr) ? raw.dvr : d.dvr,
     nack: typeof raw.nack === 'boolean' ? raw.nack : d.nack,
   };
@@ -262,6 +272,8 @@ const EDIT_LABEL = { channels: 'Channels', link: 'Link channel', width: 'Channel
 export function describeEdit(key, val) {
   if (key === 'dvr') return `Recording target set to ${{ web: 'mabur web', vtx: 'VTX', both: 'Both' }[val]}`;
   if (key === 'colortrans') return `Colour correction ${val ? 'on' : 'off'}`;
+  if (key === 'stabilize') return `Stabilization ${{ off: 'off', translate: 'translate', rotate: 'rotate + translate' }[val]}`;
+  if (key === 'stabCrop') return `Stabilizer crop set to ${val}%`;
   if (key === 'nack') return `Retransmit (NACK) ${val ? 'on' : 'off'}`;
   const shown = key === 'channels' ? val.join(', ') : key === 'link' ? (val === 'auto' ? 'Auto' : val)
     : key === 'width' ? `${val} MHz` : key === 'staticMcs' && val < 0 ? 'Adaptive' : val;
