@@ -100,3 +100,5 @@ TEST(garbage_without_a_frame_boundary_is_bounded) {
   src.on_bytes(junk.data(), junk.size(), 1000);
   CHECK(src.frames() == 0);
 }
+
+MTEST_MAIN
