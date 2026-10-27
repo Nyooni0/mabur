@@ -14,10 +14,12 @@ const now = () => performance.timeOrigin + performance.now();
 export class VideoPipeline {
   // getCanvas: the flat 2D canvas; getGlCanvas: the colortrans WebGL one
   // (a canvas cannot change context type). getColortrans: the live toggle.
-  constructor({ getCanvas, getGlCanvas = () => null, getMode, getColortrans = () => false,
+  constructor({ getCanvas, getGlCanvas = () => null, getStabTarget = () => null, getMode,
+    getColortrans = () => false,
     getStabilize = () => 'off', getStabCrop = () => 0, onWantIdr = () => {} }) {
     this.getCanvas = getCanvas;
     this.getGlCanvas = getGlCanvas;
+    this.getStabTarget = getStabTarget;
     this.getMode = getMode;
     this.getColortrans = getColortrans;
     this.getStabilize = getStabilize;
@@ -171,22 +173,27 @@ export class VideoPipeline {
     const zoom = 1 / (1 - (2 * crop) / 100);
     const tf = `translate(${((c.x / w) * 100).toFixed(3)}%, ${((c.y / h) * 100).toFixed(3)}%)`
       + ` rotate(${((c.rad * 180) / Math.PI).toFixed(3)}deg) scale(${zoom.toFixed(4)})`;
-    for (const canvas of [this.getCanvas(), this.getGlCanvas()]) {
-      if (!canvas) continue;
-      canvas.style.transformOrigin = '50% 50%';
-      canvas.style.willChange = 'transform';
-      canvas.style.transform = tf;
+    // Transform the wrapper, not the canvases: scaling/rotating a canvas
+    // element itself makes the compositor resample a stale canvas layer
+    // while it is being redrawn (visible smearing/tearing on tablets).
+    const target = this.getStabTarget() || null;
+    const targets = target ? [target] : [this.getCanvas(), this.getGlCanvas()];
+    for (const el of targets) {
+      if (!el) continue;
+      el.style.transformOrigin = '50% 50%';
+      el.style.transform = tf;
     }
     this.stabOn = true;
   }
 
   clearStabilizer() {
     if (!this.stabOn) return;
-    for (const canvas of [this.getCanvas(), this.getGlCanvas()]) {
-      if (!canvas) continue;
-      canvas.style.transform = '';
-      canvas.style.transformOrigin = '';
-      canvas.style.willChange = '';
+    const target = this.getStabTarget() || null;
+    const targets = target ? [target] : [this.getCanvas(), this.getGlCanvas()];
+    for (const el of targets) {
+      if (!el) continue;
+      el.style.transform = '';
+      el.style.transformOrigin = '';
     }
     this.stab?.reset();
     this.stabOn = false;
