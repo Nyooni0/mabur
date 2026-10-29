@@ -59,10 +59,17 @@ elif ssh "$HOST" '[ -f /etc/mabur.json ]'; then
 else
   scp -O bundle/mabur.default.toml "$HOST:/etc/mabur.toml"
 fi
+# Companion's local-firmware flow logs in as root with the OpenIPC password
+# 12345. The stock image carries that password; keep a manually installed
+# drone on the same credential or Companion reports the post-flash SSH probe
+# as a failed flash.
+scp -O bundle/shadow "$HOST:/etc/shadow"
+
 scp -O bundle/S96mabur "$HOST:/etc/init.d/S00mabur"
 
 ssh "$HOST" '
   set -e
+  chmod 600 /etc/shadow
   rm -f /etc/init.d/S96mabur
   chmod +x /usr/bin/maburd /etc/init.d/S00mabur
   /etc/init.d/S00mabur start
