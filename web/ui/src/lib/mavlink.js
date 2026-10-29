@@ -3,9 +3,9 @@
 // CRC_EXTRA validation and the message -> state mapping.
 //
 // Supported messages: HEARTBEAT, SYS_STATUS, GPS_RAW_INT, ATTITUDE,
-// GLOBAL_POSITION_INT, GPS_GLOBAL_ORIGIN, VFR_HUD, BATTERY_STATUS,
-// STATUSTEXT. Unknown message IDs are skipped (their CRC_EXTRA is unknown
-// here); the frame is not an error.
+// GLOBAL_POSITION_INT, RC_CHANNELS_RAW, GPS_GLOBAL_ORIGIN, VFR_HUD,
+// BATTERY_STATUS, STATUSTEXT. Unknown message IDs are skipped (their CRC_EXTRA
+// is unknown here); the frame is not an error.
 //
 // Field offsets are MAVLink's wire order (payload-relative), not the XML
 // order: the generator places the largest fields first. They are pinned in
@@ -21,7 +21,6 @@ const CRC_EXTRA = new Map([
   [49, 39],   // GPS_GLOBAL_ORIGIN
   [74, 20],   // VFR_HUD
   [147, 154], // BATTERY_STATUS
-  [251, 170], // NAMED_VALUE_FLOAT
   [253, 83],  // STATUSTEXT
 ]);
 
