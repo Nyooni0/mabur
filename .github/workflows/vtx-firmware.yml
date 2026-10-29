@@ -73,6 +73,24 @@ jobs:
           sed -i 's|^MABUR_BRANCH = .*|MABUR_VERSION = local|' "$MK"
           grep -E '^MABUR_(SITE|SITE_METHOD|VERSION) ' "$MK"
 
+      - name: Install the Companion root credential in the image
+        run: |
+          set -euo pipefail
+          MK=openipc-builder/package/mabur/mabur.mk
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path("openipc-builder/package/mabur/mabur.mk")
+          s = p.read_text()
+          marker = "\t$(INSTALL) -D -m 0755 $(@D)/bundle/S96mabur $(TARGET_DIR)/etc/init.d/S00mabur"
+          shadow = "\t$(INSTALL) -D -m 0600 $(@D)/bundle/shadow $(TARGET_DIR)/etc/shadow"
+          if shadow not in s:
+              if marker not in s:
+                  raise SystemExit("mabur.mk: S96mabur install line not found")
+              s = s.replace(marker, marker + "\n" + shadow, 1)
+              p.write_text(s)
+          PY
+          grep -n 'bundle/shadow' "$MK"
+
       - name: Select telemetry config
         env:
           TELEMETRY: ${{ inputs.telemetry || 'mavlink' }}
