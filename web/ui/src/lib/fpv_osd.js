@@ -8,10 +8,7 @@
 // `flight` carries:
 //   pitch, roll (degrees, +nose up / +right bank)
 //   heading (deg true), alt (m), speed (m/s), vario (m/s, + climbing)
-//   track/groundSpeed, NED velocity, the home vector
-//   SATS/fix/HDOP, mode/armed/flightTime, battery/current/mAh/cells
-//   trip/odometer/efficiency, throttle, messages and warnings.
-// Missing optional fields are simply not drawn.
+// (battery / timer / voltage / link belong on the separate telemetry OSD.)
 //
 // Style lives in OSD_THEME and OSD_CFG below; nothing else hard-codes a colour
 // or a size. Change `ink` to recolour the whole HUD.
@@ -43,11 +40,12 @@ export const OSD_CFG = {
   hfovDeg: 102.5,
   vfovDeg: 70.0,
   camPitchDeg: 12,        // camera boresight tilted down from the nose (deg)
+  gimbal: { pitchChannel: 11, pitchStrength: 30, pitchOffset: 12, yawChannel: 10, yawEnabled: false, yawStrength: 60, throttleChannel: 4 },
   compassPpd: 1.8,        // px per degree of heading along the horizon rung
-  ladder: { horizon: 140, rung: 78, gap: 18, rungGap: 16, clipTop: 140, clipW: 520 },
+  ladder: { horizon: 140, rung: 78, gap: 18, rungGap: 16, clipTop: 140, clipW: 700 },
   roll: { cy: 92, r: 38, span: 60 },
   tape: {
-    half: 120, speedX: 310, altX: 970,
+    half: 120, speedX: 250, altX: 1030,
     boxW: 68, boxH: 38, point: 9, cap: 60,
     tickMajor: 12, tickMinor: 7, labelGap: 34, boxGap: 0,
   },
@@ -56,13 +54,14 @@ export const OSD_CFG = {
   },
   alt: { min: 0, max: 600, major: 20, minor: 10, ppu: 2.4, unit: 'm', scale: 1 },
   hdg: { labelY: 14, valueY: 36 },
-  vvi: { offset: -30, half: 50, ppu: 4.5, boxW: 44, boxH: 18 },
+  vvi: { offset: -15, half: 50, ppu: 4.5, boxW: 34, boxH: 15 },
   fpm: { margin: 30, wing: 20, r: 7, tick: 14 },
+  aoa: { warn: 12, critical: 18, x: 0, y: 0, w: 44, h: 44, size: 16, label: 12 },
   home: { hideWithinM: 20, centreFrac: 0.15, margin: 32, glyphH: 7.2, glyphW: 5.2, glyphStroke: 2.4 },
   // Edge blocks. Keep every one of these clear of the centre 0.7x AHI/tape
   // box: the left column ends at x~300, the right begins at x~980.
   status: { x: 22, y: 24, size: 14, label: 10 },
-  mode: { x: 970, y: 226, size: 15 },
+  mode: { x: 1030, y: 226, size: 15 },
   battery: { x: 1272, y: 632, line: 17, size: 13, label: 10 },
   messages: { x: 22, y: 628, line: 18, size: 12, max: 3, ttlS: 5 },
   warnings: { x: 640, y: 660, line: 16, size: 13, max: 2 },
@@ -190,22 +189,26 @@ function drawRung(ctx, p, y) {
 }
 
 function drawAttitude(ctx, f) {
-  const cx = K.center.x, cy = K.center.y;
-  const roll = clamp(f.roll || 0, -180, 180);
   const heading = ((f.heading || 0) % 360 + 360) % 360;
   const pitch = f.pitch || 0;
-  const cam = K.camPitchDeg || 0;
+  const cam = Number.isFinite(f.camPitchDeg) ? f.camPitchDeg : (K.camPitchDeg || 0);
+  const camYaw = Number.isFinite(f.camYawDeg) ? f.camYawDeg : 0;
+  const yawPx = (Math.tan(camYaw * DEG) / Math.tan((K.hfovDeg * DEG) / 2)) * (OSD_W / 2);
+  const cx = K.center.x - yawPx;       // aircraft centre shifts opposite camera yaw
+  const cy = K.center.y;
+  const roll = clamp(f.roll || 0, -180, 180);
   const ty = Math.tan((K.vfovDeg * DEG) / 2);
   // Screen y (relative to the boresight/centre) of a rung at pitch p, for a
   // camera tilted down by `cam`: exact rectilinear mapping, same maths as the
   // world markers, so the ladder and the home/FPM agree.
   const yFor = (p) => (-Math.tan((p - pitch + cam) * DEG) / ty) * (OSD_H / 2);
 
-  // Rungs are clipped below the bank arc; the horizon/compass is not, so it
-  // stays visible when a nose-down attitude pushes it up the screen.
+  // Rungs are clipped below the bank arc and between the two tapes, so the
+  // ladder never rides over a tape even when the gimbal yaws.
   ctx.save();
   ctx.beginPath();
-  ctx.rect(cx - K.ladder.clipW / 2, K.ladder.clipTop, K.ladder.clipW, OSD_H - K.ladder.clipTop);
+  const clipL = K.tape.speedX + 40, clipR = K.tape.altX - 40;
+  ctx.rect(clipL, K.ladder.clipTop, clipR - clipL, OSD_H - K.ladder.clipTop);
   ctx.clip();
   ctx.translate(cx, cy);
   ctx.rotate(-roll * DEG);
@@ -221,13 +224,30 @@ function drawAttitude(ctx, f) {
   ctx.translate(cx, cy);
   ctx.rotate(-roll * DEG);
   ctx.translate(0, yFor(0));
-  drawHorizon(ctx, heading, roll);
+  drawHorizon(ctx, heading + camYaw, roll);
   ctx.restore();
 
-  // Centre reference: two small brackets above the horizon, no dot.
+  drawNoseCrosshair(ctx, f);
+}
+
+function drawNoseCrosshair(ctx, f) {
+  // The nose is where the aircraft is pointing, not the camera boresight:
+  // with a 12 deg down camera it sits above the screen centre and follows
+  // gimbal yaw and roll.
+  const psi = (f.heading || 0) * DEG, theta = (f.pitch || 0) * DEG;
+  const n = projectWorldPoint(
+    Math.cos(theta) * Math.cos(psi),
+    Math.cos(theta) * Math.sin(psi),
+    -Math.sin(theta), f, K,
+  );
+  if (n.behind || !Number.isFinite(n.x) || !Number.isFinite(n.y)) return;
+  ctx.save();
+  ctx.translate(n.x, n.y);
+  ctx.rotate(-(f.roll || 0) * DEG);
   for (const s of [-1, 1]) {
-    polyline(ctx, [[cx + s * 13, cy - 6], [cx + s * 33, cy - 6], [cx + s * 33, cy + 1]], { w: 1.8, halo: 1.4 });
+    polyline(ctx, [[s * 9, -5], [s * 22, -5], [s * 22, 1]], { w: 1.8, halo: 1.4 });
   }
+  ctx.restore();
 }
 
 function drawRollArc(ctx, f) {
@@ -291,13 +311,17 @@ export function projectWorldPoint(relN, relE, relD, att, fov = OSD_CFG) {
   const y3 = y2 * cr + z2 * sr;
   const z3 = -y2 * sr + z2 * cr;
 
-  // Camera-frame axes. A camera tilted down by camPitchDeg has its boresight
-  // along body (cos, 0, sin) and its screen-down axis along (-sin, 0, cos).
-  const cam = (fov.camPitchDeg || 0) * DEG;
+  // Camera-frame axes. Yaw the body frame into the camera, then pitch down:
+  // a camera tilted down by camPitchDeg has its boresight below the nose.
+  const cyaw = (Number.isFinite(att.camYawDeg) ? att.camYawDeg : (fov.camYawDeg || 0)) * DEG;
+  const cwy = Math.cos(cyaw), swy = Math.sin(cyaw);
+  const xc = x3 * cwy + y3 * swy;
+  const yc = -x3 * swy + y3 * cwy;
+  const cam = ((Number.isFinite(att.camPitchDeg) ? att.camPitchDeg : fov.camPitchDeg) || 0) * DEG;
   const cc = Math.cos(cam), sc = Math.sin(cam);
-  const x4 = x3 * cc + z3 * sc;
-  const z4 = -x3 * sc + z3 * cc;
-  const y4 = y3;
+  const x4 = xc * cc + z3 * sc;
+  const z4 = -xc * sc + z3 * cc;
+  const y4 = yc;
 
   const out = { behind: x4 <= 1e-6, x3, y3, z3, x4, y4, z4, x: null, y: null };
   if (out.behind) return out;
@@ -313,7 +337,16 @@ export function projectWorldPoint(relN, relE, relD, att, fov = OSD_CFG) {
 // course over ground) plus barometric climb.
 function velocityVector(f) {
   if (Number.isFinite(f.velN) && Number.isFinite(f.velE)) {
-    return [f.velN, f.velE, Number.isFinite(f.velD) ? f.velD : -(f.vario || 0)];
+    let down = Number.isFinite(f.velD) ? f.velD : -(f.vario || 0);
+    if (f.velDIsUp) down = -down;
+    else if (f.velDIsUp === undefined && Number.isFinite(f.vario)
+      && Math.abs(f.vario) > 1 && Math.abs(down) > 1
+      && Math.sign(down) === Math.sign(f.vario)) {
+      // INAV packs NEU into the MAVLink NED field; infer the sign from the
+      // fused climb rate until the adapter can label it explicitly.
+      down = -down;
+    }
+    return [f.velN, f.velE, down];
   }
   if (Number.isFinite(f.groundSpeed) && Number.isFinite(f.track)) {
     const tr = f.track * DEG;
@@ -333,6 +366,22 @@ function homeVector(f) {
   return null;
 }
 
+// 3D GPS speed: horizontal ground velocity plus the vertical component.
+function speed3d(f) {
+  let h = 0, v = 0;
+  if (Number.isFinite(f.velN) && Number.isFinite(f.velE)) {
+    h = Math.hypot(f.velN, f.velE);
+    if (Number.isFinite(f.velD)) v = f.velD;
+    else if (Number.isFinite(f.vario)) v = -f.vario;
+  } else if (Number.isFinite(f.groundSpeed)) {
+    h = f.groundSpeed;
+    v = Number.isFinite(f.vario) ? f.vario : 0;
+  } else {
+    return Number.isFinite(f.speed) ? f.speed : 0;
+  }
+  return Math.hypot(h, v);
+}
+
 // Flight-path marker: where the aircraft is actually going (ground track and
 // climb), not where the nose points. Drawn as the circle-and-wings symbol.
 function drawFlightPath(ctx, f) {
@@ -340,9 +389,11 @@ function drawFlightPath(ctx, f) {
   if (!v) return;
   const p = projectWorldPoint(v[0], v[1], v[2], f);
   if (p.behind) return;
-  const m = K.fpm.margin;
-  const x = clamp(p.x, m, OSD_W - m);
-  const y = clamp(p.y, m, OSD_H - m);
+  // Unlike the home marker, the flight-path marker is clipped once it is
+  // more than ~30 px outside the picture. No edge pinning.
+  const m = 30;
+  if (p.x < -m || p.x > OSD_W + m || p.y < -m || p.y > OSD_H + m) return;
+  const x = p.x, y = p.y;
   const { r, wing, tick } = K.fpm;
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -503,7 +554,8 @@ function drawTape(ctx, f, side) {
   const outward = -inward;             // caps, ticks, labels, box go outboard
   const cy = K.center.y, half = K.tape.half;
   const top = cy - half, bot = cy + half;
-  const value = clamp(left ? (f.speed || 0) * cfg.scale : (f.alt || 0), cfg.min, cfg.max);
+  const speedMps = speed3d(f);
+  const value = clamp(left ? speedMps * cfg.scale : (f.alt || 0), cfg.min, cfg.max);
 
   const bw = K.tape.boxW, bh = K.tape.boxH, pt = K.tape.point;
   // A small gap between the spine and the box point leaves the notches
@@ -603,7 +655,8 @@ function drawVvi(ctx, f) {
   const x = K.tape.altX + K.vvi.offset;
   const cy = K.center.y, half = K.vvi.half;
   const top = cy - half, bot = cy + half;
-  const v = clamp(f.vario || 0, -10, 10);
+  const raw = Number.isFinite(f.vsi) ? f.vsi : (Number.isFinite(f.vario) ? f.vario : 0);
+  const v = clamp(raw, -10, 10);
   const ppu = K.vvi.ppu;
 
   ctx.beginPath();
@@ -628,15 +681,14 @@ function drawVvi(ctx, f) {
   ctx.lineTo(farX, y + h / 2);
   ctx.closePath();
   paint(ctx, { w: 1.0, halo: 1.2 });
-  const label = `${v >= 0 ? '+' : ''}${v.toFixed(1)}`;
+  const label = `${raw >= 0 ? '+' : ''}${raw.toFixed(1)}`;
   txt(ctx, label, (farX + nearX) / 2, y, { size: 11, align: 'center', halo: 1.8 });
 }
 
 // ---------------------------------------------------------------- edge blocks
 
 function throttlePct(f) {
-  if (Number.isFinite(f.throttlePct)) return Math.round(clamp(f.throttlePct, 0, 100));
-  const t = f.throttle;
+  const t = Number.isFinite(f.throttlePct) ? f.throttlePct : f.throttle;
   if (!Number.isFinite(t)) return null;
   return Math.round(clamp(t <= 1 ? t * 100 : t, 0, 100));
 }
@@ -677,6 +729,37 @@ function fmtTime(sec) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
   return h ? `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`
     : `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+}
+
+function drawAoa(ctx, f, nowMs) {
+  let aoa = Number.isFinite(f.aoa) ? f.aoa : NaN;
+  if (!Number.isFinite(aoa) && Number.isFinite(f.groundSpeed) && f.groundSpeed > 1) {
+    const fpa = Math.atan2(-(f.vario || 0), f.groundSpeed) * 180 / Math.PI;
+    aoa = (f.pitch || 0) - fpa;
+  }
+  if (!Number.isFinite(aoa)) return;
+  const abs = Math.abs(aoa);
+  if (abs <= K.aoa.warn) return;          // only after the first threshold
+  const critical = abs > K.aoa.critical;
+  const color = critical ? T.warn : T.ink;
+  const w = K.aoa.w, h = K.aoa.h;
+  const x = K.tape.speedX + 30;
+  const y = K.center.y - h / 2;
+  const cx = x + w / 2;
+
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  paint(ctx, { w: 1.2, color, halo: 1.4 });
+
+  // AOA and the number blink together, on the same clock.
+  const on = Math.floor((nowMs || 0) / 400) % 2 === 0;
+  ctx.save();
+  ctx.globalAlpha = on ? 1 : 0.15;
+  txt(ctx, 'AOA', cx, y + 14, { size: K.aoa.label, align: 'center', color, halo: 1.4 });
+  txt(ctx, `${aoa.toFixed(0)}\u00b0`, cx, y + 32, {
+    size: K.aoa.size, align: 'center', color, weight: 500, halo: 1.8,
+  });
+  ctx.restore();
 }
 
 function drawTimerHome(ctx, f) {
@@ -737,14 +820,13 @@ function drawWarnings(ctx, f) {
 }
 
 function drawExtras(ctx, f) {
-  // Low-importance fields fill the edges without entering the AHI box.
-  // 3D speed sits under SAT/HDOP; G force under the right tape; trip and
-  // total distance bottom-left; home bearing and battery % bottom-right.
+  // 3D speed sits under SAT/HDOP; G force under the right tape; total
+  // distance bottom-left.
   const xl = K.status.x;
-  const v3 = Math.hypot(f.groundSpeed || 0, f.vario || 0);
+  const v3 = speed3d(f);
   txt(ctx, '3D', xl, 64, { size: 10, align: 'left', color: T.muted, halo: 1.2 });
   txt(ctx, String(Math.round(v3 * 3.6)), xl + 18, 64, { size: 10, align: 'left', halo: 1.2 });
-  drawUnit(ctx, { top: 'KM', bottom: 'H' }, xl + 44, 64, { size: 6.5, color: T.muted });
+  drawUnit(ctx, { top: 'KM', bottom: 'H' }, xl + 34, 64, { size: 6.5, color: T.muted });
   if (Number.isFinite(f.gForce)) {
     txt(ctx, `G ${f.gForce.toFixed(1)}`, K.tape.altX + K.tape.cap / 2, K.center.y + K.tape.half + 18, {
       size: 10, align: 'center', color: T.muted, halo: 1.2,
@@ -752,10 +834,8 @@ function drawExtras(ctx, f) {
   }
 
   const yb = 686;
-  const trip = Number.isFinite(f.tripDist) ? `${(f.tripDist / 1000).toFixed(2)}km` : '--';
   const odo = Number.isFinite(f.odometer) ? `${(f.odometer / 1000).toFixed(1)}km` : '--';
-  txt(ctx, `TRIP ${trip}`, xl, yb, { size: 10, align: 'left', color: T.muted, halo: 1.2 });
-  txt(ctx, `TOTAL ${odo}`, xl, yb + 14, { size: 10, align: 'left', color: T.muted, halo: 1.2 });
+  txt(ctx, `TOTAL ${odo}`, xl, yb, { size: 10, align: 'left', color: T.muted, halo: 1.2 });
 }
 
 
@@ -765,6 +845,37 @@ export class FpvOsd {
     this.theme = { ...OSD_THEME, ...(theme || {}) };
     this.cfg = { ...OSD_CFG, ...(cfg || {}) };
     this.canvas = null;
+    this.smoothTau = 0.10;
+  }
+
+  // Runtime OSD options from the OSD tab. FOV is entered as a 16:9 diagonal;
+  // the horizontal/vertical split is derived the same way as the defaults.
+  configure(o = {}) {
+    const diag = Number.isFinite(o.fovDiag) ? Math.max(40, Math.min(170, o.fovDiag)) : 110;
+    const t = Math.tan((diag * Math.PI) / 360);
+    const aspect = OSD_W / OSD_H;
+    const tv = t / Math.hypot(1, aspect);
+    const hf = (Math.atan(aspect * tv) * 360) / Math.PI;
+    const vf = (Math.atan(tv) * 360) / Math.PI;
+    this.cfg = {
+      ...this.cfg,
+      hfovDeg: hf,
+      vfovDeg: vf,
+      camPitchDeg: Number.isFinite(o.camPitch) ? o.camPitch : this.cfg.camPitchDeg,
+      gimbal: {
+        ...this.cfg.gimbal,
+        pitchChannel: o.gimbalPitchChannel ?? this.cfg.gimbal.pitchChannel,
+        pitchStrength: o.gimbalPitchStrength ?? this.cfg.gimbal.pitchStrength,
+        pitchOffset: o.camPitch ?? this.cfg.gimbal.pitchOffset,
+        yawEnabled: !!o.gimbalYawEnabled,
+        yawChannel: o.gimbalYawChannel ?? this.cfg.gimbal.yawChannel,
+        yawStrength: o.gimbalYawStrength ?? this.cfg.gimbal.yawStrength,
+        throttleChannel: o.throttleChannel ?? this.cfg.gimbal.throttleChannel,
+      },
+      aoa: { ...this.cfg.aoa, warn: o.aoaWarn ?? this.cfg.aoa.warn, critical: o.aoaCritical ?? this.cfg.aoa.critical },
+      speed: { ...this.cfg.speed, stall: o.stallSpeed ?? this.cfg.speed.stall },
+    };
+    this.smoothTau = Number.isFinite(o.smoothingMs) ? Math.max(0, o.smoothingMs / 1000) : 0.10;
   }
 
   attach(canvas) { this.canvas = canvas; }
@@ -781,13 +892,104 @@ export class FpvOsd {
   clear() {
     const c = this.canvas;
     if (c) c.getContext('2d').clearRect(0, 0, c.width, c.height);
+    this._sm = null;
+    this._smAt = 0;
+    this._altSamples = [];
+    this._vsi = 0;
   }
 
-  render(flight) {
+  _altVsi(alt, nowMs) {
+    if (!Number.isFinite(alt)) return this._vsi;
+    const h = this._altSamples;
+    h.push([nowMs, alt]);
+    while (h.length > 2 && h[0][0] < nowMs - 500) h.shift();
+    if (h.length < 2) return this._vsi;
+    const a = h[0], b = h[h.length - 1];
+    const dt = (b[0] - a[0]) / 1000;
+    if (dt < 0.15) return this._vsi;
+    const target = (b[1] - a[1]) / dt;
+    const k = 1 - Math.exp(-dt / 0.25);
+    this._vsi += (target - this._vsi) * k;
+    return this._vsi;
+  }
+
+  // RC-driven gimbal and RC4 throttle. Stick channels are 1000..2000 us;
+  // gimbal strength/offset live in OSD_CFG.gimbal.
+  _fromRc(flight) {
+    const rc = Array.isArray(flight.rc) ? flight.rc : null;
+    if (!rc) {
+      return {
+        ...flight,
+        camPitchDeg: Number.isFinite(flight.camPitchDeg) ? flight.camPitchDeg : K.camPitchDeg,
+        camYawDeg: Number.isFinite(flight.camYawDeg) ? flight.camYawDeg : 0,
+      };
+    }
+    const n = (ch) => {
+      const v = rc[ch - 1];
+      return v >= 800 && v <= 2200 ? clamp((v - 1500) / 500, -1, 1) : 0;
+    };
+    const g = { ...K.gimbal, ...(flight.gimbal || {}) };
+    const thr = rc[(g.throttleChannel || 4) - 1];
+    const out = {
+      ...flight,
+      camPitchDeg: g.pitchOffset + g.pitchStrength * n(g.pitchChannel),
+      camYawDeg: g.yawEnabled ? g.yawStrength * n(g.yawChannel) : 0,
+    };    if (thr >= 800 && thr <= 2200) out.throttlePct = clamp((thr - 1000) / 10, 0, 100);
+    return out;
+  }
+
+  // Time-based smoothing, driven by the render clock rather than a fixed
+  // per-frame alpha. Heading wraps; every other continuous field uses the
+  // same time constant.
+  _smooth(flight, nowMs) {
+    const dt = this._smAt ? (nowMs - this._smAt) / 1000 : 0;
+    this._smAt = nowMs;
+    if (!this._sm || dt <= 0 || dt > 0.5) { this._sm = { ...flight }; return this._sm; }
+    const s = this._sm;
+    const k = 1 - Math.exp(-dt / (this.smoothTau || 0.10));
+    const blend = (key) => {
+      const t = flight[key];
+      if (!Number.isFinite(t)) return;
+      if (!Number.isFinite(s[key])) { s[key] = t; return; }
+      s[key] += (t - s[key]) * k;
+    };
+    const angle = (key) => {
+      const t = flight[key];
+      if (!Number.isFinite(t)) return;
+      if (!Number.isFinite(s[key])) { s[key] = t; return; }
+      const d = ((t - s[key] + 540) % 360) - 180;
+      s[key] = ((s[key] + d * k) % 360 + 360) % 360;
+    };
+    for (const key of ['pitch', 'roll', 'alt', 'speed', 'vario', 'groundSpeed',
+      'velN', 'velE', 'velD', 'homeRelN', 'homeRelE', 'homeRelD',
+      'homeDist', 'camPitchDeg', 'camYawDeg', 'throttlePct']) blend(key);
+    angle('heading');
+    angle('homeBearing');
+    if (Number.isFinite(s.homeRelN) && Number.isFinite(s.homeRelE)) {
+      s.homeDist = Math.hypot(s.homeRelN, s.homeRelE);
+      s.homeBearing = ((Math.atan2(s.homeRelE, s.homeRelN) * 180 / Math.PI) + 360) % 360;
+    }
+    // Non-continuous state follows the latest message immediately.
+    for (const key of ['sats', 'fix', 'hdop', 'mode', 'armed', 'batteryV', 'cellV',
+      'cells', 'currentA', 'mah', 'efficiency', 'gForce', 'flightTime',
+      'messages', 'warnings', 'rc', 'gimbal', 'velDIsUp', 'frames']) {
+      if (flight[key] !== undefined) s[key] = flight[key];
+    }
+    return s;
+  }
+
+  render(flight, nowMs) {
     const c = this.canvas;
     if (!c || !flight) return;
     T = this.theme;
     K = this.cfg;
+    flight = this._fromRc(flight);
+    if (Number.isFinite(nowMs)) {
+      flight = this._smooth(flight, nowMs);
+      // The VSI follows altitude slope, so it keeps working when VFR_HUD is
+      // slower than the position stream. The FPM keeps the fused velocity.
+      flight = { ...flight, vsi: this._altVsi(flight.alt, nowMs) };
+    }
     const ctx = c.getContext('2d');
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, c.width, c.height);
@@ -799,6 +1001,7 @@ export class FpvOsd {
     drawHeadingReadout(ctx, flight);
     drawTape(ctx, flight, 'left');
     drawTape(ctx, flight, 'right');
+    drawAoa(ctx, flight, nowMs);
     drawFlightPath(ctx, flight);
     drawHome(ctx, flight);
     drawSatStatus(ctx, flight);

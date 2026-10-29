@@ -4,7 +4,7 @@
   import { clampFloatPos, dragStarted, FLOAT_W } from '../lib/layout.js';
   // toLocal: client (screen) point -> the page's layout coords; not identity
   // when App draws the UI rotated on an upright phone.
-  let { v, mobile, open, pos, onOpen, onMove, cw, ch, toLocal = (x, y) => ({ x, y }) } = $props();
+  let { v, mobile, open, pos, onOpen, onMove, cw, ch, pinned = false, onPin = () => {}, toLocal = (x, y) => ({ x, y }) } = $props();
 
   const fw = $derived(mobile ? FLOAT_W.mobile : FLOAT_W.desktop);
   let justDragged = false;
@@ -69,8 +69,16 @@
         onpointerdown={startDrag} ondblclick={() => onMove(null)} onkeydown={onHeadKey} title="Drag to move · double-click to reset">
         <Icon name="dots-six-vertical" size="15px" style="color:var(--color-neutral-500)" />
         <span class="card-kicker" style="margin-right:auto">Flight stats</span>
-        <button class="btn btn-ghost" type="button" title="Collapse" aria-label="Collapse flight stats" style="width:28px;height:28px;padding:0"
-          onpointerdown={(e) => e.stopPropagation()} onclick={() => onOpen(false)}><Icon name="caret-up" /></button>
+        <button class="btn btn-ghost" type="button" title={pinned ? 'Unpin flight stats' : 'Pin flight stats'}
+          aria-label={pinned ? 'Unpin flight stats' : 'Pin flight stats'} aria-pressed={pinned}
+          style="width:28px;height:28px;padding:0"
+          onpointerdown={(e) => e.stopPropagation()} onclick={() => onPin(!pinned)}>
+          <Icon name={pinned ? 'push-pin' : 'push-pin-slash'} />
+        </button>
+        {#if !pinned}
+          <button class="btn btn-ghost" type="button" title="Collapse" aria-label="Collapse flight stats" style="width:28px;height:28px;padding:0"
+            onpointerdown={(e) => e.stopPropagation()} onclick={() => onOpen(false)}><Icon name="caret-up" /></button>
+        {/if}
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">
         <div style="display:flex;align-items:baseline;gap:6px"><span style="font-size:20px;line-height:1">MCS {v.mcs}</span>

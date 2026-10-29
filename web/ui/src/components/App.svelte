@@ -7,8 +7,9 @@
   import DisconnectedOverlay from './DisconnectedOverlay.svelte';
   import FsOverlay from './FsOverlay.svelte';
   import FloatStats from './FloatStats.svelte';
+  import OsdPanel from './OsdPanel.svelte';
   import ConfigSide from './ConfigSide.svelte';
-  import { ui, saveMode, reloadToConfig, relaySavedAtLoad } from '../lib/ui.svelte.js';
+  import { ui, saveMode, saveOsd, reloadToConfig, relaySavedAtLoad } from '../lib/ui.svelte.js';
   import { Session, WORKER_FAILED, isWindowWorkerFailure } from '../lib/session.js';
   import { VideoPipeline } from '../lib/video.js';
   import { Telemetry } from '../lib/telemetry.js';
@@ -98,6 +99,7 @@
   // vector HUD draws.
   const mav = new MavlinkFeed();
   const fpv = new FpvOsd({ getCanvas: () => fpvCanvas });
+  fpv.configure(ui.osd);
 
   // The HUD runs on the page's animation clock; the MAVLink feed updates the
   // state at the FC's rate. Deliberately independent of the decoder, so a
@@ -112,9 +114,10 @@
     const flightTime = s.flightTime + (s.armedSince ? (now - s.armedSince) / 1000 : 0);
     return {
       pitch: s.pitch, roll: s.roll, heading: s.heading,
-      alt: s.alt, speed, vario: s.vario,
+      alt: s.alt, altMsl: s.mslAlt, speed, vario: s.vario,
       velN: s.velN, velE: s.velE, velD: s.velD,
       track: s.track, groundSpeed: s.groundspeed,
+      rc: s.rc, aoa: s.aoa,
       homeRelN: s.homeRelN, homeRelE: s.homeRelE, homeRelD: s.homeRelD,
       homeDist: s.homeDist, homeBearing: s.homeBearing,
       sats: s.sats, fix: s.fix, hdop: s.hdop,
@@ -129,7 +132,7 @@
   }
   function fpvFrame() {
     const f = fpvFlight();
-    if (f) fpv.render(f); else fpv.clear();
+    if (f) fpv.render(f, performance.now()); else fpv.clear();
     fpvRaf = requestAnimationFrame(fpvFrame);
   }
   function startFpv() { if (!fpvRaf) fpvRaf = requestAnimationFrame(fpvFrame); }
@@ -284,6 +287,13 @@
     if (live) disconnect(); else connect();
   }
 
+  function onOsdChange(next) {
+    ui.osd = next;
+    saveOsd($state.snapshot(next));
+    fpv.configure(ui.osd);
+    ui.applied = `OSD options · saved ${new Date().toTimeString().slice(0, 8)}`;
+  }
+
   function onCfgChange(next, label) {
     ui.cfg = next;
     saveConfig(localStorageSafe(), $state.snapshot(next));
@@ -403,6 +413,7 @@
     let roFpv = null;
     if (fpvCanvas) {
       fpv.attach(fpvCanvas);
+      fpv.configure(ui.osd);
       roFpv = new ResizeObserver(([e]) => fpv.resize(e.contentRect.width, e.contentRect.height, window.devicePixelRatio || 1));
       roFpv.observe(fpvCanvas);
     }
@@ -461,6 +472,9 @@
             onDisconnect={live ? disconnect : null} variant="rule" applied={ui.applied} recordings={recList}
             keyFp={keyFingerprint(ui.key)} {onLoadKey} {onClearKey} />
         {/snippet}
+        {#snippet osd()}
+          <OsdPanel osd={ui.osd} onChange={onOsdChange} />
+        {/snippet}
       </Sidebar>
     {/if}
   </div>
@@ -469,9 +483,12 @@
       onConn={toggleConn} onRec={toggleRec} onStats={() => (ui.statsVisible = !ui.statsVisible)}
       onCfg={() => (ui.cfgOpen = !ui.cfgOpen)} fsButton={isMobile(LW, LH) ? (fsSupported ? { on: realFs } : null) : { on: true }}
       onFs={isMobile(LW, LH) ? toggleRealFs : toggleFs} {fsMsg} />
-    {#if ui.statsVisible && !ui.cfgOpen}
-      <FloatStats v={view} mobile={isMobile(LW, LH)} open={ui.floatOpen} pos={ui.fpos}
-        onOpen={(o) => (ui.floatOpen = o)} onMove={(p) => (ui.fpos = p)} cw={LW} ch={LH} toLocal={frame.toLocal} />
+    {#if (ui.statsVisible || ui.statsPinned) && !ui.cfgOpen}
+      <FloatStats v={view} mobile={isMobile(LW, LH)} open={ui.floatOpen || ui.statsPinned} pos={ui.fpos}
+        pinned={ui.statsPinned}
+        onPin={(p) => { ui.statsPinned = p; if (p) ui.floatOpen = true; }}
+        onOpen={(o) => { if (ui.statsPinned) ui.floatOpen = true; else ui.floatOpen = o; }}
+        onMove={(p) => (ui.fpos = p)} cw={LW} ch={LH} toLocal={frame.toLocal} />
     {/if}
     {#if ui.cfgOpen}
       <ConfigSide onClose={() => (ui.cfgOpen = false)}>

@@ -2,12 +2,13 @@
   import Icon from './Icon.svelte';
   import StatsGroups from './StatsGroups.svelte';
   import DebugTables from './DebugTables.svelte';
-  let { tab, onTab, v, spark, groups, onCopy, copyMsg, config } = $props();
+  let { tab, onTab, v, spark, groups, onCopy, copyMsg, config, osd } = $props();
 </script>
 <aside class="side rule-v mono">
   <div class="seg" style="flex:none">
     <label class="seg-opt"><input type="radio" name="webgs-tab" checked={tab === 'stats'} onchange={() => onTab('stats')}><Icon name="chart-line-up" />Stats</label>
     <label class="seg-opt"><input type="radio" name="webgs-tab" checked={tab === 'config'} onchange={() => onTab('config')}><Icon name="sliders-horizontal" />Config</label>
+    <label class="seg-opt"><input type="radio" name="webgs-tab" checked={tab === 'osd'} onchange={() => onTab('osd')}><Icon name="binoculars" />OSD</label>
     <label class="seg-opt"><input type="radio" name="webgs-tab" checked={tab === 'debug'} onchange={() => onTab('debug')}><Icon name="bug" />Debug</label>
   </div>
   {#if tab === 'stats'}
@@ -16,6 +17,8 @@
     </div>
   {:else if tab === 'config'}
     <div class="scroll scroll-thin" style="padding:var(--space-2) 8px var(--space-6) 1px">{@render config?.()}</div>
+  {:else if tab === 'osd'}
+    <div class="scroll scroll-thin" style="padding:var(--space-2) 8px var(--space-6) 1px">{@render osd?.()}</div>
   {:else}
     <div class="scroll scroll-thin" style="display:flex;flex-direction:column;gap:var(--space-6);padding:1px 8px var(--space-6) 1px">
       <DebugTables {groups} {onCopy} {copyMsg} />

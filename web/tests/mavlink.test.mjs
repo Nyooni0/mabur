@@ -44,7 +44,7 @@ function setU32(b, o, v) { new DataView(b.buffer, b.byteOffset + o, 4).setUint32
 
 test('CRC_EXTRA table is pinned to the message definitions', () => {
   assert.deepEqual(Object.fromEntries(MAVLINK_CRC_EXTRA), {
-    0: 50, 1: 124, 24: 24, 30: 39, 33: 104, 49: 39, 74: 20, 147: 154, 253: 83,
+    0: 50, 1: 124, 24: 24, 30: 39, 33: 104, 35: 244, 49: 39, 74: 20, 147: 154, 251: 170, 253: 83,
   });
 });
 

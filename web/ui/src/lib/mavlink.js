@@ -17,9 +17,11 @@ const CRC_EXTRA = new Map([
   [24, 24],   // GPS_RAW_INT
   [30, 39],   // ATTITUDE
   [33, 104],  // GLOBAL_POSITION_INT
+  [35, 244],  // RC_CHANNELS_RAW
   [49, 39],   // GPS_GLOBAL_ORIGIN
   [74, 20],   // VFR_HUD
   [147, 154], // BATTERY_STATUS
+  [251, 170], // NAMED_VALUE_FLOAT
   [253, 83],  // STATUSTEXT
 ]);
 
@@ -103,6 +105,7 @@ export class MavlinkFeed {
       messages: [],
       lastLat: NaN, lastLon: NaN, lastPosMs: 0,
       throttle: 0,
+      rc: new Array(18).fill(0), rcMs: 0, aoa: NaN,
       sats: 0, fix: 0,
       batteryV: NaN, cellV: NaN, cells: 0, currentA: NaN, mah: NaN, batteryPct: NaN,
       mode: '', armed: false, type: 0,
@@ -245,6 +248,10 @@ export class MavlinkFeed {
       s.homeLon = i32(b, p + 4) / 1e7;
       s.homeAlt = i32(b, p + 8) / 1000;
       this.updateHome(s);
+      s.updated = nowMs;
+    } else if (msgid === 35 && len >= 22) {             // RC_CHANNELS_RAW
+      for (let i = 0; i < 8; i++) s.rc[i] = u16(b, p + 4 + i * 2);
+      s.rcMs = nowMs;
       s.updated = nowMs;
     } else if (msgid === 74 && len >= 20) {              // VFR_HUD
       s.airspeed = f32(b, p + 0);

@@ -23,13 +23,15 @@
   import trash from '@phosphor-icons/core/assets/regular/trash.svg?raw';
   import stop from '@phosphor-icons/core/assets/regular/stop.svg?raw';
   import record from '@phosphor-icons/core/assets/regular/record.svg?raw';
+  import pushPin from '@phosphor-icons/core/assets/regular/push-pin.svg?raw';
+  import pushPinSlash from '@phosphor-icons/core/assets/regular/push-pin-slash.svg?raw';
 
   const ICONS = {
     plugs, 'plugs-connected': plugsConnected, 'corners-out': cornersOut, 'corners-in': cornersIn,
     'chart-line-up': chartLineUp, 'sliders-horizontal': slidersHorizontal, bug, 'gear-six': gearSix,
     x, 'caret-up': caretUp, 'caret-down': caretDown, 'dots-six-vertical': dotsSixVertical,
     broadcast, binoculars, 'lock-simple': lockSimple, info, warning, 'check-circle': checkCircle,
-    plus, trash, stop, record,
+    plus, trash, stop, record, 'push-pin': pushPin, 'push-pin-slash': pushPinSlash,
   };
   let { name, size = '1em', style = '' } = $props();
 </script>
