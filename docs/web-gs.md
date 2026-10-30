@@ -1000,6 +1000,15 @@ armed, timer, trip/total distance, efficiency, battery and status messages).
 The HUD clears after 5 s without a decoded frame. It is independent of the
 MSP DisplayPort grid: a MAVLink-only aircraft gets the HUD and no grid.
 
+MAVLink v2 trims trailing zero bytes from a payload, so a live stream carries
+frames shorter than their message definition: a stationary aircraft's ATTITUDE
+is 16 bytes (its three rates are zero) rather than 28, and `VFR_HUD` is 18 with
+throttle 0. The page zero-extends each payload to the message's minimum length
+before decoding, as the reference C parser does, so the HUD draws on the bench
+instead of waiting for the aircraft to move. The minimum lengths are pinned
+beside the CRC_EXTRA table and the test suite covers a trimmed ATTITUDE,
+`VFR_HUD` and `STATUSTEXT`.
+
 The drone's `[mavlink]` block:
 
 ```toml

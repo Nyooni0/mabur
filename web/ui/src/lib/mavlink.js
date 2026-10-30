@@ -26,6 +26,28 @@ const CRC_EXTRA = new Map([
 
 export const MAVLINK_CRC_EXTRA = CRC_EXTRA;
 
+// MAVLink v2 trims trailing zero bytes from the payload, so a live stream
+// carries messages shorter than their definition: a stationary aircraft sends
+// ATTITUDE as 16 bytes (its three rates are zero) instead of 28, and VFR_HUD
+// drops to 18 with throttle 0. The field offsets below assume the full wire
+// order, so a short payload is zero-extended to the message's minimum length
+// before decoding, exactly as the reference C parser does. Without this a
+// bench aircraft decodes HEARTBEAT only and the HUD stays blank.
+const MIN_LEN = new Map([
+  [0, 9],     // HEARTBEAT
+  [1, 31],    // SYS_STATUS
+  [24, 30],   // GPS_RAW_INT
+  [30, 28],   // ATTITUDE
+  [33, 28],   // GLOBAL_POSITION_INT
+  [35, 22],   // RC_CHANNELS_RAW
+  [49, 12],   // GPS_GLOBAL_ORIGIN
+  [74, 20],   // VFR_HUD
+  [147, 36],  // BATTERY_STATUS
+  [253, 51],  // STATUSTEXT
+]);
+
+export const MAVLINK_MIN_LEN = MIN_LEN;
+
 const DEG = 180 / Math.PI;
 
 // MAVLink CRC-16/MCRF4XX (init 0xFFFF, no final xor).
@@ -149,7 +171,7 @@ export class MavlinkFeed {
         off++;   // resync one byte; the next magic may start a good frame
         continue;
       }
-      this.decode(msgid, this.buf, off + hdr, len, ptsUs, nowMs);
+      this.decodeFrame(msgid, this.buf, off + hdr, len, ptsUs, nowMs);
       this.state.frames++;
       off += total;
     }
@@ -194,6 +216,20 @@ export class MavlinkFeed {
     s.efficiency = Number.isFinite(s.mah) && s.tripDist > 50
       ? s.mah / (s.tripDist / 1000)
       : NaN;
+  }
+
+  // Zero-extends a v2-trimmed payload to the message's minimum length, then
+  // decodes it from offset 0. A payload already that long (v2 extension fields,
+  // or a v1 sender) decodes in place.
+  decodeFrame(msgid, b, p, len, ptsUs, nowMs) {
+    const min = MIN_LEN.get(msgid);
+    if (min === undefined || len >= min) {
+      this.decode(msgid, b, p, len, ptsUs, nowMs);
+      return;
+    }
+    const padded = new Uint8Array(min);
+    padded.set(b.subarray(p, p + len));
+    this.decode(msgid, padded, 0, min, ptsUs, nowMs);
   }
 
   decode(msgid, b, p, len, ptsUs, nowMs) {

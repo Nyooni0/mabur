@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MavlinkFeed, MAVLINK_CRC_EXTRA, mavlinkCrc } from '../ui/src/lib/mavlink.js';
+import { MavlinkFeed, MAVLINK_CRC_EXTRA, MAVLINK_MIN_LEN, mavlinkCrc } from '../ui/src/lib/mavlink.js';
 
 // Build a v2 frame. `payload` is the wire-order payload (the caller owns the
 // field offsets, as the FC's serializer does).
@@ -46,6 +46,56 @@ test('CRC_EXTRA table is pinned to the message definitions', () => {
   assert.deepEqual(Object.fromEntries(MAVLINK_CRC_EXTRA), {
     0: 50, 1: 124, 24: 24, 30: 39, 33: 104, 35: 244, 49: 39, 74: 20, 147: 154, 253: 83,
   });
+});
+
+test('every decoded message pins a minimum payload length', () => {
+  assert.deepEqual([...MAVLINK_MIN_LEN.keys()].sort(), [...MAVLINK_CRC_EXTRA.keys()].sort());
+});
+
+// MAVLink v2 drops trailing zero bytes, so a stationary aircraft's frames are
+// shorter than their definition. Decoding a trimmed frame is what lets the HUD
+// show before the aircraft moves: on the bench HEARTBEAT was the only message
+// that survived the length guards.
+test('a v2-trimmed ATTITUDE (zero rates) still decodes', () => {
+  const att = payload(16);        // 28 in the definition; the three rates are 0
+  setU32(att, 0, 1234);
+  setF32(att, 4, 0.1);
+  setF32(att, 8, -0.2);
+  setF32(att, 12, 1.5);
+  const f = new MavlinkFeed();
+  f.push(frame(30, att), 0, 5000);
+  assert.equal(f.state.frames, 1);
+  assert.equal(f.state.crcErrors, 0);
+  assert.equal(f.state.attMs, 5000);
+  assert.ok(Math.abs(f.state.roll - (0.1 * 180 / Math.PI)) < 1e-6);
+  assert.ok(Math.abs(f.state.pitch - (-0.2 * 180 / Math.PI)) < 1e-6);
+  assert.ok(Math.abs(f.state.heading - ((1.5 * 180 / Math.PI) % 360)) < 1e-6);
+});
+
+test('a v2-trimmed VFR_HUD decodes its remaining fields', () => {
+  const vfr = payload(18);        // throttle 0 -> the last two bytes are trimmed
+  setF32(vfr, 0, 12);
+  setF32(vfr, 4, 13);
+  setF32(vfr, 8, 100);
+  setF32(vfr, 12, -1.5);
+  setI16(vfr, 16, 270);
+  const f = new MavlinkFeed();
+  f.push(frame(74, vfr), 0, 6000);
+  assert.equal(f.state.frames, 1);
+  assert.equal(f.state.heading, 270);
+  assert.equal(f.state.throttle, 0);
+  assert.equal(f.state.vario, -1.5);
+});
+
+test('a v2-trimmed STATUSTEXT decodes the short text', () => {
+  const st = payload(8);          // severity + "NO GPS" + terminator, well under 51
+  st[0] = 4;
+  st.set(new TextEncoder().encode('NO GPS'), 1);
+  const f = new MavlinkFeed();
+  f.push(frame(253, st), 0, 7000);
+  assert.equal(f.state.frames, 1);
+  assert.equal(f.state.messages.length, 1);
+  assert.equal(f.state.messages[0].text, 'NO GPS');
 });
 
 test('battery status decodes pack, cells, current and mAh', () => {
