@@ -237,6 +237,31 @@ TEST(no_cap_without_offset) {
   CHECK(!last.cap_to_complete_us.has_value());   // no Telem -> no RTT offset
 }
 
+TEST(t_mav_reaches_on_mav_and_stats) {
+  std::vector<std::vector<uint8_t>> got;
+  uint32_t got_pts = 0;
+  Io io;
+  io.on_au = [](Au&&) {};
+  io.on_mav = [&](const uint8_t* p, size_t n, uint32_t pts) {
+    got.emplace_back(p, p + n);
+    got_pts = pts;
+  };
+  WebGs g(cfg(), Mode::Spotter, 136, 40, {}, 0, io);
+  const std::vector<uint8_t> raw = {0xfd, 0x09, 0, 0, 1, 1, 1, 0, 0, 0,
+                                    1, 2, 3, 4, 5, 6, 7, 8, 9, 0xaa, 0xbb};
+  auto body = mabur::rc::pack_mav(raw.data(), raw.size(), 0x01020304);
+  g.on_rx(rc_body(body, 1000000));
+  g.on_rx(rc_body(body, 1001000));
+  CHECK(g.stats().mav_frames == 2);
+  CHECK(g.stats().mav_bytes == 2 * raw.size());
+  REQUIRE(got.size() == 2);
+  CHECK(got[0] == raw);
+  CHECK(got_pts == 0x01020304u);
+  const std::string j = stats_json(g.stats());
+  CHECK(j.find("\"mav_frames\":2") != std::string::npos);
+  CHECK(j.find("\"mav_bytes\":42") != std::string::npos);
+}
+
 TEST(stats_json_has_mode_and_nulls) {
   Stats s;
   s.mode = Mode::Spotter;

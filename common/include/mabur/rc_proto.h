@@ -88,6 +88,12 @@ constexpr uint8_t T_CAL_RESULT = 6;
 // the TxQueue.
 constexpr uint8_t T_NACK = 7;
 
+// T_MAV (VTX -> VRX): one complete MAVLink v1/v2 frame as it came off the
+// flight controller's UART. Display/telemetry only: the drone neither
+// parses nor rewrites it, so the GS sees exactly the bytes the FC sent. Not
+// FEC-protected -- a lost frame is a lost HUD update, never a video stall.
+constexpr uint8_t T_MAV = 8;
+
 constexpr uint8_t F_DISCOVERY = 0x04;
 
 // SipHash-24 auth tag (link pairing): the 8 bytes
@@ -120,6 +126,11 @@ constexpr uint16_t CAP_TELEMETRY = 0x0002;
 // DiscAck.chip_caps bit: VTX understands T_CAL_CMD / T_CAL_RESULT and can run
 // a TX-power wall calibration. The GS refuses to start a session without it.
 constexpr uint16_t CAP_CALIBRATE = 0x0004;
+
+// DiscAck.chip_caps bit: VTX forwards raw MAVLink as T_MAV frames. The GS
+// parses them without the bit (the pair ships together); it is the
+// observability bit for "this drone has a MAVLink input".
+constexpr uint16_t CAP_MAV_TELEMETRY = 0x0008;
 
 // VRX -> VTX feedback: the GS-authoritative operating point. Every field
 // here is one maburd acts on. It used to also carry ack_seq, an alink-style
@@ -316,6 +327,24 @@ struct CalResult {
   // W rows, and the drone has no use for them. Nothing on this side of
   // the wire ever read one.
 };
+
+// T_MAV body (VTX -> VRX):
+//   magic(2) | version | type | pts_us(4) | len(2) | data(len) | crc(2)
+// `data` is one complete MAVLink frame, magic through CRC (no 802.11 FCS).
+// `pts_us` is the drone video-clock stamp at forward time (0 = unavailable).
+// The header is 10 bytes, so a body is 12 + data.size().
+struct MavFrame {
+  uint32_t pts_us = 0;
+  std::vector<uint8_t> data;
+};
+
+// Largest MAVLink frame T_MAV carries: v2 header(10) + payload(255) +
+// CRC(2) + signature(13) = 280.
+constexpr size_t kMavMaxFrame = 280;
+constexpr size_t kMavHeadLen = 10;
+
+std::vector<uint8_t> pack_mav(const uint8_t* frame, size_t n, uint32_t pts_us = 0);
+std::optional<MavFrame> parse_mav(const uint8_t* buf, size_t len);
 
 // Tagged frames (DISC/RCF/CAL_CMD/CAL_RESULT) carry an 8-byte SipHash tag
 // (kTagLen) right before the CRC. pack_* always writes a tag -- keyed by

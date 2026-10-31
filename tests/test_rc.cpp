@@ -423,6 +423,34 @@ TEST(telem_round_trip_and_golden) {
   CHECK(!mabur::rc::parse_telem(flip.data(), flip.size()).has_value());
 }
 
+TEST(mav_round_trip_and_validation) {
+  // T_MAV carries a complete MAVLink frame unchanged plus the drone's pts
+  // stamp. The envelope is magic(2) ver type pts(4) len(2) data(n) crc(2),
+  // so a body is 12 + data.size().
+  std::vector<uint8_t> raw = {0xfd, 0x09, 0x00, 0x00, 0x01, 0x01, 0x01,
+                              0x00, 0x00, 0x00, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+                              0xAA, 0xBB, 0xCC};
+  auto wire = mabur::rc::pack_mav(raw.data(), raw.size(), 0x12345678u);
+  CHECK(!wire.empty());
+  CHECK(wire.size() == mabur::rc::kMavHeadLen + raw.size() + 2);
+  CHECK(mabur::rc::frame_type(wire.data(), wire.size()) == mabur::rc::T_MAV);
+  auto back = mabur::rc::parse_mav(wire.data(), wire.size());
+  REQUIRE(back.has_value());
+  CHECK(back->pts_us == 0x12345678u);
+  CHECK(back->data == raw);
+
+  auto trunc = wire; trunc.pop_back();
+  CHECK(!mabur::rc::parse_mav(trunc.data(), trunc.size()).has_value());
+  auto flip = wire; flip[8] ^= 0xFF;
+  CHECK(!mabur::rc::parse_mav(flip.data(), flip.size()).has_value());
+  CHECK(mabur::rc::pack_mav(raw.data(), 0, 0).empty());
+
+  std::vector<uint8_t> biggest(mabur::rc::kMavMaxFrame, 0xFD);
+  auto ok = mabur::rc::pack_mav(biggest.data(), biggest.size(), 0);
+  CHECK(ok.size() == mabur::rc::kMavHeadLen + mabur::rc::kMavMaxFrame + 2);
+  CHECK(mabur::rc::pack_mav(biggest.data(), biggest.size() + 1, 0).empty());
+}
+
 TEST(telem_rtt_sync_fields_round_trip) {
   // link-rtt: the drone echoes WHICH RCF rcf_age_ms is aging against (seq
   // identity for the GS send-time match) and its pts-domain clock at telem

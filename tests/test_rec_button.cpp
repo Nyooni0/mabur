@@ -56,11 +56,13 @@ TEST(a_button_held_at_startup_does_not_fire) {
   CHECK(!d.feed(true, 5000));
 }
 
-TEST(a_press_fires_once_and_a_hold_never_repeats) {
+TEST(a_press_fires_once_it_has_held_for_the_window) {
   ButtonDebounce d;
   CHECK(!d.feed(false, 0));     // seed: released
-  CHECK(d.feed(true, 100));     // press
-  for (uint64_t t = 102; t < 5000; t += 2) CHECK(!d.feed(true, t));
+  CHECK(!d.feed(true, 100));    // press begins
+  CHECK(!d.feed(true, 148));    // held 48 ms: not yet
+  CHECK(d.feed(true, 150));     // held 50 ms: the press
+  for (uint64_t t = 152; t < 5000; t += 2) CHECK(!d.feed(true, t));  // a hold never repeats
 }
 
 TEST(a_bounce_burst_yields_exactly_one_press) {
@@ -80,20 +82,51 @@ TEST(a_bounce_burst_yields_exactly_one_press) {
 TEST(release_then_press_fires_a_second_time) {
   ButtonDebounce d;
   CHECK(!d.feed(false, 0));
-  CHECK(d.feed(true, 100));
-  CHECK(!d.feed(false, 400));   // a release is accepted but never a press
-  CHECK(d.feed(true, 800));
+  CHECK(!d.feed(true, 100));
+  CHECK(d.feed(true, 150));
+  CHECK(!d.feed(false, 400));
+  CHECK(!d.feed(false, 450));   // a release is accepted but never a press
+  CHECK(!d.feed(true, 800));
+  CHECK(d.feed(true, 850));
 }
 
-TEST(a_release_inside_the_window_is_not_accepted) {
+TEST(a_release_shorter_than_the_window_is_not_accepted) {
   ButtonDebounce d;
   CHECK(!d.feed(false, 0));
-  CHECK(d.feed(true, 100));
-  CHECK(!d.feed(false, 120));   // rejected: 20 ms < 50 ms
-  // Because the release was rejected the level is still "pressed", so the
-  // line returning high is not a new press.
-  CHECK(!d.feed(true, 140));
+  CHECK(!d.feed(true, 100));
+  CHECK(d.feed(true, 150));
+  CHECK(!d.feed(false, 160));   // a 20 ms dropout, never accepted
+  // Because the release was never accepted the level is still "pressed",
+  // so the line staying high is not a new press.
+  CHECK(!d.feed(true, 180));
   CHECK(!d.feed(true, 300));
+}
+
+// Noise on the line: one sample at the other level, at the 2 ms poll rate
+// of the player's loop. Neither polarity of glitch may toggle the DVR --
+// not a spike to "pressed" on an idle line, and not a spike to "released"
+// followed by the return, which is how a line idling at the pressed level
+// (polarity configured opposite to the wiring) read as a press.
+TEST(a_single_sample_glitch_never_fires) {
+  for (bool idle : {false, true}) {
+    ButtonDebounce d;
+    int presses = 0;
+    for (uint64_t t = 0; t < 3000; t += 2) {
+      const bool level = (t == 1000) ? !idle : idle;
+      if (d.feed(level, t)) ++presses;
+    }
+    CHECK(presses == 0);
+  }
+}
+
+TEST(a_glitch_shorter_than_the_window_never_fires) {
+  ButtonDebounce d;
+  int presses = 0;
+  for (uint64_t t = 0; t < 3000; t += 2) {
+    const bool level = t >= 1000 && t < 1048;  // a 48 ms spike
+    if (d.feed(level, t)) ++presses;
+  }
+  CHECK(presses == 0);
 }
 
 // The ioctl shell has no host mock -- enumerate, match, request is all it

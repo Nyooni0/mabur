@@ -373,6 +373,36 @@ std::optional<Telem> parse_telem(const uint8_t* buf, size_t len) {
   return t;
 }
 
+std::vector<uint8_t> pack_mav(const uint8_t* frame, size_t n, uint32_t pts_us) {
+  if (!frame || n == 0 || n > kMavMaxFrame) return {};
+  std::vector<uint8_t> body;
+  body.reserve(kMavHeadLen + n + 2);
+  put16(body, RC_MAGIC);
+  body.push_back(RC_VERSION);
+  body.push_back(T_MAV);
+  put32(body, pts_us);
+  put16(body, static_cast<uint16_t>(n));
+  body.insert(body.end(), frame, frame + n);
+  put_crc(body);
+  return body;
+}
+
+std::optional<MavFrame> parse_mav(const uint8_t* buf, size_t len) {
+  // magic(2) ver type pts(4) len(2) data(n) crc(2)
+  if (!buf || len < kMavHeadLen + 2) return std::nullopt;
+  if (get16(buf, 0) != RC_MAGIC || buf[2] != RC_VERSION || buf[3] != T_MAV)
+    return std::nullopt;
+  const uint16_t n = get16(buf, 8);
+  if (n == 0 || n > kMavMaxFrame) return std::nullopt;
+  if (len < kMavHeadLen + n + 2) return std::nullopt;
+  const size_t crc_at = kMavHeadLen + n;
+  if (get16(buf, crc_at) != crc16_ccitt(buf, crc_at)) return std::nullopt;
+  MavFrame m;
+  m.pts_us = get32(buf, 4);
+  m.data.assign(buf + kMavHeadLen, buf + kMavHeadLen + n);
+  return m;
+}
+
 int frame_type(const uint8_t* buf, size_t len) {
   if (len < 4) return -1;
   uint16_t magic = get16(buf, 0);

@@ -17,7 +17,8 @@ const mem = (init = {}) => {
 test('defaults match maburgs.default.toml', () => {
   const c = defaultConfig();
   assert.deepEqual(c, { channels: [40, 64, 112, 144], link: 'auto', width: 40, staticMcs: -1,
-    ladder: [0, 1, 2, 3, 4].map((mcs) => ({ mcs, bw: 40, ob: 0.5, oe: 0.25 })), colortrans: true, dvr: 'web', nack: true });
+    ladder: [0, 1, 2, 3, 4].map((mcs) => ({ mcs, bw: 40, ob: 0.5, oe: 0.25 })), colortrans: true,
+    stabilize: 'off', stabCrop: 0, dvr: 'web', nack: true });
   c.ladder[0].mcs = 7;
   assert.equal(defaultConfig().ladder[0].mcs, 0, 'fresh copy each call');
   assert.ok(CHANNELS.includes(136) && CHANNELS.includes(165) && CHANNELS.length === 25);
@@ -45,6 +46,11 @@ test('normalize_config_falls_back_per_field', () => {
   assert.equal(normalizeConfig({ colortrans: false }).colortrans, false);
   assert.equal(normalizeConfig({ colortrans: 'no' }).colortrans, true);   // non-boolean -> default on
   assert.equal(normalizeConfig({}).colortrans, true);
+  const stab = normalizeConfig({ stabilize: 'rotate', stabCrop: '12' });
+  assert.equal(stab.stabilize, 'rotate');
+  assert.equal(stab.stabCrop, 12);
+  assert.equal(normalizeConfig({ stabilize: 'bogus' }).stabilize, 'off');
+  assert.equal(normalizeConfig({ stabCrop: 99 }).stabCrop, 30);
 });
 
 test('load/save round trip, storage failures tolerated, URL ch/w override', () => {

@@ -689,6 +689,37 @@ TEST(fec_symbol_size_bounds) {
   }
 }
 
+TEST(mavlink_defaults_and_same_serial_rejected) {
+  {
+    auto path = write_temp_toml("");
+    auto cfg = load_config(path.string());
+    CHECK(!cfg.mavlink.enable);
+    CHECK(cfg.mavlink.serial == "/dev/ttyS2");
+    CHECK(cfg.mavlink.baud == 115200);
+    CHECK(cfg.mavlink.max_bps == 4000);
+    std::filesystem::remove(path);
+  }
+  {
+    auto path = write_temp_toml(
+        "[msp]\nenable = true\nserial = \"/dev/ttyS2\"\n"
+        "[mavlink]\nenable = true\nserial = \"/dev/ttyS2\"\n");
+    bool threw = false;
+    try { (void)load_config(path.string()); } catch (const std::exception&) { threw = true; }
+    CHECK(threw);
+    std::filesystem::remove(path);
+  }
+  {
+    auto path = write_temp_toml(
+        "[mavlink]\nenable = true\nserial = \"/dev/ttyS3\"\nbaud = 230400\nmax_bps = 2500\n");
+    auto cfg = load_config(path.string());
+    CHECK(cfg.mavlink.enable);
+    CHECK(cfg.mavlink.serial == "/dev/ttyS3");
+    CHECK(cfg.mavlink.baud == 230400);
+    CHECK(cfg.mavlink.max_bps == 2500);
+    std::filesystem::remove(path);
+  }
+}
+
 TEST(msp_defaults_and_parse) {
   // Defaults: disabled, ttyS2, 1 Hz.
   {

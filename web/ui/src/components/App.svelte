@@ -7,8 +7,9 @@
   import DisconnectedOverlay from './DisconnectedOverlay.svelte';
   import FsOverlay from './FsOverlay.svelte';
   import FloatStats from './FloatStats.svelte';
+  import OsdPanel from './OsdPanel.svelte';
   import ConfigSide from './ConfigSide.svelte';
-  import { ui, saveMode, reloadToConfig, relaySavedAtLoad } from '../lib/ui.svelte.js';
+  import { ui, saveMode, saveOsd, reloadToConfig, relaySavedAtLoad } from '../lib/ui.svelte.js';
   import { Session, WORKER_FAILED, isWindowWorkerFailure } from '../lib/session.js';
   import { VideoPipeline } from '../lib/video.js';
   import { Telemetry } from '../lib/telemetry.js';
@@ -23,11 +24,14 @@
   import { effectiveTarget, targetCovers, recFileName, localView, combinedRec, headroomWarning,
     formatBytes, listRecordings, downloadRecording, deleteRecording, opfsRoot } from '../lib/localrec.js';
   import { OsdLayer, OsdPainter } from '../lib/osd.js';
+  import { FpvOsd } from '../lib/fpv_osd.js';
+  import { MavlinkFeed } from '../lib/mavlink.js';
   import { ScreenWake } from '../lib/wakelock.js';
 
   let canvas = $state(null);
   let glCanvas = $state(null);
   let osdCanvas = $state(null);
+  let fpvCanvas = $state(null);
   let W = $state(innerWidth), H = $state(innerHeight);
   let sess = $state({ state: 'idle', mode: ui.mode, ch: null, w: null, error: null, notice: null, startedAt: null, recWish: false });
   let sessionCfg = $state(ui.cfg);        // the config the running session started with
@@ -71,8 +75,10 @@
     if (root) try { await downloadRecording(root, name); } catch (e) { console.error('[webgs] download', name, e); }
   }
 
-  const video = new VideoPipeline({ getCanvas: () => canvas, getGlCanvas: () => glCanvas, getMode: () => sess.mode,
-    getColortrans: () => ui.cfg.colortrans, onWantIdr: () => session.requestIdr() });
+  const video = new VideoPipeline({ getCanvas: () => canvas, getGlCanvas: () => glCanvas,
+    getMode: () => sess.mode,
+    getColortrans: () => ui.cfg.colortrans, getStabilize: () => ui.cfg.stabilize,
+    getStabCrop: () => ui.cfg.stabCrop, onWantIdr: () => session.requestIdr() });
   const tele = new Telemetry(video);
   // MSP OSD: latest DisplayPort grid, painted on
   // a second canvas over the video. The atlas URL resolves against the page
@@ -87,6 +93,54 @@
     },
   });
   function clearOsd() { if (osdLayer.screen) { osdLayer.clear(); osd.schedule(); } }
+
+  // Raw MAVLink from the drone's T_MAV tunnel. The drone forwards the FC's
+  // frames verbatim; this page validates CRC_EXTRA and decodes the subset the
+  // vector HUD draws.
+  const mav = new MavlinkFeed();
+  const fpv = new FpvOsd({ getCanvas: () => fpvCanvas });
+  fpv.configure(ui.osd);
+
+  // The HUD runs on the page's animation clock; the MAVLink feed updates the
+  // state at the FC's rate. Deliberately independent of the decoder, so a
+  // frozen or late picture does not freeze the instruments.
+  let fpvRaf = 0;
+  function fpvFlight() {
+    const s = mav.state;
+    const now = performance.now();
+    if (!s.frames || mav.ageMs(now) >= 5000) return null;
+    if (!s.attMs && !s.posMs && !s.gpsMs) return null;   // heartbeat only
+    const speed = Number.isFinite(s.airspeed) && s.airspeed > 0.5 ? s.airspeed : s.groundspeed;
+    const flightTime = s.flightTime + (s.armedSince ? (now - s.armedSince) / 1000 : 0);
+    return {
+      pitch: s.pitch, roll: s.roll, heading: s.heading,
+      alt: s.alt, altMsl: s.mslAlt, speed, vario: s.vario,
+      velN: s.velN, velE: s.velE, velD: s.velD,
+      track: s.track, groundSpeed: s.groundspeed,
+      rc: s.rc, aoa: s.aoa,
+      homeRelN: s.homeRelN, homeRelE: s.homeRelE, homeRelD: s.homeRelD,
+      homeDist: s.homeDist, homeBearing: s.homeBearing,
+      sats: s.sats, fix: s.fix, hdop: s.hdop,
+      mode: s.mode, armed: s.armed, flightTime,
+      batteryV: s.batteryV, cells: s.cells, cellV: s.cellV,
+      currentA: s.currentA, mah: s.mah, batteryPct: s.batteryPct,
+      efficiency: s.efficiency, tripDist: s.tripDist, odometer: s.odometer,
+      throttle: s.throttle, throttlePct: s.throttle,
+      messages: s.messages.filter((m) => m.severity > 4).map((m) => ({ text: m.text, age: (now - m.t) / 1000 })),
+      warnings: s.messages.filter((m) => m.severity <= 4 && now - m.t < 5000).slice(-2).map((m) => m.text),
+    };
+  }
+  function fpvFrame() {
+    const f = fpvFlight();
+    if (f) fpv.render(f, performance.now()); else fpv.clear();
+    fpvRaf = requestAnimationFrame(fpvFrame);
+  }
+  function startFpv() { if (!fpvRaf) fpvRaf = requestAnimationFrame(fpvFrame); }
+  function stopFpv() {
+    if (fpvRaf) cancelAnimationFrame(fpvRaf);
+    fpvRaf = 0;
+    fpv.clear();
+  }
 
   const session = new Session({
     createModule: (opts) => window.createWebGs(opts),
@@ -118,6 +172,11 @@
       osdLayer.onScreen(rows, cols, cells, performance.now());
       osd.schedule();
     },
+    onMav: (buf, pts) => {
+      const st = session.snapshot.state;
+      if (st !== 'live' && st !== 'connecting') return;
+      mav.push(new Uint8Array(buf), pts, performance.now());
+    },
     onRecClosed: (n, b, e) => onRecClosed(n, b, e),
     reload: reloadToConfig,
   });
@@ -126,7 +185,8 @@
   session.subscribe((s) => {
     sess = s;
     // Left live (stopping/idle/error): free the hardware decoder now.
-    if (s.state !== 'live' && s.state !== 'connecting') { video.close(); clearOsd(); }
+    if (s.state !== 'live' && s.state !== 'connecting') { video.close(); clearOsd(); mav.reset(); }
+    if (s.state === 'live') startFpv(); else stopFpv();
     wake.set(s.state === 'live' || s.state === 'connecting');
     if (s.state === 'live' && prevState !== 'live') { ui.tab = 'stats'; ui.cfgOpen = false; ui.statsVisible = true; }
     if (prevState === 'stopping' && s.state === 'idle') { ui.tab = 'config'; ui.cfgOpen = true; }
@@ -197,6 +257,7 @@
     // which the first-time WebUSB chooser needs.
     if (isMobile(LW, LH) && usbGranted) goLandscape();
     video.reset(); tele.reset(); osd.resetAtlasFailure(); hiddenShown = false; hiddenBanner = false;
+    mav.reset();
     const ch = startChannel(sessionCfg, loadRememberedChannel(localStorageSafe()));
     const p = session.connect({ mode: ui.mode, ch, w: sessionCfg.width, overlayToml: toOverlayToml(sessionCfg, ui.key, ui.mode),
       relay: ui.radio === 'relay' ? relayTarget(showRelayAddr ? ui.relayAddr : '') : null });
@@ -224,6 +285,13 @@
   function toggleConn() {
     if (busy) return;
     if (live) disconnect(); else connect();
+  }
+
+  function onOsdChange(next) {
+    ui.osd = next;
+    saveOsd($state.snapshot(next));
+    fpv.configure(ui.osd);
+    ui.applied = `OSD options · saved ${new Date().toTimeString().slice(0, 8)}`;
   }
 
   function onCfgChange(next, label) {
@@ -342,6 +410,13 @@
     osd.attach(osdCanvas);
     const ro = new ResizeObserver(([e]) => osd.resize(e.contentRect.width, e.contentRect.height, window.devicePixelRatio || 1));
     ro.observe(osdCanvas);
+    let roFpv = null;
+    if (fpvCanvas) {
+      fpv.attach(fpvCanvas);
+      fpv.configure(ui.osd);
+      roFpv = new ResizeObserver(([e]) => fpv.resize(e.contentRect.width, e.contentRect.height, window.devicePixelRatio || 1));
+      roFpv.observe(fpvCanvas);
+    }
     const onFsChange = () => {
       realFs = !!document.fullscreenElement;
       if (!realFs) ui.fs = false;
@@ -354,7 +429,7 @@
     document.addEventListener('visibilitychange', onVis);
     const onWinErr = (e) => { if (isWindowWorkerFailure(e)) session.fail(WORKER_FAILED); };
     window.addEventListener('error', onWinErr);
-    return () => { clearInterval(iv); ro.disconnect(); clearTimeout(copyTimer); document.removeEventListener('fullscreenchange', onFsChange);
+    return () => { clearInterval(iv); ro.disconnect(); roFpv?.disconnect(); stopFpv(); clearTimeout(copyTimer); document.removeEventListener('fullscreenchange', onFsChange);
       document.removeEventListener('visibilitychange', onVis); window.removeEventListener('error', onWinErr); wake.set(false); };
   });
 </script>
@@ -377,6 +452,8 @@
           <canvas class="vgl" bind:this={glCanvas} width="1280" height="720" style="visibility:hidden"></canvas>
           <!-- MSP OSD: page-lifetime like the video canvas; .videoinner IS the visible area in every layout. -->
           <canvas class="osd" bind:this={osdCanvas}></canvas>
+          <!-- Vector HUD: MSP grid below, MAVLink attitude/tapes above. -->
+          <canvas class="fpvosd" bind:this={fpvCanvas}></canvas>
           {#if live && status}<div class="status glass">{status}</div>{/if}
           {#if !live}
             <DisconnectedOverlay mode={ui.mode} onMode={(m) => (ui.mode = m)} onConnect={connect}
@@ -395,6 +472,9 @@
             onDisconnect={live ? disconnect : null} variant="rule" applied={ui.applied} recordings={recList}
             keyFp={keyFingerprint(ui.key)} {onLoadKey} {onClearKey} />
         {/snippet}
+        {#snippet osd()}
+          <OsdPanel osd={ui.osd} onChange={onOsdChange} />
+        {/snippet}
       </Sidebar>
     {/if}
   </div>
@@ -403,9 +483,12 @@
       onConn={toggleConn} onRec={toggleRec} onStats={() => (ui.statsVisible = !ui.statsVisible)}
       onCfg={() => (ui.cfgOpen = !ui.cfgOpen)} fsButton={isMobile(LW, LH) ? (fsSupported ? { on: realFs } : null) : { on: true }}
       onFs={isMobile(LW, LH) ? toggleRealFs : toggleFs} {fsMsg} />
-    {#if ui.statsVisible && !ui.cfgOpen}
-      <FloatStats v={view} mobile={isMobile(LW, LH)} open={ui.floatOpen} pos={ui.fpos}
-        onOpen={(o) => (ui.floatOpen = o)} onMove={(p) => (ui.fpos = p)} cw={LW} ch={LH} toLocal={frame.toLocal} />
+    {#if (ui.statsVisible || ui.statsPinned) && !ui.cfgOpen}
+      <FloatStats v={view} mobile={isMobile(LW, LH)} open={ui.floatOpen || ui.statsPinned} pos={ui.fpos}
+        pinned={ui.statsPinned}
+        onPin={(p) => { ui.statsPinned = p; if (p) ui.floatOpen = true; }}
+        onOpen={(o) => { if (ui.statsPinned) ui.floatOpen = true; else ui.floatOpen = o; }}
+        onMove={(p) => (ui.fpos = p)} cw={LW} ch={LH} toLocal={frame.toLocal} />
     {/if}
     {#if ui.cfgOpen}
       <ConfigSide onClose={() => (ui.cfgOpen = false)}>
@@ -429,7 +512,7 @@
   .videobox { flex: 1; min-height: 0; display: grid; place-items: center; container-type: size; background: var(--color-bg); }
   .videoinner { position: relative; aspect-ratio: 16 / 9; width: min(100cqw, calc(100cqh * 16 / 9)); border-radius: var(--radius-sm); overflow: hidden; background: #000; }
   canvas { display: block; width: 100%; height: 100%; object-fit: contain; }
-  .osd, .vgl { position: absolute; inset: 0; pointer-events: none; }
+  .osd, .fpvosd, .vgl { position: absolute; inset: 0; pointer-events: none; }
   .immersive .row { position: absolute; inset: 0; padding: 0; gap: 0; }
   /* Letterboxed, never cropped: the 16:9 box fits the viewport, black bars fill the rest. */
   .immersive .videobox { background: #000; }

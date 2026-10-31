@@ -199,6 +199,22 @@
       </div>
       <div class="hint">Undoes the drone camera's colortrans tuning. Turn off for a drone without the colortrans sensor file.</div>
     </div>
+    <div class="field">
+      <span id="{uid}stab-label" class="fieldlabel">Stabilization</span>
+      <div class="seg" role="radiogroup" aria-labelledby="{uid}stab-label">
+        <label class="seg-opt"><input type="radio" name="{uid}stab" checked={cfg.stabilize === 'off'} onchange={() => set('stabilize', 'off')}>Off</label>
+        <label class="seg-opt"><input type="radio" name="{uid}stab" checked={cfg.stabilize === 'translate'} onchange={() => set('stabilize', 'translate')}>Translate</label>
+        <label class="seg-opt"><input type="radio" name="{uid}stab" checked={cfg.stabilize === 'rotate'} onchange={() => set('stabilize', 'rotate')}>Rotate + translate</label>
+      </div>
+      {#if cfg.stabilize !== 'off'}
+        <div style="display:flex;align-items:center;gap:8px;margin-top:var(--space-3)">
+          <label for="{uid}stab-crop" style="flex:0 0 auto">Crop %</label>
+          <input id="{uid}stab-crop" class="input sm num" type="number" min="0" max="30" step="1"
+            value={cfg.stabCrop} onchange={(e) => set('stabCrop', Number(e.currentTarget.value))}>
+        </div>
+      {/if}
+      <div class="hint">Page-only. Off adds no frame work. Rotate + translate tracks two windows at 1/3 and 2/3; Translate uses the centre window. Crop 0 keeps the full frame and may show black bars at the edges.</div>
+    </div>
   </div>
 
   {#if applied}

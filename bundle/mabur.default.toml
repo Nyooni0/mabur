@@ -78,14 +78,24 @@ tick_ms         = 100      # housekeeping interval (health checks, stats)
 key_file        = "/etc/mabur.key"   # pairing key; same file on the ground station (docs/deploy.md "Pairing"). Missing = built-in default
 
 [msp]
-# Flight-controller link for the OSD and arm state.
-enable         = true
+# Flight-controller link for the OSD and arm state. Off in this bundle: the
+# FC UART carries MAVLink (below). Enable it for MSP DisplayPort instead,
+# and point [mavlink] at a different port or disable it.
+enable         = false
 serial         = "/dev/ttyS2"   # UART the flight controller is wired to
 baud           = 115200
 update_rate_hz = 3              # OSD updates per second sent to the ground station
 symbol_size    = 1312           # bytes per OSD packet
 window         = 16             # error-correction window, in packets
 overhead       = 1.0            # extra repair data (1.0 = +100 %)
+
+[mavlink]
+# Raw MAVLink tunnel from the FC UART to the ground station, on by default.
+# serial must differ from [msp].serial: one UART is one protocol.
+enable  = true
+serial  = "/dev/ttyS2"
+baud    = 115200
+max_bps = 4000             # token bucket over the whole tunnel
 
 [low_power]
 # While disarmed: lower bitrate and frame rate to keep the VTX cool.

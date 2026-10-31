@@ -7,23 +7,29 @@ import {
 } from './logic.mjs';
 import { PageMetrics } from './metrics.js';
 import { ColorTransGl } from './colortrans.js';
+import { Stabilizer } from './stabilizer.js';
 
 const now = () => performance.timeOrigin + performance.now();
 
 export class VideoPipeline {
   // getCanvas: the flat 2D canvas; getGlCanvas: the colortrans WebGL one
   // (a canvas cannot change context type). getColortrans: the live toggle.
-  constructor({ getCanvas, getGlCanvas = () => null, getMode, getColortrans = () => false, onWantIdr = () => {} }) {
+  constructor({ getCanvas, getGlCanvas = () => null, getMode,
+    getColortrans = () => false,
+    getStabilize = () => 'off', getStabCrop = () => 0, onWantIdr = () => {} }) {
     this.getCanvas = getCanvas;
     this.getGlCanvas = getGlCanvas;
     this.getMode = getMode;
     this.getColortrans = getColortrans;
+    this.getStabilize = getStabilize;
+    this.getStabCrop = getStabCrop;
     this.onWantIdr = onWantIdr;
-    // Page lifetime, like the canvases: built on the first colortrans frame;
-    // a failure (no WebGL, lost context) falls back to flat for good.
     this.ct = null;
     this.ctFailed = false;
     this.shown = null;
+    this.stab = null;
+    this.stabFailed = false;
+    this.stabOn = false;
     // ONE slot for the page lifetime: every replace() closes the decoder it
     // held, so a Connect never leaks the previous session's hardware decoder.
     this.decoderSlot = new DecoderSlot();
@@ -57,6 +63,7 @@ export class VideoPipeline {
     // black and the page says what it is waiting for; after it, a freeze
     // keeps the last frame up with nothing drawn over it.
     this.hasPicture = false;
+    if (this.stabOn) this.clearStabilizer();
   }
 
   gateArmed() { return this.gate.armed; }
@@ -147,22 +154,72 @@ export class VideoPipeline {
     return this.ct;
   }
 
+  // Page-only stabilizer. The disabled path is one string compare and no
+  // frame reads; the stabilizer object is only built when a mode is picked.
+  // The warp is done inside the draw (WebGL shader or 2D transform), never
+  // by a CSS transform on the canvas: compositing a transformed canvas
+  // while it is being redrawn looks like data mosh on tablets.
+  stabilizerCorrection(frame, mode) {
+    if (this.stabFailed) return null;
+    if (!this.stab) {
+      try { this.stab = new Stabilizer(); }
+      catch (e) {
+        console.error('[webgs] stabilizer unavailable:', e);
+        this.stabFailed = true;
+        return null;
+      }
+    }
+    const c = this.stab.update(frame, mode);
+    const crop = Math.max(0, Math.min(30, Number(this.getStabCrop()) || 0));
+    this.stabOn = true;
+    return { x: c.x, y: c.y, rad: c.rad, zoom: 1 / (1 - (2 * crop) / 100) };
+  }
+
+  clearStabilizer() {
+    if (!this.stabOn) return;
+    this.stab?.reset();
+    this.stabOn = false;
+  }
+
+  drawFlat(frame, corr) {
+    const canvas = this.getCanvas();
+    if (!canvas) return;
+    const w = frame.displayWidth, h = frame.displayHeight;
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (!corr) {
+      ctx.drawImage(frame, 0, 0);
+      return;
+    }
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, w, h);
+    ctx.translate(w / 2 + corr.x, h / 2 + corr.y);
+    ctx.rotate(corr.rad);
+    ctx.scale(corr.zoom, corr.zoom);
+    ctx.drawImage(frame, -w / 2, -h / 2, w, h);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+
   draw(frame) {
+    const stab = this.getStabilize();
+    let corr = null;
+    if (stab && stab !== 'off') corr = this.stabilizerCorrection(frame, stab);
+    else if (this.stabOn) this.clearStabilizer();
+
     const want = this.getColortrans();
     const ct = want ? this.colorTrans() : null;
     this.colour = ct ? 'colortrans' : want ? 'unavailable' : 'flat';
     let canvas;
     if (ct) {
       canvas = this.getGlCanvas();
-      ct.draw(frame);
+      ct.draw(frame, corr);
     } else {
       canvas = this.getCanvas();
-      if (!canvas) return;
-      if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
-        canvas.width = frame.displayWidth;
-        canvas.height = frame.displayHeight;
-      }
-      canvas.getContext('2d').drawImage(frame, 0, 0);
+      this.drawFlat(frame, corr);
     }
     // Only the canvas that got this frame is visible (the toggle flips live).
     if (canvas !== this.shown) {

@@ -147,6 +147,18 @@ struct MspCfg {
   double overhead = 1.0;
 };
 
+// Raw MAVLink tunnel (VTX -> GS). The FC's own stream is forwarded
+// frame-for-frame, not parsed or normalized, so the GS sees exactly what the
+// FC sent. `max_bps` is a token bucket over the whole forwarder so a chatty
+// FC cannot crowd the video link. `serial` must differ from [msp].serial:
+// one UART carries either MSP or MAVLink.
+struct MavlinkCfg {
+  bool enable = false;
+  std::string serial = "/dev/ttyS2";
+  int baud = 115200;
+  int max_bps = 4000;
+};
+
 // A-MPDU TX aggregation. OFF by default per the bench verdict
 // (dq-spike-findings §12): the depth sweep measured NO fec improvement at any
 // depth — maburd's per-body tax is host/USB-side, not medium access — while
@@ -240,6 +252,7 @@ struct Config {
   VencSectionCfg venc;
   LinkCfg link;
   MspCfg msp;
+  MavlinkCfg mavlink;
   AmpduCfg ampdu;
   AirClockCfg air_clock;
   LowPowerCfg low_power;

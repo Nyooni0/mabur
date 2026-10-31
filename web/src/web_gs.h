@@ -37,6 +37,7 @@
 // mono us) for both the RX stamps and tick(). The core's scout thread is the
 // only other thread; it reads the clock through the core's clock fns.
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -139,6 +140,8 @@ struct Stats {
   std::optional<int> drone_temp_c;        // Telem.soc_temp_c; unset when -128 (unavailable)
   uint64_t osd_snaps = 0;     // MSP snapshots out of the FEC sink
   uint64_t osd_screens = 0;   // OSD screens published (Io::on_osd)
+  uint64_t mav_frames = 0;    // T_MAV frames decoded
+  uint64_t mav_bytes = 0;     // raw MAVLink bytes handed to Io::on_mav
   // Pairing key: the drone's rendezvous
   // answer told us our key doesn't match its, and the fingerprint of the
   // key this core is configured with (for the page to show beside it).
@@ -194,6 +197,11 @@ struct Io {
   // Optional, both modes: one MSP OSD screen,
   // at most every 30 ms. rows x cols cells, row-major, char | page << 8.
   std::function<void(int rows, int cols, const uint16_t* cells)> on_osd;
+  // Optional, both modes: one raw MAVLink frame from the drone's T_MAV
+  // tunnel. `pts_us` is the drone's video-clock stamp at forward time
+  // (0 = unavailable). The frame is exactly what the FC sent; the consumer
+  // validates CRC_EXTRA and decodes.
+  std::function<void(const uint8_t* frame, size_t len, uint32_t pts_us)> on_mav;
   // Gs with a roster: the core's stderr-style lines ("maburgs channel: ...",
   // "maburgs hop: ..."), exact text as maburgs prints them. The glue prints them.
   // Called from the core thread or the scout thread.
@@ -305,6 +313,7 @@ class WebGs {
   std::optional<mabur::rc::Telem> telem_;
   Au cur_;
   uint64_t bodies_ = 0, aus_complete_ = 0, aus_truncated_ = 0, sends_ = 0, rcf_sent_ = 0;
+  uint64_t mav_frames_ = 0, mav_bytes_ = 0;
   uint64_t aus_truncated_base_ = 0;
   uint64_t aus_salvaged_ = 0;
   uint64_t resets_ = 0;

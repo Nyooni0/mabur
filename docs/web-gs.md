@@ -973,6 +973,84 @@ more. The 5 s blank counts from the last *published* screen, where
 `maburplay` counts from the last datagram. That is the same thing in
 practice, since Betaflight sends DRAW_SCREEN continuously.
 
+## MAVLink telemetry tunnel
+
+`maburd` forwards the flight controller's MAVLink stream byte-for-byte as
+`T_MAV` frames (`[mavlink]` in the drone config; `serial` must differ from
+`[msp].serial`). The shipped bundle enables the tunnel on `/dev/ttyS2` and
+runs `[msp]` disabled on that port. This is a downlink only: the drone never
+parses or rewrites the frames, and no GCS heartbeat is sent back to the FC. A
+lost `T_MAV` is a lost HUD update; the type is not FEC-protected and does not
+touch the video path.
+
+The envelope is `magic(2) | version | type | pts_us(4) | len(2) | frame |
+crc(2)`, so the body is 12 bytes larger than one complete MAVLink v1/v2
+frame (magic through CRC). `[mavlink] max_bps` is a token bucket over the
+whole forwarder (default 4000 B/s); frames over budget are dropped, not
+queued.
+
+`WebGs` decodes `T_MAV` in the RC sink in both modes, counts `mav_frames` /
+`mav_bytes` in the stats line, and hands the raw frame to the page through
+`Module.onMav`. The page (`web/ui/src/lib/mavlink.js`) validates MAVLink
+CRC_EXTRA and maps `HEARTBEAT`, `SYS_STATUS`, `GPS_RAW_INT`, `ATTITUDE`,
+`GLOBAL_POSITION_INT`, `GPS_GLOBAL_ORIGIN`, `VFR_HUD`, `BATTERY_STATUS` and
+`STATUSTEXT` into the vector HUD over the video (attitude/heading, speed and
+altitude tapes, VSI, flight-path and home markers, SATS/HDOP, mode, throttle,
+armed, timer, trip/total distance, efficiency, battery and status messages).
+The HUD clears after 5 s without a decoded frame. It is independent of the
+MSP DisplayPort grid: a MAVLink-only aircraft gets the HUD and no grid.
+
+MAVLink v2 trims trailing zero bytes from a payload, so a live stream carries
+frames shorter than their message definition: a stationary aircraft's ATTITUDE
+is 16 bytes (its three rates are zero) rather than 28, and `VFR_HUD` is 18 with
+throttle 0. The page zero-extends each payload to the message's minimum length
+before decoding, as the reference C parser does, so the HUD draws on the bench
+instead of waiting for the aircraft to move. The minimum lengths are pinned
+beside the CRC_EXTRA table and the test suite covers a trimmed ATTITUDE,
+`VFR_HUD` and `STATUSTEXT`.
+
+Betaflight's ATTITUDE roll is mirrored: its sender negates pitch but passes its
+internal roll through unnegated, and that roll is negative for a right bank, so
+the stream is the opposite of the MAVLink convention. The page un-mirrors it
+from `HEARTBEAT.autopilot` (`MAV_AUTOPILOT_BETAFLIGHT` = 22), which keeps the
+HUD's +right-bank convention for every autopilot.
+
+The drone's `[mavlink]` block:
+
+```toml
+[mavlink]
+enable  = true
+serial  = "/dev/ttyS2"   # the FC UART; disable [msp] on the same port
+baud    = 115200
+max_bps = 4000
+```
+
+The FC must be configured to emit MAVLink on that UART. INAV exposes the
+stream rates as `mavlink_extra1_rate` (ATTITUDE), `mavlink_pos_rate`,
+`mavlink_extra2_rate` (VFR_HUD/HEARTBEAT), `mavlink_ext_status_rate` and
+`mavlink_extra3_rate`; ArduPilot uses `SERIALn_PROTOCOL=2` plus `SRn_*`.
+
+## Page-only video stabilization
+
+The Config tab's **Stabilization** select is page-only and can be changed
+live. `Off` does no frame work: no ROI reads, no transform, no added
+latency. `Translate` tracks one centre window; `Rotate + translate` tracks
+two windows at horizontal 1/3 and 2/3 and fits a similarity transform from
+their displacements.
+
+Motion is estimated at 20 Hz as a 64x64 luma SAD search (±10 px), smoothed
+over ~0.35 s, and applied inside the video draw: the WebGL colortrans shader
+samples through the inverse transform, and the flat path uses a 2D canvas
+transform. The MSP and vector OSD canvases stay fixed. It is deliberately
+not a CSS transform on the canvas — compositing a transformed canvas while
+it is being redrawn looks like data mosh on tablets. The accumulated
+correction leaks back to centre with a 2 s time constant, so a long yaw does
+not park it against the clamp; one `[webgs] stab` line per second reports the
+window scores, displacement and correction for the console. `Crop %` (0–30) scales the picture
+in to hide the moving edges; 0 keeps the full frame and shows black bars when
+the transform reaches the border. A low-variance window (sky, water) or a
+poor match falls back to the other window, then to the last correction.
+
 ## Software NACK
 
 GS mode runs `docs/fec-nack.md`'s base-layer selective repeat with the same
