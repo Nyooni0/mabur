@@ -1009,6 +1009,12 @@ instead of waiting for the aircraft to move. The minimum lengths are pinned
 beside the CRC_EXTRA table and the test suite covers a trimmed ATTITUDE,
 `VFR_HUD` and `STATUSTEXT`.
 
+Betaflight's ATTITUDE roll is mirrored: its sender negates pitch but passes its
+internal roll through unnegated, and that roll is negative for a right bank, so
+the stream is the opposite of the MAVLink convention. The page un-mirrors it
+from `HEARTBEAT.autopilot` (`MAV_AUTOPILOT_BETAFLIGHT` = 22), which keeps the
+HUD's +right-bank convention for every autopilot.
+
 The drone's `[mavlink]` block:
 
 ```toml

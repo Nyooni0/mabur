@@ -48,6 +48,10 @@ const MIN_LEN = new Map([
 
 export const MAVLINK_MIN_LEN = MIN_LEN;
 
+// HEARTBEAT.autopilot. Betaflight advertises 22, and its ATTITUDE roll is
+// mirrored relative to the MAVLink convention; see the decode() comment.
+export const MAV_AUTOPILOT_BETAFLIGHT = 22;
+
 const DEG = 180 / Math.PI;
 
 // MAVLink CRC-16/MCRF4XX (init 0xFFFF, no final xor).
@@ -129,7 +133,7 @@ export class MavlinkFeed {
       rc: new Array(18).fill(0), rcMs: 0, aoa: NaN,
       sats: 0, fix: 0,
       batteryV: NaN, cellV: NaN, cells: 0, currentA: NaN, mah: NaN, batteryPct: NaN,
-      mode: '', armed: false, type: 0,
+      mode: '', armed: false, type: 0, autopilot: 0,
       attMs: 0, posMs: 0, gpsMs: 0, statusMs: 0,
       frames: 0, crcErrors: 0, updated: 0,
     };
@@ -237,6 +241,7 @@ export class MavlinkFeed {
     if (msgid === 0 && len >= 9) {                       // HEARTBEAT
       const wasArmed = s.armed;
       s.type = b[p + 4];
+      s.autopilot = b[p + 5];
       s.armed = (b[p + 6] & 0x80) !== 0;
       s.mode = modeName(s.type, u32(b, p));
       if (s.armed && !wasArmed) { s.armedSince = nowMs; s.tripDist = 0; s.efficiency = NaN; }
@@ -247,7 +252,12 @@ export class MavlinkFeed {
       s.statusMs = nowMs;
       s.updated = nowMs;
     } else if (msgid === 30 && len >= 28) {              // ATTITUDE
-      s.roll = f32(b, p + 4) * DEG;
+      // The HUD's convention is +right bank. Betaflight's sender negates its
+      // pitch but passes its internal roll through unchanged, and that roll is
+      // negative for a right bank, so its stream arrives mirrored; un-mirror it
+      // here, keyed on the autopilot its heartbeat advertises. Every other
+      // autopilot already sends the MAVLink convention.
+      s.roll = (s.autopilot === MAV_AUTOPILOT_BETAFLIGHT ? -1 : 1) * f32(b, p + 4) * DEG;
       s.pitch = f32(b, p + 8) * DEG;
       s.heading = ((f32(b, p + 12) * DEG) % 360 + 360) % 360;
       s.attMs = nowMs;

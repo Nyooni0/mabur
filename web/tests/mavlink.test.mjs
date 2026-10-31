@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MavlinkFeed, MAVLINK_CRC_EXTRA, MAVLINK_MIN_LEN, mavlinkCrc } from '../ui/src/lib/mavlink.js';
+import { MavlinkFeed, MAVLINK_CRC_EXTRA, MAVLINK_MIN_LEN, MAV_AUTOPILOT_BETAFLIGHT, mavlinkCrc } from '../ui/src/lib/mavlink.js';
 
 // Build a v2 frame. `payload` is the wire-order payload (the caller owns the
 // field offsets, as the FC's serializer does).
@@ -50,6 +50,40 @@ test('CRC_EXTRA table is pinned to the message definitions', () => {
 
 test('every decoded message pins a minimum payload length', () => {
   assert.deepEqual([...MAVLINK_MIN_LEN.keys()].sort(), [...MAVLINK_CRC_EXTRA.keys()].sort());
+});
+
+// Betaflight's sender passes its internal roll through unnegated, and that roll
+// is negative for a right bank, so its ATTITUDE stream is mirrored. The HUD's
+// convention is +right bank, so the decoder un-mirrors it from the autopilot
+// the heartbeat advertises.
+test('Betaflight ATTITUDE roll is un-mirrored', () => {
+  const hb = payload(9);
+  hb[4] = 2;                       // MAV_TYPE_QUADROTOR
+  hb[5] = MAV_AUTOPILOT_BETAFLIGHT;
+  const att = payload(16);         // trimmed: the three rates are zero
+  setF32(att, 4, -0.5);            // BF sends a right bank as negative
+  setF32(att, 8, 0.1);
+  setF32(att, 12, 1.0);
+  const f = new MavlinkFeed();
+  f.push(frame(0, hb), 0, 900);
+  f.push(frame(30, att), 0, 1000);
+  assert.equal(f.state.autopilot, MAV_AUTOPILOT_BETAFLIGHT);
+  assert.ok(f.state.roll > 0, 'a right bank must read positive');
+  assert.ok(Math.abs(f.state.roll - (0.5 * 180 / Math.PI)) < 1e-6);
+  assert.ok(Math.abs(f.state.pitch - (0.1 * 180 / Math.PI)) < 1e-6);
+});
+
+test('a non-Betaflight ATTITUDE roll is taken as sent', () => {
+  const hb = payload(9);
+  hb[4] = 1;                       // fixed wing
+  hb[5] = 0;                       // MAV_AUTOPILOT_GENERIC (INAV)
+  const att = payload(28);
+  setF32(att, 4, -0.5);
+  const f = new MavlinkFeed();
+  f.push(frame(0, hb), 0, 900);
+  f.push(frame(30, att), 0, 1000);
+  assert.ok(f.state.roll < 0, 'only Betaflight is mirrored');
+  assert.ok(Math.abs(f.state.roll - (-0.5 * 180 / Math.PI)) < 1e-6);
 });
 
 // MAVLink v2 drops trailing zero bytes, so a stationary aircraft's frames are
